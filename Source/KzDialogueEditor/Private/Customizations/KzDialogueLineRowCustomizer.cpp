@@ -131,6 +131,23 @@ FText FKzDialogueLineRowCustomizer::GetTooltipText(TSharedPtr<IPropertyHandle> H
 	return FText::GetEmpty();
 }
 
+bool FKzDialogueLineRowCustomizer::TryResolveContextId(const FGuid& ContextId, const TArray<TSharedPtr<IPropertyHandle>>& Handles, TSharedPtr<IPropertyHandle>& OutHandle) const
+{
+	if (!ContextId.IsValid()) { return false; }
+	for (const TSharedPtr<IPropertyHandle>& Handle : Handles)
+	{
+		if (FKzDialogueLine* Line = ResolveStruct<FKzDialogueLine>(Handle))
+		{
+			if (Line->LineId == ContextId)
+			{
+				OutHandle = Handle;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
 // =======================================================================================
 // Audition
 // =======================================================================================

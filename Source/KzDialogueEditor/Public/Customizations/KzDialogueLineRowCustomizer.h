@@ -34,6 +34,7 @@ public:
 	virtual TSharedRef<SWidget> BuildTrailingWidget(TSharedPtr<IPropertyHandle> Handle) override;
 	virtual FText GetDisplayText(TSharedPtr<IPropertyHandle> Handle) const override;
 	virtual FText GetTooltipText(TSharedPtr<IPropertyHandle> Handle) const override;
+	virtual bool TryResolveContextId(const FGuid& ContextId, const TArray<TSharedPtr<IPropertyHandle>>& Handles, TSharedPtr<IPropertyHandle>& OutHandle) const override;
 	//~ End FKzPropertyStackRowCustomizer
 
 private:
