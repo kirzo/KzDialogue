@@ -16,7 +16,8 @@ public class KzDialogue : ModuleRules
 				"KzLib",
 				"UMG",
 				"MovieScene",
-				"MovieSceneTracks"
+				"MovieSceneTracks",
+				"DeveloperSettings"
 			}
 			);
 

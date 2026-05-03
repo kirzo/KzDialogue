@@ -15,6 +15,8 @@ class USoundBase;
 namespace Kz::Tags::Dialogue
 {
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(MainChannel);
+	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(BarkChannel);
+	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(SystemChannel);
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(SpeakerBase);
 }
 
@@ -156,6 +158,64 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 		return FText::Format(INVTEXT("({0}) {1}"), SpeakerLabel, FText::FromString(TextStr));
 	}
+};
+
+/**
+ * Per-channel configuration. Lives in UKzDialogueSettings and is consulted by the
+ * subsystem on every Play() call to clamp priorities, decide interruption rules,
+ * and (eventually) drive cross-channel ducking.
+ */
+USTRUCT(BlueprintType)
+struct FKzDialogueChannelDefinition
+{
+	GENERATED_BODY()
+
+	/** Tag identifying this channel (e.g. "Dialogue.Main"). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag Tag;
+
+	/** Display name used in editor UI and debug overlays. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	FText DisplayName;
+
+	/** Priority used when neither the asset nor the caller specify one. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	int32 DefaultPriority = 0;
+
+	/**
+	 * Lower bound for any priority on this channel. Caller priorities are clamped to
+	 * this range, so a "Bark" channel can guarantee it never preempts story dialogue.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	int32 MinPriority = 0;
+
+	/** Upper bound for any priority on this channel. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	int32 MaxPriority = 1000;
+
+	/**
+	 * When false, dialogues on this channel cannot be interrupted regardless of the
+	 * incoming priority. Note: an asset's bInterruptible flag is also consulted; both
+	 * must be true for an interruption to actually occur.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	bool bAllowInterruption = true;
+
+	/**
+	 * When this channel is active, other channels' audio is reduced by DuckedVolume.
+	 * Implementation pending — flag is honored by the API but does not yet affect
+	 * audio mixing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking")
+	bool bDuckOtherChannels = false;
+
+	/** Volume multiplier applied to other channels while this one is playing. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking", meta = (ClampMin = 0.0, ClampMax = 1.0))
+	float DuckedVolume = 0.3f;
+
+	/** Fade time used when entering and leaving the ducked state. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking", meta = (ClampMin = 0.0))
+	float DuckFadeTime = 0.2f;
 };
 
 /** A choice presented to the player at a branching point. */

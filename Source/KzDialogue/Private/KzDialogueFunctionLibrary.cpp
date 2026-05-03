@@ -18,18 +18,18 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* 
 	{
 		return nullptr;
 	}
-
-	// Delegate to the subsystem based on the requested behavior
 	return bCreateIfNotFound ? Sub->GetOrCreatePlayer(InChannel) : Sub->FindPlayer(InChannel);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
+	FGameplayTag Channel, bool bStartImmediately)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, bStartImmediately) : nullptr;
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLine& Line,
+	FGameplayTag Channel, int32 Priority, bool bStartImmediately)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	return IsValid(Sub) ? Sub->PlayLine(Line, Channel, Priority, bStartImmediately) : nullptr;

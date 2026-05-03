@@ -11,6 +11,7 @@
 class UKzDialoguePlayer;
 class UKzDialogueProvider;
 class UKzDialogueAsset;
+struct FKzDialogueChannelDefinition;
 
 /**
  * World-level manager of dialogue playback. Owns a UKzDialoguePlayer per channel and
@@ -35,13 +36,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	UKzDialoguePlayer* FindPlayer(FGameplayTag InChannel) const;
 
+	/** Sentinel meaning "no explicit priority"; falls back to asset, then channel default. */
+	static constexpr int32 InheritPriority = -1;
+
 	/**
 	 * Play a provider on a given channel, respecting priority.
-	 * Returns the player that is now playing it, or nullptr if
-	 * rejected (lower priority than current).
+	 * Returns the player that is now playing it, or nullptr if rejected (lower priority
+	 * than current and channel/asset don't allow interruption).
+	 *
+	 * Pass InheritPriority to fall back to the asset hint / channel default. Otherwise
+	 * the priority is clamped to the channel's [MinPriority, MaxPriority] range.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = 0, bool bStartImmediately = true);
+	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/** Convenience wrapper: build an asset provider and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
@@ -49,7 +56,7 @@ public:
 
 	/** Convenience wrapper: build a manual single-line provider and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = 0, bool bStartImmediately = true);
+	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/** Stop the dialogue on a channel (graceful, with exit animations). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
@@ -66,4 +73,22 @@ public:
 private:
 	UPROPERTY(Transient)
 	TMap<FGameplayTag, TObjectPtr<UKzDialoguePlayer>> Players;
+
+	/**
+	 * Resolve the priority to use given:
+	 *   - RequestedPriority (caller's request, possibly InheritPriority sentinel)
+	 *   - AssetHintPriority (asset's Priority field, or InheritPriority if not asset-backed)
+	 *   - ChannelDef (channel definition from settings, or null if undeclared)
+	 *
+	 * Precedence: explicit caller > asset hint > channel default > 0.
+	 * The result is clamped to the channel's [MinPriority, MaxPriority] range when defined.
+	 */
+	int32 ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const;
+
+	/** Look up the channel definition in settings, or null if not declared. Logs a
+	 *  warning the first time an undeclared channel is used. */
+	const FKzDialogueChannelDefinition* FindChannelDefinition(const FGameplayTag& Tag) const;
+
+	/** True if the dialogue currently playing on this player allows being interrupted. */
+	bool IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const;
 };

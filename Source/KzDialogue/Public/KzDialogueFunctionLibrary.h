@@ -6,11 +6,11 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
+#include "KzDialogueSubsystem.h"
 #include "KzDialogueFunctionLibrary.generated.h"
 
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
-class UKzDialogueSubsystem;
 
 UCLASS()
 class KZDIALOGUE_API UKzDialogueFunctionLibrary : public UBlueprintFunctionLibrary
@@ -31,7 +31,7 @@ public:
 
 	/** One-shot helper: play a single line on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	static UKzDialoguePlayer* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority = 0, bool bStartImmediately = false);
+	static UKzDialoguePlayer* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = false);
 
 	/** Stop the dialogue on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
