@@ -3,7 +3,7 @@
 #pragma once
 
 #include "KzDialogueEditor.h"
-
+#include "Customizations/KzDialogueLineRowCustomizer.h"
 #include "KzDialogueAsset.h"
 
 #include "Editors/KzArrayAssetEditor.h"
@@ -15,11 +15,7 @@
 
 void FKzDialogueEditorModule::OnStartupModule()
 {
-	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FColor::FromHex("#4A6EB6"), { INVTEXT("Dialogues") }, GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines), INVTEXT("Line"),
-		FKzArrayAssetEditor::MakeDisplayDelegate<FKzDialogueLine>([](FKzDialogueLine* Line) -> FString
-			{
-				return Line->GetDisplayLabel(140).ToString();
-			}));
+	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FColor::FromHex("#4A6EB6"), { INVTEXT("Dialogues") }, GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines), INVTEXT("Line"), MakeShared<FKzDialogueLineRowCustomizer>());
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));
