@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Debug/KzDialogueDebugCommands.h"
+#include "UObject/UObjectIterator.h"
 
 #if !UE_BUILD_SHIPPING
 

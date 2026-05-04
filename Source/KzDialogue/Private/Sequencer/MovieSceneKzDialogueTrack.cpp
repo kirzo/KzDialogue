@@ -165,6 +165,7 @@ FName UMovieSceneKzDialogueTrack::GetTrackName() const
 	return TEXT("KzDialogue");
 }
 
+#if WITH_EDITORONLY_DATA
 FText UMovieSceneKzDialogueTrack::GetDisplayName() const
 {
 	static const FText DefaultDisplayName = LOCTEXT("TrackDisplayName", "KzDialogue");
@@ -180,6 +181,7 @@ FText UMovieSceneKzDialogueTrack::GetDisplayName() const
 
 	return DefaultDisplayName;
 }
+#endif
 
 FMovieSceneEvalTemplatePtr UMovieSceneKzDialogueTrack::CreateTemplateForSection(const UMovieSceneSection& InSection) const
 {

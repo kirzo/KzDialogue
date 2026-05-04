@@ -3,6 +3,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 
+#include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
