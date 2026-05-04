@@ -3,7 +3,7 @@
 	"Version": 1,
 	"VersionName": "1.0",
 	"FriendlyName": "KzDialogue",
-	"Description": "",
+	"Description": "KzDialogue is a modular, data-driven dialogue and subtitles system for Unreal Engine 5. It is built around a clean separation between data, playback engine, and presentation, so that lines, audio, subtitles, cinematics, and gameplay events can all be driven from the same authored asset.",
 	"Category": "Gameplay",
 	"CreatedBy": "kirzo",
 	"CreatedByURL": "https://kirzo.dev",
