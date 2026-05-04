@@ -66,6 +66,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void StopAll();
 
+	/**
+	 * Fill OutPlayers with every player currently held by the subsystem.
+	 * Order is not guaranteed. Useful for debug commands and overlays. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
+	void GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const;
+
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;

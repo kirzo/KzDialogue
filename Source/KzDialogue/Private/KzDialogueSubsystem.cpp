@@ -226,6 +226,16 @@ void UKzDialogueSubsystem::StopAll()
 	}
 }
 
+void UKzDialogueSubsystem::GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const
+{
+	OutPlayers.Reset();
+	OutPlayers.Reserve(Players.Num());
+	for (const auto& Pair : Players)
+	{
+		if (IsValid(Pair.Value)) { OutPlayers.Add(Pair.Value); }
+	}
+}
+
 bool UKzDialogueSubsystem::IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const
 {
 	if (!IsValid(Player) || !Player->IsPlaying()) { return true; }

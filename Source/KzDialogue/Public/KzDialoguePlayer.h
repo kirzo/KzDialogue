@@ -44,6 +44,13 @@ public:
 	float DefaultDuration = 2.5f;
 
 	/**
+	 * Multiplies all line durations and audio fades. 1.0 = normal speed. Useful for
+	 * console-driven debugging (Kz.Dialogue.SetSpeed) and for fast-forward features.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Player", meta = (ClampMin = 0.1, ClampMax = 10.0))
+	float TimeScale = 1.0f;
+
+	/**
 	 * When true, the player waits for view-driven Notify*Finished calls to advance the fade phases.
 	 * When false, those phases auto-complete (no animation).
 	 * Set by views.

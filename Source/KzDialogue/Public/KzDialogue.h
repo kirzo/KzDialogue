@@ -6,8 +6,12 @@
 
 class FKzDialogueModule : public IModuleInterface
 {
-public:
+private:
+#if !UE_BUILD_SHIPPING
+	TUniquePtr<class FKzDialogueDebugCommands> DebugCommands;
+#endif
 
+public:
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
