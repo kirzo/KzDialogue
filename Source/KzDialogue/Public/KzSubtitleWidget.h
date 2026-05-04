@@ -11,6 +11,34 @@ class UTextBlock;
 class UWidgetAnimation;
 class UKzDialoguePlayer;
 
+/** Enum to define where the affix will be placed relative to the speaker's name */
+UENUM(BlueprintType)
+enum class EKzSpeakerAffixPosition : uint8
+{
+	Prefix,
+	Suffix
+};
+
+/** Rule defining an affix to attach to the speaker's name */
+USTRUCT(BlueprintType)
+struct FKzSpeakerAffixRule
+{
+	GENERATED_BODY()
+
+public:
+	/** The text or symbol to add (e.g., ":", "~", "(") */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	FString AffixText;
+
+	/** Whether to place it before or after the speaker's name */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	EKzSpeakerAffixPosition Position = EKzSpeakerAffixPosition::Suffix;
+
+	/** Automatically inserts a space between the name and the affix */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	bool bAddSpace = false;
+};
+
 /**
  * Reference subtitle view. Binds to a UKzDialoguePlayer and renders its events as
  * fade-in/out widget animations + text updates.
@@ -66,6 +94,10 @@ protected:
 
 	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
 	TObjectPtr<UWidgetAnimation> LineFadeOut = nullptr;
+
+	/** Rules applied sequentially to format the speaker's name */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
+	TArray<FKzSpeakerAffixRule> SpeakerFormattingRules;
 
 	/** Optional Blueprint hooks. Override in subclass for custom presentation. */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Setup Line"))

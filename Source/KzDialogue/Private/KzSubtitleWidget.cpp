@@ -129,7 +129,25 @@ void UKzSubtitleWidget::ApplyLineToWidgets(const FKzDialogueLine& Line)
 {
 	if (SpeakerText)
 	{
-		SpeakerText->SetText(Line.Speaker.GetDisplayLabel());
+		FString FinalSpeakerName = Line.Speaker.GetDisplayLabel().ToString();
+
+		// Process each formatting rule in order
+		for (const FKzSpeakerAffixRule& Rule : SpeakerFormattingRules)
+		{
+			FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
+			if (Rule.Position == EKzSpeakerAffixPosition::Prefix)
+			{
+				// Example: "~" + " " + "Bob" -> "~ Bob"
+				FinalSpeakerName = Rule.AffixText + SpaceStr + FinalSpeakerName;
+			}
+			else if (Rule.Position == EKzSpeakerAffixPosition::Suffix)
+			{
+				// Example: "Bob" + "" + ":" -> "Bob:"
+				FinalSpeakerName = FinalSpeakerName + SpaceStr + Rule.AffixText;
+			}
+		}
+
+		SpeakerText->SetText(FText::FromString(FinalSpeakerName));
 	}
 	if (SubtitlesText)
 	{
