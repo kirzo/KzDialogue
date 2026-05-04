@@ -1,4 +1,14 @@
-# KzDialogue
+<p align="center">
+  <img src="https://kirzo.dev/content/images/plugins/KzDialogue_banner.jpg" alt="KzDialogue Banner" width="512">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Unreal%20Engine-5.x-blue?logo=unrealengine" alt="Unreal Engine 5.x" />
+  <img src="https://img.shields.io/badge/language-C%2B%2B20-00599C?logo=c%2B%2B" alt="C++20" />
+  <img src="https://img.shields.io/badge/Blueprint-ready-orange" alt="Blueprint ready" />
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License" />
+  <img src="https://img.shields.io/github/stars/kirzo/KzDialogue?style=social" alt="GitHub stars" />
+</p>
 
 **KzDialogue** is a modular, data-driven dialogue and subtitles system for **Unreal Engine 5**. It is built around a clean separation between **data**, **playback engine**, and **presentation**, so that lines, audio, subtitles, cinematics, and gameplay events can all be driven from the same authored asset.
 
