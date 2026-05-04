@@ -8,6 +8,8 @@
 
 void UKzSubtitleWidget::NativeConstruct()
 {
+	ClearTextWidgets();
+
 	Super::NativeConstruct();
 
 	if (IsValid(InitialPlayer))
@@ -53,6 +55,12 @@ void UKzSubtitleWidget::BindPlayer(UKzDialoguePlayer* InPlayer)
 			ApplyLineToWidgets(Player->GetCurrentLine());
 		}
 	}
+}
+
+void UKzSubtitleWidget::ClearTextWidgets()
+{
+	if (SpeakerText) { SpeakerText->SetText(FText::GetEmpty()); }
+	if (SubtitlesText) { SubtitlesText->SetText(FText::GetEmpty()); }
 }
 
 void UKzSubtitleWidget::BindEvents()

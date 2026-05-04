@@ -36,6 +36,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	UKzDialoguePlayer* GetBoundPlayer() const { return Player.Get(); }
 
+	/** Clears speaker and subtitle text widgets. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	virtual void ClearTextWidgets();
+
 protected:
 	/**
 	 * Optional player to bind immediately upon widget creation.
