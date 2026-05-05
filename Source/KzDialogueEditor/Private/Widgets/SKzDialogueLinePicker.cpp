@@ -1,6 +1,6 @@
 // Copyright 2026 kirzo
 
-#include "Sequencer/SKzDialogueLinePicker.h"
+#include "Widgets/SKzDialogueLinePicker.h"
 #include "KzDialogueAsset.h"
 #include "Sound/SoundBase.h"
 

@@ -22,6 +22,11 @@
 			"LoadingPhase": "Default"
 		},
 		{
+			"Name": "KzDialogueUncooked",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "PreDefault"
+		},
+		{
 			"Name": "KzDialogueEditor",
 			"Type": "Editor",
 			"LoadingPhase": "PostEngineInit"

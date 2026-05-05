@@ -3,11 +3,14 @@
 #pragma once
 
 #include "KzDialogueEditor.h"
-#include "Customizations/KzDialogueLineRowCustomizer.h"
 #include "KzDialogueAsset.h"
+
+#include "Customizations/KzDialogueLineRowCustomizer.h"
+#include "Customizations/KzDialogueLinePinFactory.h"
 
 #include "Editors/KzArrayAssetEditor.h"
 
+#include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 
@@ -19,6 +22,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));
+
+	LinePinFactory = MakeShared<FKzDialogueLinePinFactory>();
+	FEdGraphUtilities::RegisterVisualPinFactory(LinePinFactory);
 }
 
 void FKzDialogueEditorModule::OnShutdownModule()
@@ -27,6 +33,12 @@ void FKzDialogueEditorModule::OnShutdownModule()
 	{
 		ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 		SequencerModule.UnRegisterTrackEditor(DialogueTrackEditorHandle);
+	}
+
+	if (LinePinFactory.IsValid())
+	{
+		FEdGraphUtilities::UnregisterVisualPinFactory(LinePinFactory);
+		LinePinFactory.Reset();
 	}
 }
 

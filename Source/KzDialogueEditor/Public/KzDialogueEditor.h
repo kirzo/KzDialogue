@@ -8,6 +8,7 @@ class FKzDialogueEditorModule : public FKzLibEditorModule_Base
 {
 private:
 	FDelegateHandle DialogueTrackEditorHandle;
+	TSharedPtr<class FKzDialogueLinePinFactory> LinePinFactory;
 
 protected:
 	virtual void OnStartupModule() override;

@@ -16,6 +16,7 @@ public class KzDialogueEditor : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(
 			new string[] {
+				"KzDialogueUncooked",
 				"Core",
 				"CoreUObject",
 				"Engine",
@@ -32,7 +33,8 @@ public class KzDialogueEditor : ModuleRules
 				"MovieScene",
 				"MovieSceneTools",
 				"MovieSceneTracks",
-				"GameplayTags"
+				"GameplayTags",
+				"GraphEditor",
 			});
 	}
 }

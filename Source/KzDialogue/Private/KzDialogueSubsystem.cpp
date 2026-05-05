@@ -73,8 +73,7 @@ const FKzDialogueChannelDefinition* UKzDialogueSubsystem::FindChannelDefinition(
 	return nullptr;
 }
 
-int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority,
-	const FKzDialogueChannelDefinition* ChannelDef) const
+int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const
 {
 	int32 Resolved;
 	if (RequestedPriority != InheritPriority) { Resolved = RequestedPriority; }
@@ -89,8 +88,7 @@ int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 Asset
 	return Resolved;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel,
-	int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
 	if (!IsValid(Provider))
 	{
@@ -160,8 +158,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGam
 	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel,
-	int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
 	if (!InChannel.IsValid()) { InChannel = DefaultChannel; }
 

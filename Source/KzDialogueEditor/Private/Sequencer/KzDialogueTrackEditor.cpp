@@ -1,7 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Sequencer/KzDialogueTrackEditor.h"
-#include "Sequencer/SKzDialogueLinePicker.h"
+#include "Widgets/SKzDialogueLinePicker.h"
 
 #include "KzDialogueAsset.h"
 #include "Sequencer/MovieSceneKzDialogueTrack.h"
