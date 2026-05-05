@@ -138,7 +138,7 @@ private:
 	{
 		if (!GraphPinObj) { return; }
 
-		const FString NewValue = InLineId.ToString(EGuidFormats::DigitsWithHyphens);
+		const FString NewValue = InLineId.ToString(EGuidFormats::Digits);
 		if (NewValue == GraphPinObj->GetDefaultAsString()) { return; }
 
 		const FScopedTransaction Transaction(LOCTEXT("PickLineTransaction", "Select dialogue line"));

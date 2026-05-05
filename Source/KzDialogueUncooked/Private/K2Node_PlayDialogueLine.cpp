@@ -181,9 +181,9 @@ FGuid UK2Node_PlayDialogueLine::GetLineIdValue() const
 	if (!LineIdPin) { return FGuid(); }
 
 	// FGuid struct pin stores its value as a string formatted by FGuid::ToString.
-	FGuid Result;
-	FGuid::Parse(LineIdPin->GetDefaultAsString(), Result);
-	return Result;
+	FGuid LineId;
+	FGuid::Parse(LineIdPin->GetDefaultAsString(), LineId);
+	return LineId;
 }
 
 // =======================================================================================
@@ -258,7 +258,8 @@ void UK2Node_PlayDialogueLine::ExpandNode(FKismetCompilerContext& CompilerContex
 		// Route LineId (literal GUID as default string).
 		if (UEdGraphPin* CallLineIdPin = Call->FindPin(TEXT("LineId")))
 		{
-			CallLineIdPin->DefaultValue = LineId.ToString(EGuidFormats::DigitsWithHyphens);
+			// Use EGuidFormats::Digits so the Blueprint compiler's ImportText can parse it natively
+			CallLineIdPin->DefaultValue = LineId.ToString(EGuidFormats::Digits);
 		}
 
 		// Route Channel / Priority / StartImmediately (regular pin moves).
