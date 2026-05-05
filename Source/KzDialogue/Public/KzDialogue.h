@@ -9,6 +9,7 @@ class FKzDialogueModule : public IModuleInterface
 private:
 #if !UE_BUILD_SHIPPING
 	TUniquePtr<class FKzDialogueDebugCommands> DebugCommands;
+	TUniquePtr<class FKzDialogueDebugOverlay>  DebugOverlay;
 #endif
 
 public:
