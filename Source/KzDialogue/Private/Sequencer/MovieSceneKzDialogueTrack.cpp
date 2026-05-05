@@ -39,59 +39,113 @@ UScriptStruct& FMovieSceneKzDialogueSectionTemplate::GetScriptStructImpl() const
 	return *StaticStruct();
 }
 
-void FMovieSceneKzDialogueSectionTemplate::Setup(FPersistentEvaluationData& /*PersistentData*/, IMovieScenePlayer& /*Player*/) const {}
-void FMovieSceneKzDialogueSectionTemplate::TearDown(FPersistentEvaluationData& /*PersistentData*/, IMovieScenePlayer& /*Player*/) const {}
-
-void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationOperand& Operand, const FMovieSceneContext& Context, const FPersistentEvaluationData& PersistentData, FMovieSceneExecutionTokens& ExecutionTokens) const
+void FMovieSceneKzDialogueSectionTemplate::Setup(FPersistentEvaluationData& PersistentData, IMovieScenePlayer& /*Player*/) const
 {
-	// Only fire on the very first evaluation step that includes the section's start
-	// (so scrubbing back and forth doesn't replay continuously). The Sequencer engine
-	// already handles "section just entered" semantics through the Direction/Status
-	// checks in modern UE; we keep it simple.
-	if (Context.HasJumped() || Context.GetStatus() != EMovieScenePlayerStatus::Playing)
+	// Initialize per-section persistent state.
+	PersistentData.AddSectionData<FMovieSceneKzDialogueSectionState>();
+}
+
+void FMovieSceneKzDialogueSectionTemplate::TearDown(FPersistentEvaluationData& PersistentData, IMovieScenePlayer& Player) const
+{
+	// The section is leaving the evaluation field. This happens on Stop, on a Jump
+	// that takes us out of the section, on full sequence finish, etc. We want to:
+	//   1) Stop any dialogue we triggered (only if it's still ours).
+	//   2) Reset our "fired" flag so a fresh Play through this section will work again.
+
+	UObject* PlaybackContextObj = Player.GetPlaybackContext();
+	UWorld* World = PlaybackContextObj ? PlaybackContextObj->GetWorld() : nullptr;
+	if (UKzDialogueSubsystem* Sub = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr)
 	{
-		return;
+		// Only stop if the active line in the channel is ours. Otherwise we'd kill a
+		// dialogue triggered by something else that shares the channel.
+		if (UKzDialoguePlayer* DialoguePlayer = Sub->FindPlayer(Channel))
+		{
+			if (DialoguePlayer->IsPlaying() && DialoguePlayer->GetCurrentLine().LineId == LineId)
+			{
+				Sub->StopChannel(Channel);
+			}
+		}
 	}
 
-	if (!Context.GetRange().Contains(FFrameTime(SectionStartFrame)))
+	// State is per-section in PersistentData; clearing the flag is enough.
+	if (FMovieSceneKzDialogueSectionState* State = PersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>())
 	{
-		return;
+		State->bFired = false;
+		State->LastStatus = EMovieScenePlayerStatus::Stopped;
 	}
+}
 
-	// Reach into IMovieScenePlayer via execution tokens isn't possible directly;
-	// use ExecutionTokens to enqueue a deferred task that has access to a player.
+void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationOperand& /*Operand*/, const FMovieSceneContext& Context, const FPersistentEvaluationData& PersistentData, FMovieSceneExecutionTokens& ExecutionTokens) const
+{
+	const EMovieScenePlayerStatus::Type Status = Context.GetStatus();
+
 	struct FToken : IMovieSceneExecutionToken
 	{
+		// Identity of the section/line we represent.
 		TWeakObjectPtr<UKzDialogueAsset> WeakAsset;
 		FGameplayTag Channel;
 		FGuid LineId;
 		bool bSuppressAudio = false;
 		float SectionDurationSeconds = 0.0f;
 
-		virtual void Execute(const FMovieSceneContext& InContext, const FMovieSceneEvaluationOperand& InOperand, FPersistentEvaluationData& InPersistentData, IMovieScenePlayer& InPlayer) override
+		// What we want the executor to do this evaluation.
+		enum class EAction : uint8 { None, FireIfNew, Pause, Resume } Action = EAction::None;
+
+		virtual void Execute(const FMovieSceneContext& InContext, const FMovieSceneEvaluationOperand& InOperand,
+			FPersistentEvaluationData& InPersistentData, IMovieScenePlayer& InPlayer) override
 		{
 			UObject* PlaybackContextObj = InPlayer.GetPlaybackContext();
 			UWorld* World = PlaybackContextObj ? PlaybackContextObj->GetWorld() : nullptr;
-			if (!World) { return; }
+			UKzDialogueSubsystem* Sub = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+			if (!IsValid(Sub)) { return; }
 
-			UKzDialogueSubsystem* Sub = World->GetSubsystem<UKzDialogueSubsystem>();
-			UKzDialogueAsset* AssetPtr = WeakAsset.Get();
-			if (!IsValid(Sub) || !IsValid(AssetPtr)) { return; }
-
-			FKzDialogueLine LineCopy;
-			if (!AssetPtr->TryGetLineById(LineId, LineCopy)) { return; }
-
-			if (bSuppressAudio)
+			switch (Action)
 			{
-				LineCopy.Audio = nullptr;
+			case EAction::FireIfNew:
+			{
+				FMovieSceneKzDialogueSectionState* State = InPersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>();
+				if (!State || State->bFired) { return; }
+
+				UKzDialogueAsset* AssetPtr = WeakAsset.Get();
+				if (!IsValid(AssetPtr)) { return; }
+
+				FKzDialogueLine LineCopy;
+				if (!AssetPtr->TryGetLineById(LineId, LineCopy)) { return; }
+
+				if (bSuppressAudio) { LineCopy.Audio = nullptr; }
+				if (SectionDurationSeconds > 0.f) { LineCopy.Duration = SectionDurationSeconds; }
+
+				// PlayLine respects channel and asset interruption rules; if rejected,
+				// we still mark as fired so we don't keep retrying every frame the
+				// section is active. The caller can re-trigger with Stop+Play.
+				Sub->PlayLine(LineCopy, Channel);
+				State->bFired = true;
+				break;
 			}
 
-			if (SectionDurationSeconds > 0.0f)
-			{
-				LineCopy.Duration = SectionDurationSeconds;
-			}
+			case EAction::Pause:
+				if (UKzDialoguePlayer* P = Sub->FindPlayer(Channel))
+				{
+					if (P->IsPlaying() && P->GetCurrentLine().LineId == LineId)
+					{
+						P->Pause();
+					}
+				}
+				break;
 
-			Sub->PlayLine(LineCopy, Channel, /*Priority=*/0);
+			case EAction::Resume:
+				if (UKzDialoguePlayer* P = Sub->FindPlayer(Channel))
+				{
+					if (P->GetState() == EKzDialogueState::Paused && P->GetCurrentLine().LineId == LineId)
+					{
+						P->Resume();
+					}
+				}
+				break;
+
+			default:
+				break;
+			}
 		}
 	};
 
@@ -102,7 +156,70 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 	Token.bSuppressAudio = bSuppressAudio;
 	Token.SectionDurationSeconds = SectionDurationSeconds;
 
-	ExecutionTokens.Add(MoveTemp(Token));
+	// Read the cached state to detect transitions. We can't write to it from a const
+	// Evaluate, so the actual mutation happens in the token's Execute.
+	const FMovieSceneKzDialogueSectionState* State = PersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>();
+	const EMovieScenePlayerStatus::Type LastStatus = State ? State->LastStatus : EMovieScenePlayerStatus::Stopped;
+
+	switch (Status)
+	{
+	case EMovieScenePlayerStatus::Playing:
+		// First Playing tick after Pause -> resume.
+		if (LastStatus == EMovieScenePlayerStatus::Paused)
+		{
+			Token.Action = FToken::EAction::Resume;
+		}
+		else
+		{
+			// Otherwise: try to fire (the executor checks bFired and skips if already done).
+			Token.Action = FToken::EAction::FireIfNew;
+		}
+		break;
+
+	case EMovieScenePlayerStatus::Paused:
+		if (LastStatus == EMovieScenePlayerStatus::Playing)
+		{
+			Token.Action = FToken::EAction::Pause;
+		}
+		break;
+
+	case EMovieScenePlayerStatus::Jumping:
+	case EMovieScenePlayerStatus::Scrubbing:
+	case EMovieScenePlayerStatus::Stopped:
+	case EMovieScenePlayerStatus::Stepping:
+	default:
+		// No-op: we don't fire on these states. The dialogue subsystem stays in
+		// whatever state it was; if Stop was just hit on the sequence, TearDown will
+		// run and stop our line.
+		Token.Action = FToken::EAction::None;
+		break;
+	}
+
+	// Track the status transition. We do this via a side-channel token because
+	// PersistentData is const here, but we want to update LastStatus regardless of
+	// whether we're firing this evaluation.
+	struct FStatusUpdateToken : IMovieSceneExecutionToken
+	{
+		EMovieScenePlayerStatus::Type NewStatus = EMovieScenePlayerStatus::Stopped;
+		virtual void Execute(const FMovieSceneContext&, const FMovieSceneEvaluationOperand&,
+			FPersistentEvaluationData& InPersistentData, IMovieScenePlayer&) override
+		{
+			if (FMovieSceneKzDialogueSectionState* State = InPersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>())
+			{
+				State->LastStatus = NewStatus;
+			}
+		}
+	};
+	FStatusUpdateToken StatusToken;
+	StatusToken.NewStatus = Status;
+	ExecutionTokens.Add(MoveTemp(StatusToken));
+
+	// Then the actual action token (executed after, but in practice they commute since
+	// LastStatus is read in this Evaluate from the prior frame's snapshot).
+	if (Token.Action != FToken::EAction::None)
+	{
+		ExecutionTokens.Add(MoveTemp(Token));
+	}
 }
 
 // =======================================================================================

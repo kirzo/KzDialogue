@@ -7,10 +7,26 @@
 #include "Compilation/IMovieSceneTrackTemplateProducer.h"
 #include "GameplayTagContainer.h"
 #include "Evaluation/MovieSceneEvalTemplate.h"
+#include "Evaluation/PersistentEvaluationData.h"
 #include "MovieSceneKzDialogueTrack.generated.h"
 
 class UKzDialogueAsset;
 class UMovieSceneKzDialogueSection;
+
+/**
+ * Per-section evaluation state. Stored on the persistent evaluation data so it
+ * survives across Evaluate calls within the same play session, but is wiped on
+ * TearDown (when the section leaves the evaluation field, e.g. on Stop).
+ */
+struct FMovieSceneKzDialogueSectionState : IPersistentEvaluationData
+{
+	/** True once we have dispatched the line to the subsystem during this play session.
+	 *  Reset on TearDown. */
+	bool bFired = false;
+
+	/** Last status we saw on Evaluate. Used to detect Playing -> Paused transitions. */
+	EMovieScenePlayerStatus::Type LastStatus = EMovieScenePlayerStatus::Stopped;
+};
 
 /**
  * Per-section Sequencer evaluation template. On entering, dispatches the line to the
