@@ -104,7 +104,7 @@ FText UK2Node_PlayDialogueLine::GetTooltipText() const
 
 FSlateIcon UK2Node_PlayDialogueLine::GetIconAndTint(FLinearColor& OutColor) const
 {
-	OutColor = FLinearColor(0.29f, 0.43f, 0.71f); // Match the dialogue asset color.
+	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
 	return FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment");
 }
 

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "KzDialogueEditor.h"
+#include "KzDialogueEditorStyle.h"
 #include "KzDialogueAsset.h"
 
 #include "Customizations/KzDialogueLineRowCustomizer.h"
@@ -18,7 +19,9 @@
 
 void FKzDialogueEditorModule::OnStartupModule()
 {
-	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FColor::FromHex("#4A6EB6"), { INVTEXT("Dialogues") }, GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines), INVTEXT("Line"), MakeShared<FKzDialogueLineRowCustomizer>());
+	FKzDialogueEditorStyle::Initialize();
+
+	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FKzDialogueEditorStyle::BrandColor.ToFColor(true), {INVTEXT("Dialogues")}, GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines), INVTEXT("Line"), MakeShared<FKzDialogueLineRowCustomizer>());
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));
@@ -29,6 +32,8 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
+	FKzDialogueEditorStyle::Shutdown();
+
 	if (FModuleManager::Get().IsModuleLoaded("Sequencer"))
 	{
 		ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");

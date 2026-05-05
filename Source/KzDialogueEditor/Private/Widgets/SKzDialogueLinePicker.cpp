@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Widgets/SKzDialogueLinePicker.h"
+#include "KzDialogueEditorStyle.h"
 #include "KzDialogueAsset.h"
 #include "Sound/SoundBase.h"
 
@@ -320,7 +321,7 @@ TSharedRef<SWidget> SKzDialogueLinePicker::BuildFilterMenu()
 			MenuBuilder.AddMenuEntry(
 				Label,
 				FText::Format(LOCTEXT("FilterBySpeakerTip", "Show only lines spoken by {0}"), Label),
-				FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment"),
+				FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"),
 				FUIAction(
 					FExecuteAction::CreateSP(this, &SKzDialogueLinePicker::ToggleSpeakerFilter, Speaker),
 					FCanExecuteAction(),

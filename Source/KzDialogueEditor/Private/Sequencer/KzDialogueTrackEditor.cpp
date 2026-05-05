@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Sequencer/KzDialogueTrackEditor.h"
+#include "KzDialogueEditorStyle.h"
 #include "Widgets/SKzDialogueLinePicker.h"
 
 #include "KzDialogueAsset.h"
@@ -46,7 +47,7 @@ void FKzDialogueTrackEditor::BuildAddTrackMenu(FMenuBuilder& MenuBuilder)
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("AddTrack", "KzDialogue Track"),
 		LOCTEXT("AddTrackTip", "Add a track that drives KzDialogue lines from a UKzDialogueAsset."),
-		FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment"),
+		FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"),
 		FUIAction(FExecuteAction::CreateSP(this, &FKzDialogueTrackEditor::HandleAddTrackMenuEntry)));
 }
 
@@ -174,8 +175,7 @@ TSharedRef<ISequencerSection> FKzDialogueTrackEditor::MakeSectionInterface(UMovi
 
 const FSlateBrush* FKzDialogueTrackEditor::GetIconBrush() const
 {
-	// Reuse a built-in style that reads as "speech / dialogue".
-	return FAppStyle::GetBrush("Icons.Comment");
+	return FKzDialogueEditorStyle::Get().GetBrush("Kz.Dialogue.Icon");
 }
 
 // =======================================================================================
