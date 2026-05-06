@@ -37,8 +37,11 @@ namespace
 void SKzDialogueLinePicker::Construct(const FArguments& InArgs)
 {
 	Asset = InArgs._Asset;
-	OnLinePicked = InArgs._OnLinePicked;
+	OnEntryPicked = InArgs._OnEntryPicked;
 	AlreadyUsedLineIds = InArgs._AlreadyUsedLineIds;
+	RequiredSpeaker = InArgs._RequiredSpeaker;
+	bRequireExactSpeakerMatch = InArgs._bRequireExactSpeakerMatch;
+	bShowAliases = InArgs._bShowAliases;
 	bHideAlreadyUsed = AlreadyUsedLineIds.Num() > 0;
 
 	BuildAllItems();
@@ -105,7 +108,7 @@ void SKzDialogueLinePicker::Construct(const FArguments& InArgs)
 							// The list itself.
 							+ SVerticalBox::Slot().FillHeight(1.f).Padding(0, 4, 0, 0)
 								[
-									SAssignNew(ListView, SListView<KzDialoguePickerInternal::FLineEntryPtr>)
+									SAssignNew(ListView, SListView<KzDialoguePickerInternal::FEntryPtr>)
 										.ListItemsSource(&VisibleItems)
 										.OnGenerateRow(this, &SKzDialogueLinePicker::OnGenerateRow)
 										.OnMouseButtonClick(this, &SKzDialogueLinePicker::OnItemClicked)
@@ -125,37 +128,40 @@ void SKzDialogueLinePicker::Construct(const FArguments& InArgs)
 void SKzDialogueLinePicker::BuildAllItems()
 {
 	AllItems.Reset();
+
 	UKzDialogueAsset* AssetPtr = Asset.Get();
 	if (!IsValid(AssetPtr)) { return; }
 
-	AllItems.Reserve(AssetPtr->Lines.Num());
-	for (int32 i = 0; i < AssetPtr->Lines.Num(); ++i)
+	// Lines
+	for (const FKzDialogueLine& Line : AssetPtr->Lines)
 	{
-		const FKzDialogueLine& Line = AssetPtr->Lines[i];
-
-		// Resolve the default section duration once: explicit > audio length > 2s.
-		float Duration = Line.Duration;
-		if (Duration <= 0.0f)
-		{
-			if (USoundBase* Sound = Line.Audio.LoadSynchronous())
-			{
-				Duration = Sound->GetDuration();
-			}
-		}
-		if (Duration <= 0.0f) { Duration = 2.0f; }
-
-		const FString TextStr = Line.Text.ToString();
-		const FString SpeakerStr = Line.Speaker.SpeakerTag.IsValid() ? Line.Speaker.SpeakerTag.ToString() : FString();
-
-		KzDialoguePickerInternal::FLineEntryPtr Entry = MakeShared<KzDialoguePickerInternal::FLineEntry>();
-		Entry->LineId = Line.LineId;
-		Entry->DisplayText = FString::Printf(TEXT("%d. %s"), i + 1, *Line.GetDisplayLabel(45).ToString());
-		Entry->SearchHaystack = (SpeakerStr + TEXT(" ") + TextStr).ToLower();
-		Entry->DefaultDuration = Duration;
+		auto Entry = MakeShared<KzDialoguePickerInternal::FEntry>();
+		Entry->bIsAlias = false;
+		Entry->Id = Line.LineId;
+		Entry->DisplayText = Line.GetDisplayLabel().ToString();
 		Entry->SpeakerTag = Line.Speaker.SpeakerTag;
 		Entry->LineTags = Line.Tags;
 		Entry->bHasAudio = !Line.Audio.IsNull();
+		Entry->DefaultDuration = Line.Duration > 0.f ? Line.Duration : 2.f;
 
+		// Haystack: speaker + text, lowercase.
+		Entry->SearchHaystack = (Entry->SpeakerTag.GetTagName().ToString() + TEXT(" ") + Entry->DisplayText).ToLower();
+		AllItems.Add(Entry);
+	}
+
+	// Aliases
+	for (const FKzDialogueAlias& Alias : AssetPtr->Aliases)
+	{
+		auto Entry = MakeShared<KzDialoguePickerInternal::FEntry>();
+		Entry->bIsAlias = true;
+		Entry->Id = Alias.AliasId;
+		Entry->DisplayText = Alias.GetDisplayLabel().ToString();
+		Entry->SpeakerTag = Alias.Speaker.SpeakerTag;
+		Entry->LineTags = FGameplayTagContainer();
+		Entry->bHasAudio = false;
+		Entry->DefaultDuration = 2.f;
+
+		Entry->SearchHaystack = (Entry->SpeakerTag.GetTagName().ToString() + TEXT(" ") + Alias.AliasName.ToString()).ToLower();
 		AllItems.Add(Entry);
 	}
 }
@@ -226,24 +232,43 @@ void SKzDialogueLinePicker::GatherDistinctLineTags()
 void SKzDialogueLinePicker::RebuildVisibleItems()
 {
 	VisibleItems.Reset();
-	VisibleItems.Reserve(AllItems.Num());
+	VisibleItems.Reserve(AllItems.Num() + 2); // headers add at most 2 entries
 
-	for (const KzDialoguePickerInternal::FLineEntryPtr& Item : AllItems)
+	// First pass: bucket each item into lines / aliases, applying all filters.
+	TArray<KzDialoguePickerInternal::FEntryPtr> VisibleLines;
+	TArray<KzDialoguePickerInternal::FEntryPtr> VisibleAliases;
+
+	for (const KzDialoguePickerInternal::FEntryPtr& Item : AllItems)
 	{
-		// 1. Search text
+		if (!Item.IsValid()) { continue; }
+
+		// Hard speaker constraint imposed by the caller.
+		if (RequiredSpeaker.IsValid())
+		{
+			if (Item->SpeakerTag != RequiredSpeaker) { continue; }
+		}
+		else if (bRequireExactSpeakerMatch)
+		{
+			if (Item->SpeakerTag.IsValid()) { continue; }
+		}
+
+		// Aliases visibility (e.g. Sequencer track disables them).
+		if (Item->bIsAlias && !bShowAliases) { continue; }
+
+		// Search text.
 		if (!CurrentSearchText.IsEmpty() && !Item->SearchHaystack.Contains(CurrentSearchText))
 		{
 			continue;
 		}
 
-		// 2. Speakers
+		// Speaker filter.
 		if (SelectedSpeakerFilters.Num() > 0)
 		{
 			const FGameplayTag Key = Item->SpeakerTag.IsValid() ? Item->SpeakerTag : GetNarrationSentinel();
 			if (!SelectedSpeakerFilters.Contains(Key)) { continue; }
 		}
 
-		// 3. Line tags (line passes if it has at least one of the selected tags)
+		// Line tag filter.
 		if (SelectedLineTagFilters.Num() > 0)
 		{
 			bool bMatch = false;
@@ -254,13 +279,39 @@ void SKzDialogueLinePicker::RebuildVisibleItems()
 			if (!bMatch) { continue; }
 		}
 
-		// 4. Hide already-used
-		if (bHideAlreadyUsed && AlreadyUsedLineIds.Contains(Item->LineId))
+		// Hide already-used.
+		if (bHideAlreadyUsed && AlreadyUsedLineIds.Contains(Item->Id))
 		{
 			continue;
 		}
 
-		VisibleItems.Add(Item);
+		if (Item->bIsAlias) { VisibleAliases.Add(Item); }
+		else { VisibleLines.Add(Item); }
+	}
+
+	// Second pass: assemble final list with headers between sections. Headers only
+	// appear when both sections have content — avoids a lone header at the top of
+	// a list with only one kind of entry.
+	auto MakeHeader = [](const FString& Label) -> KzDialoguePickerInternal::FEntryPtr
+		{
+			auto Header = MakeShared<KzDialoguePickerInternal::FEntry>();
+			Header->bIsHeader = true;
+			Header->DisplayText = Label;
+			return Header;
+		};
+
+	const bool bHaveBoth = VisibleAliases.Num() > 0 && VisibleLines.Num() > 0;
+
+	if (VisibleAliases.Num() > 0)
+	{
+		if (bHaveBoth) { VisibleItems.Add(MakeHeader(TEXT("Aliases"))); }
+		VisibleItems.Append(VisibleAliases);
+	}
+
+	if (VisibleLines.Num() > 0)
+	{
+		if (bHaveBoth) { VisibleItems.Add(MakeHeader(TEXT("Lines"))); }
+		VisibleItems.Append(VisibleLines);
 	}
 
 	if (ListView.IsValid()) { ListView->RequestListRefresh(); }
@@ -461,27 +512,66 @@ EActiveTimerReturnType SKzDialogueLinePicker::FocusSearchBoxOnce(double, float)
 	return EActiveTimerReturnType::Stop;
 }
 
-TSharedRef<ITableRow> SKzDialogueLinePicker::OnGenerateRow(KzDialoguePickerInternal::FLineEntryPtr Item, const TSharedRef<STableViewBase>& Owner)
+TSharedRef<ITableRow> SKzDialogueLinePicker::OnGenerateRow(KzDialoguePickerInternal::FEntryPtr Item, const TSharedRef<STableViewBase>& Owner)
 {
-	return SNew(STableRow<KzDialoguePickerInternal::FLineEntryPtr>, Owner)
-		.Padding(FMargin(0.f, 1.f))
+	if (Item->bIsHeader)
+	{
+		return SNew(STableRow<KzDialoguePickerInternal::FEntryPtr>, Owner)
+			.Style(&FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.NoHoverTableRow"))
+			.ShowSelection(false)
+			.Padding(FMargin(0, 6, 0, 2))
+			[
+				SNew(SHorizontalBox)
+
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8, 0, 6, 0)
+					[
+						SNew(STextBlock)
+							.Text(FText::FromString(Item->DisplayText.ToUpper()))
+							.TextStyle(&FAppStyle::Get().GetWidgetStyle<FTextBlockStyle>("Menu.Heading"))
+					]
+
+					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+					[
+						SNew(SSeparator)
+							.SeparatorImage(FAppStyle::Get().GetBrush("Menu.Separator"))
+							.Orientation(Orient_Horizontal)
+							.Thickness(1.f)
+					]
+			];
+	}
+
+	const FSlateBrush* IconBrush = Item->bIsAlias
+		? FAppStyle::GetBrush("Sequencer.KeyDiamond")
+		: FAppStyle::GetBrush("ClassIcon.SoundCue");
+
+	return SNew(STableRow<KzDialoguePickerInternal::FEntryPtr>, Owner)
 		[
-			SNew(SBox)
-				.Padding(FMargin(8.f, 4.f))
+			SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 2.f)
+				[
+					SNew(SBox).WidthOverride(16.f).HeightOverride(16.f)
+						[
+							SNew(SImage).Image(IconBrush).ColorAndOpacity(FSlateColor::UseForeground())
+						]
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 				[
 					SNew(STextBlock)
 						.Text(FText::FromString(Item->DisplayText))
+						.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 				]
 		];
 }
 
-void SKzDialogueLinePicker::OnItemClicked(KzDialoguePickerInternal::FLineEntryPtr Item)
+void SKzDialogueLinePicker::OnItemClicked(KzDialoguePickerInternal::FEntryPtr Item)
 {
-	if (Item.IsValid() && OnLinePicked.IsBound())
-	{
-		OnLinePicked.Execute(Item->LineId, Item->DefaultDuration);
-	}
-	FSlateApplication::Get().DismissAllMenus();
+	if (!Item.IsValid() || Item->bIsHeader) { return; }
+
+	FKzDialogueAssetReference Ref;
+	Ref.Id = Item->Id;
+	Ref.bIsAlias = Item->bIsAlias;
+
+	OnEntryPicked.ExecuteIfBound(Ref, Item->DefaultDuration);
 }
 
 #undef LOCTEXT_NAMESPACE

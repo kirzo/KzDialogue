@@ -124,13 +124,17 @@ TSharedRef<SWidget> FKzDialogueTrackEditor::BuildAddSectionMenu(UMovieSceneKzDia
 	return SNew(SKzDialogueLinePicker)
 		.Asset(Asset)
 		.AlreadyUsedLineIds(AlreadyUsed)
-		.OnLinePicked(SKzDialogueLinePicker::FOnLinePicked::CreateSP(
+		.bShowAliases(false)
+		.OnEntryPicked(SKzDialogueLinePicker::FOnEntryPicked::CreateSP(
 			this, &FKzDialogueTrackEditor::HandleAddSection, Track));
 }
 
-void FKzDialogueTrackEditor::HandleAddSection(FGuid LineId, float DefaultDurationSeconds, UMovieSceneKzDialogueTrack* Track)
+void FKzDialogueTrackEditor::HandleAddSection(FKzDialogueAssetReference Reference, float DefaultDurationSeconds, UMovieSceneKzDialogueTrack* Track)
 {
 	if (!IsValid(Track) || !Track->GetTypedOuter<UMovieScene>()) { return; }
+	if (Reference.bIsAlias) { return; } // sequencer rejects aliases
+
+	const FGuid LineId = Reference.Id;
 
 	UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>();
 	const FFrameRate TickResolution = MovieScene->GetTickResolution();

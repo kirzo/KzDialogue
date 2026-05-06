@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "MovieSceneTrackEditor.h"
+#include "KzDialogueTypes.h"
 
 /**
  * Track editor for UMovieSceneKzDialogueTrack. Adds:
@@ -32,7 +33,7 @@ public:
 
 private:
 	void HandleAddTrackMenuEntry();
-	void HandleAddSection(FGuid LineId, float DefaultDurationSeconds, class UMovieSceneKzDialogueTrack* Track);
+	void HandleAddSection(FKzDialogueAssetReference Reference, float DefaultDurationSeconds, class UMovieSceneKzDialogueTrack* Track);
 
 	TSharedRef<SWidget> BuildAddSectionMenu(class UMovieSceneKzDialogueTrack* Track);
 };

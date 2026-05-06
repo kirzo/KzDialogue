@@ -31,26 +31,32 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* 
 
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
 {
-	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
+	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
+	return IsValid(Sub) ? Sub->PlayAssetLine(Asset, LineId, Channel, Priority, bStartImmediately) : nullptr;
+}
 
-	FKzDialogueLine Line;
-	if (!Asset->TryGetLineById(LineId, Line))
-	{
-		// Caller passed a GUID that doesn't exist in the asset (renamed/removed line).
-		// Fail silent rather than crash; log so it shows up if anyone is looking.
-		UE_LOG(LogTemp, Warning, TEXT("PlayDialogueLineFromAsset: LineId %s not found in asset %s"), *LineId.ToString(), *Asset->GetName());
-		return nullptr;
-	}
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+{
+	if (!Ref.IsValid()) { return nullptr; }
 
+	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
+	if (!IsValid(Sub)) { return nullptr; }
+
+	UKzDialogueAsset* Loaded = Ref.Asset.LoadSynchronous();
+	if (!Loaded) { return nullptr; }
+
+	return Sub->PlayAssetLine(Loaded, Ref.LineId, Channel, Priority, bStartImmediately);
+}
+
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+{
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	return IsValid(Sub) ? Sub->PlayLine(Line, Channel, Priority, bStartImmediately) : nullptr;
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLine& Line,
-	FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+bool UKzDialogueFunctionLibrary::TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine)
 {
-	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayLine(Line, Channel, Priority, bStartImmediately) : nullptr;
+	return Ref.TryResolve(OutLine);
 }
 
 void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)

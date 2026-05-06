@@ -207,6 +207,16 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
 }
 
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
+	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
+
+	FKzDialogueLine Line;
+	if (!Asset->TryResolveLineOrAlias(LineId, Line)) { return nullptr; }
+
+	return PlayLine(Line, InChannel, Priority, bStartImmediately);
+}
+
 void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 {
 	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))

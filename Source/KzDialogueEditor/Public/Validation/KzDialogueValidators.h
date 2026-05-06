@@ -40,3 +40,53 @@ public:
 	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
 	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
 };
+
+/** Reports aliases without a defined speaker (warning — likely a setup mistake). */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_AliasMissingSpeaker : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
+
+/** Reports aliases that reference no lines. */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_AliasEmpty : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
+
+/** Reports aliases referencing LineIds that no longer exist in the asset. */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_AliasInvalidLine : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
+
+/** Reports lines referenced by an alias that don't share the alias's speaker. */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_AliasSpeakerMismatch : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
+
+/** Reports two or more aliases sharing the same name. */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_DuplicateAliasName : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};

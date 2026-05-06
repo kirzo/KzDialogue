@@ -4,10 +4,14 @@
 
 #include "KzDialogueEditor.h"
 #include "KzDialogueEditorStyle.h"
+#include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
 
 #include "Customizations/KzDialogueLineRowCustomizer.h"
+#include "Customizations/KzDialogueAliasRowCustomizer.h"
 #include "Customizations/KzDialogueLinePinFactory.h"
+#include "Customizations/KzDialogueLineRefCustomization.h"
+#include "Customizations/KzDialogueAliasCustomization.h"
 
 #include "Editors/KzArrayAssetEditor.h"
 
@@ -27,6 +31,11 @@ void FKzDialogueEditorModule::OnStartupModule()
 		INVTEXT("Line"),
 		MakeShared<FKzDialogueLineRowCustomizer>()));
 
+	DialogueTabs.Add(FKzArrayEditorTabConfig(
+		GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Aliases),
+		INVTEXT("Alias"),
+		MakeShared<FKzDialogueAliasRowCustomizer>()));
+
 	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(
 		KzAssetCategoryBit,
 		INVTEXT("Dialogue"),
@@ -35,6 +44,8 @@ void FKzDialogueEditorModule::OnStartupModule()
 		DialogueTabs);
 
 	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FKzDialogueEditorStyle::BrandColor.ToFColor(true), {INVTEXT("Dialogues")}, DialogueTabs);
+	RegisterPropertyLayout<FKzDialogueAlias, FKzDialogueAliasCustomization>();
+	RegisterPropertyLayout<FKzDialogueLineRef, FKzDialogueLineRefCustomization>();
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));

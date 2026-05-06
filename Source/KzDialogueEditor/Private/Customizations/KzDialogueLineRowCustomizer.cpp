@@ -115,7 +115,7 @@ FText FKzDialogueLineRowCustomizer::GetDisplayText(TSharedPtr<IPropertyHandle> H
 {
 	if (FKzDialogueLine* Line = ResolveLine(Handle))
 	{
-		return Line->GetDisplayLabel(140);
+		return Line->GetDisplayLabel();
 	}
 	return FText::GetEmpty();
 }
@@ -126,7 +126,7 @@ FText FKzDialogueLineRowCustomizer::GetTooltipText(TSharedPtr<IPropertyHandle> H
 	{
 		// Untruncated speaker + text for the tooltip, useful for long lines that get
 		// cut off in the row label.
-		return Line->GetDisplayLabel(/*MaxTextLength=*/0);
+		return Line->GetDisplayLabel();
 	}
 	return FText::GetEmpty();
 }

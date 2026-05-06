@@ -83,8 +83,6 @@ private:
 		const UK2Node_PlayDialogueLine* Node = GetOwningNode();
 		if (!Node) { return LOCTEXT("InvalidNode", "(invalid)"); }
 
-		// If the asset pin is connected we can't preview anything — show the GUID
-		// directly (which is what the user typed/wired) so it's still inspectable.
 		if (!Node->ShouldShowLineDropdown())
 		{
 			if (GraphPinObj->LinkedTo.Num() > 0)
@@ -93,25 +91,33 @@ private:
 			}
 			const FString DefaultStr = GraphPinObj->GetDefaultAsString();
 			return DefaultStr.IsEmpty()
-				? LOCTEXT("NoLineIdHint", "Set a Line GUID")
+				? LOCTEXT("NoLineIdHint", "Set a Line / Alias")
 				: FText::FromString(DefaultStr);
 		}
 
-		// Asset is literal: render the resolved line label.
-		FGuid LineId;
-		FGuid::Parse(GraphPinObj->GetDefaultAsString(), LineId);
+		FGuid Id;
+		FGuid::Parse(GraphPinObj->GetDefaultAsString(), Id);
 
 		UKzDialogueAsset* Asset = GetCurrentAsset();
-		if (Asset && LineId.IsValid())
+		if (!Asset || !Id.IsValid())
 		{
-			FKzDialogueLine Line;
-			if (Asset->TryGetLineById(LineId, Line))
-			{
-				return Line.GetDisplayLabel(60);
-			}
+			return LOCTEXT("PickLineOrAlias", "Select line or alias...");
 		}
 
-		return LOCTEXT("PickLine", "Select line...");
+		// Prefer line lookup (line GUIDs are typically more numerous).
+		FKzDialogueLine Line;
+		if (Asset->TryGetLineById(Id, Line))
+		{
+			return Line.GetDisplayLabel();
+		}
+
+		FKzDialogueAlias Alias;
+		if (Asset->TryGetAliasById(Id, Alias))
+		{
+			return Alias.GetDisplayLabel();
+		}
+
+		return LOCTEXT("UnknownEntry", "(unknown)");
 	}
 
 	TSharedRef<SWidget> BuildPickerContent()
@@ -129,19 +135,21 @@ private:
 			[
 				SNew(SKzDialogueLinePicker)
 					.Asset(Asset)
-					.OnLinePicked(SKzDialogueLinePicker::FOnLinePicked::CreateSP(
-						this, &SKzDialogueLineGraphPin::OnLinePicked))
+					.OnEntryPicked(SKzDialogueLinePicker::FOnEntryPicked::CreateSP(
+						this, &SKzDialogueLineGraphPin::OnEntryPicked))
 			];
 	}
 
-	void OnLinePicked(FGuid InLineId, float /*DefaultDuration*/)
+	void OnEntryPicked(FKzDialogueAssetReference InRef, float /*Duration*/)
 	{
-		if (!GraphPinObj) { return; }
+		if (!GraphPinObj || !InRef.IsValid()) { return; }
 
-		const FString NewValue = InLineId.ToString(EGuidFormats::Digits);
+		// The pin is FGuid-typed; we only persist the id. The runtime decides whether
+		// the GUID maps to a line or an alias.
+		const FString NewValue = InRef.Id.ToString(EGuidFormats::Digits);
 		if (NewValue == GraphPinObj->GetDefaultAsString()) { return; }
 
-		const FScopedTransaction Transaction(LOCTEXT("PickLineTransaction", "Select dialogue line"));
+		const FScopedTransaction Transaction(LOCTEXT("PickLineTransaction", "Select dialogue line/alias"));
 		GraphPinObj->Modify();
 		GraphPinObj->GetSchema()->TrySetDefaultValue(*GraphPinObj, NewValue);
 

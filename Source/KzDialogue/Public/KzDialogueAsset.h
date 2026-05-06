@@ -44,6 +44,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueLine> Lines;
 
+	/** Reusable named groups of lines selected randomly at playback time. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	TArray<FKzDialogueAlias> Aliases;
+
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
 	int32 IndexOfLine(const FGuid& LineId) const;
@@ -51,6 +55,34 @@ public:
 	/** Get a line by its stable id. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
 	bool TryGetLineById(const FGuid& LineId, FKzDialogueLine& OutLine) const;
+
+	/** Look up an alias by name. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	bool TryGetAliasByName(FName AliasName, FKzDialogueAlias& OutAlias) const;
+
+	/** Look up an alias by GUID. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	bool TryGetAliasById(const FGuid& AliasId, FKzDialogueAlias& OutAlias) const;
+
+	/**
+	 * Resolve an alias to one of its lines (random pick).
+	 * Returns false if the alias is unknown, empty, or all referenced LineIds are stale.
+	 */
+	bool TryResolveAlias(const FGuid& AliasId, FKzDialogueLine& OutLine) const;
+	bool TryResolveAlias(FName AliasName, FKzDialogueLine& OutLine) const;
+
+	/**
+	 * Resolve a GUID to a concrete line. The GUID can be either a LineId or an
+	 * AliasId — the asset checks both tables. Returns false if neither matches.
+	 */
+	bool TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& OutLine) const;
+
+	/**
+	 * Resolve a reference (line or alias) to a concrete line. The same as
+	 * TryGetLineById when the reference points to a line, or TryResolveAlias
+	 * when it points to an alias.
+	 */
+	bool TryResolveReference(const FKzDialogueAssetReference& Reference, FKzDialogueLine& OutLine) const;
 
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;

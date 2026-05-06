@@ -11,6 +11,7 @@
 #include "KzDialogueTypes.generated.h"
 
 class USoundBase;
+class UKzDialogueAsset;
 
 namespace Kz::Tags::Dialogue
 {
@@ -122,7 +123,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * Returns a "(Speaker) Text" formatted label for this line, suitable for editor
 	 * UI, list previews, Sequencer section titles, etc.
 	 */
-	FText GetDisplayLabel(int32 MaxTextLength = 60) const
+	FText GetDisplayLabel(int32 MaxTextLength = 0) const
 	{
 		FString TextStr = Text.ToString();
 
@@ -158,6 +159,128 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 		return FText::Format(INVTEXT("({0}) {1}"), SpeakerLabel, FText::FromString(TextStr));
 	}
+};
+
+/**
+ * A randomized group of dialogue lines that share a speaker.
+ *
+ * When played, the asset picks one of the referenced LineIds at random. Useful for
+ * variations of the same beat ("greet the player" with 4 different lines, "react to
+ * surprise" with 3, etc.) without needing to wire a SoundCue with a Random selector
+ * (which can't carry per-variant subtitles).
+ *
+ * Lines referenced by an alias must share the alias's Speaker. The validator will
+ * surface mismatches.
+ */
+USTRUCT(BlueprintType)
+struct FKzDialogueAlias
+{
+	GENERATED_BODY()
+
+	/** Stable identifier for the alias. Survives renames so external references hold. */
+	UPROPERTY(VisibleAnywhere, Category = "Dialogue|Alias")
+	FGuid AliasId;
+
+	/** Author-facing identifier, e.g. "Greeting", "Surprise", "Insult". Must be unique
+	 *  within the asset. Used by gameplay code as a stable key. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	FName AliasName;
+
+	/** Speaker constraint: every line referenced by this alias must use this speaker.
+	 *  An empty/invalid speaker tag means the alias is for narration-style lines (no
+	 *  speaker assigned). */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	FKzDialogueSpeaker Speaker;
+
+	/** Lines this alias resolves to. Picking the alias picks one at random. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	TArray<FGuid> LineIds;
+
+	FKzDialogueAlias() = default;
+
+	/** Returns a UI-facing label combining the alias name and its line count. */
+	FText GetDisplayLabel() const
+	{
+		const FString NameStr = AliasName.IsNone() ? TEXT("(unnamed)") : AliasName.ToString();
+
+		const FString SpeakerStr = Speaker.GetDisplayLabel().ToString();
+		if (!SpeakerStr.IsEmpty())
+		{
+			return FText::Format(NSLOCTEXT("KzDialogueAlias", "AliasLabelWithSpeaker", "({0}) {1} [{2}]"),
+				FText::FromString(SpeakerStr),
+				FText::FromString(NameStr),
+				FText::AsNumber(LineIds.Num()));
+		}
+
+		return FText::Format(NSLOCTEXT("KzDialogueAlias", "AliasLabel", "{0} [{1}]"),
+			FText::FromString(NameStr),
+			FText::AsNumber(LineIds.Num()));
+	}
+};
+
+/**
+ * Reference to either a single line or an alias inside a dialogue asset.
+ *
+ * Used by the picker, K2Node, Sequencer, and any future system that needs to point
+ * at a "playable thing" inside a dialogue asset without committing to which kind it
+ * is at the call site.
+ */
+USTRUCT(BlueprintType)
+struct FKzDialogueAssetReference
+{
+	GENERATED_BODY()
+
+	/** GUID of the line or alias. Combined with bIsAlias to disambiguate. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	FGuid Id;
+
+	/** True if Id refers to an alias, false if it refers to a line. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	bool bIsAlias = false;
+
+	bool IsValid() const { return Id.IsValid(); }
+
+	bool operator==(const FKzDialogueAssetReference& Other) const
+	{
+		return Id == Other.Id && bIsAlias == Other.bIsAlias;
+	}
+};
+
+/**
+ * Reference to a single playable entry (line or alias) inside a dialogue asset.
+ *
+ * Stored as a soft pointer to the asset plus a GUID that the runtime resolves
+ * against both the Lines and Aliases tables, so callers don't need to know whether
+ * the GUID points to a concrete line or to an alias that randomizes one.
+ *
+ * Useful as a property in actors / data assets / structs whenever you want a
+ * designer to pick a specific line from a specific asset without writing code.
+ * The editor customization renders an asset picker plus a searchable dropdown.
+ */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzDialogueLineRef
+{
+	GENERATED_BODY()
+
+	/**
+	 * Asset that owns the line or alias. Soft so referencing this
+	 * struct doesn't pull the asset into memory until it's needed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	TSoftObjectPtr<UKzDialogueAsset> Asset;
+
+	/** GUID of the line or alias inside Asset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	FGuid LineId;
+
+	bool IsValid() const { return !Asset.IsNull() && LineId.IsValid(); }
+
+	/**
+	 * Loads the asset (synchronously) and resolves the GUID to a concrete line.
+	 * Returns false if the asset can't be loaded, the GUID is invalid, or it
+	 * doesn't match any line or alias in the asset.
+	 */
+	bool TryResolve(FKzDialogueLine& OutLine) const;
 };
 
 /**

@@ -49,7 +49,7 @@ void UK2Node_PlayDialogueLine::AllocateDefaultPins()
 	// editor module replaces its default widget with the dropdown when appropriate.
 	UEdGraphPin* LineIdPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct,
 		TBaseStructure<FGuid>::Get(), PN_LineId);
-	LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line");
+	LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line / Alias");
 
 	// Channel.
 	UEdGraphPin* ChannelPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct,
@@ -180,7 +180,6 @@ FGuid UK2Node_PlayDialogueLine::GetLineIdValue() const
 	const UEdGraphPin* LineIdPin = GetLineIdPin();
 	if (!LineIdPin) { return FGuid(); }
 
-	// FGuid struct pin stores its value as a string formatted by FGuid::ToString.
 	FGuid LineId;
 	FGuid::Parse(LineIdPin->GetDefaultAsString(), LineId);
 	return LineId;
@@ -194,94 +193,51 @@ void UK2Node_PlayDialogueLine::ExpandNode(FKismetCompilerContext& CompilerContex
 {
 	Super::ExpandNode(CompilerContext, SourceGraph);
 
-	UEdGraphPin* AssetPin = GetAssetPin();
-	const bool bAssetIsLiteral = AssetPin && AssetPin->LinkedTo.Num() == 0;
+	UK2Node_CallFunction* Call = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
+	Call->FunctionReference.SetExternalMember(
+		GET_FUNCTION_NAME_CHECKED(UKzDialogueFunctionLibrary, PlayDialogueLineFromAsset),
+		UKzDialogueFunctionLibrary::StaticClass());
+	Call->AllocateDefaultPins();
 
-	// Common helper: build a CallFunction node and route the standard pins.
-	auto BuildCall = [&](FName FunctionName) -> UK2Node_CallFunction*
-		{
-			UK2Node_CallFunction* Call = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
-			Call->FunctionReference.SetExternalMember(FunctionName, UKzDialogueFunctionLibrary::StaticClass());
-			Call->AllocateDefaultPins();
+	// Exec / then.
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Execute), *Call->GetExecPin());
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Then), *Call->GetThenPin());
 
-			// Wire exec / then.
-			CompilerContext.MovePinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Execute), *Call->GetExecPin());
-			CompilerContext.MovePinLinksToIntermediate(*FindPin(UEdGraphSchema_K2::PN_Then), *Call->GetThenPin());
+	// Return value.
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_ReturnValue), *Call->GetReturnValuePin());
 
-			// Wire return.
-			CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_ReturnValue), *Call->GetReturnValuePin());
-
-			// Wire WorldContext (hidden on our node, hidden on the call too — the BP
-			// compiler resolves it automatically via the CallFunction's metadata).
-			if (UEdGraphPin* CallWorldPin = Call->FindPin(TEXT("WorldContextObject")))
-			{
-				CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_WorldContext), *CallWorldPin);
-			}
-
-			return Call;
-		};
-
-	if (bAssetIsLiteral)
+	// World context.
+	if (UEdGraphPin* CallWorldPin = Call->FindPin(TEXT("WorldContextObject")))
 	{
-		// =============================================================================
-		// Literal path: build a transient FKzDialogueLine via MakeStruct, then call
-		// PlayDialogueLine directly. Avoids a runtime lookup.
-		// =============================================================================
-		UKzDialogueAsset* Asset = GetLiteralAsset();
-		const FGuid LineId = GetLineIdValue();
-
-		FKzDialogueLine ResolvedLine;
-		const bool bResolved = Asset && Asset->TryGetLineById(LineId, ResolvedLine);
-		if (!bResolved)
-		{
-			CompilerContext.MessageLog.Warning(
-				*LOCTEXT("UnresolvedLine", "@@: Line GUID could not be resolved in the selected asset.").ToString(), this);
-		}
-
-		// Instead of building an FKzDialogueLine literal (which is awkward to do with
-		// MakeStruct from Blueprint codegen for nested tags/objects), we route through
-		// the runtime helper. It does exactly the same as the runtime path for
-		// connected assets: lookup by GUID, then PlayLine.
-		//
-		// This keeps the literal and dynamic paths identical at runtime, simplifying
-		// debugging. The "literal vs dynamic" distinction only affects the editor UX
-		// (the dropdown), not the compiled bytecode.
-		UK2Node_CallFunction* Call = BuildCall(GET_FUNCTION_NAME_CHECKED(
-			UKzDialogueFunctionLibrary, PlayDialogueLineFromAsset));
-
-		// Route Asset (literal default object).
-		if (UEdGraphPin* CallAssetPin = Call->FindPin(TEXT("Asset")))
-		{
-			CallAssetPin->DefaultObject = Asset;
-		}
-
-		// Route LineId (literal GUID as default string).
-		if (UEdGraphPin* CallLineIdPin = Call->FindPin(TEXT("LineId")))
-		{
-			// Use EGuidFormats::Digits so the Blueprint compiler's ImportText can parse it natively
-			CallLineIdPin->DefaultValue = LineId.ToString(EGuidFormats::Digits);
-		}
-
-		// Route Channel / Priority / StartImmediately (regular pin moves).
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Channel), *Call->FindPin(TEXT("Channel")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Priority), *Call->FindPin(TEXT("Priority")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_StartImmediately), *Call->FindPin(TEXT("bStartImmediately")));
+		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_WorldContext), *CallWorldPin);
 	}
-	else
+
+	// Asset.
+	if (UEdGraphPin* CallAssetPin = Call->FindPin(TEXT("Asset")))
 	{
-		// =============================================================================
-		// Dynamic path: Asset pin is connected. Use the runtime helper that does the
-		// lookup at runtime.
-		// =============================================================================
-		UK2Node_CallFunction* Call = BuildCall(GET_FUNCTION_NAME_CHECKED(
-			UKzDialogueFunctionLibrary, PlayDialogueLineFromAsset));
-
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Asset), *Call->FindPin(TEXT("Asset")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_LineId), *Call->FindPin(TEXT("LineId")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Channel), *Call->FindPin(TEXT("Channel")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Priority), *Call->FindPin(TEXT("Priority")));
-		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_StartImmediately), *Call->FindPin(TEXT("bStartImmediately")));
+		UEdGraphPin* OurAssetPin = FindPin(PN_Asset);
+		CompilerContext.MovePinLinksToIntermediate(*OurAssetPin, *CallAssetPin);
+		if (OurAssetPin->LinkedTo.Num() == 0)
+		{
+			CallAssetPin->DefaultObject = OurAssetPin->DefaultObject;
+		}
 	}
+
+	// LineId — same name on both sides, just a regular pin move + default preservation.
+	if (UEdGraphPin* CallLineIdPin = Call->FindPin(TEXT("LineId")))
+	{
+		UEdGraphPin* OurLineIdPin = GetLineIdPin();
+		CompilerContext.MovePinLinksToIntermediate(*OurLineIdPin, *CallLineIdPin);
+		if (OurLineIdPin->LinkedTo.Num() == 0)
+		{
+			CallLineIdPin->DefaultValue = OurLineIdPin->DefaultValue;
+		}
+	}
+
+	// Channel / Priority / StartImmediately.
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Channel), *Call->FindPin(TEXT("Channel")));
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_Priority), *Call->FindPin(TEXT("Priority")));
+	CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_StartImmediately), *Call->FindPin(TEXT("bStartImmediately")));
 
 	BreakAllNodeLinks();
 }
