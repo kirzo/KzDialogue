@@ -38,5 +38,5 @@ private:
 	TWeakPtr<class IPropertyUtilities> PropertyUtilities;
 
 	/** Row customizer for the LineIds array, lives for the lifetime of this customization. */
-	TSharedPtr<FKzDialogueAliasLineRowCustomizer> LineRowCustomizer;
+	TSharedPtr<class FKzDialogueLineFromAssetRowCustomizer> LineRowCustomizer;
 };

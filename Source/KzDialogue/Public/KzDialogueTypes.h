@@ -284,6 +284,53 @@ struct KZDIALOGUE_API FKzDialogueLineRef
 };
 
 /**
+ * Reference to a list of playable entries (lines or aliases) inside a single dialogue
+ * asset. Equivalent to a TArray<FKzDialogueLineRef> where every element shares the
+ * same Asset, with a stricter shape: one asset reference, many ids.
+ *
+ * Useful for "a sequence of related lines" — barks, intros, multi-step events —
+ * where forcing the designer to repeat the asset per element is noise.
+ */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzDialogueLineList
+{
+	GENERATED_BODY()
+
+	/**
+	 * Asset that owns all entries in this list. Soft so referencing this
+	 * struct doesn't pull the asset into memory until it's needed.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	TSoftObjectPtr<UKzDialogueAsset> Asset;
+
+	/** GUIDs of lines or aliases inside Asset. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	TArray<FGuid> LineIds;
+
+	bool IsValid() const { return !Asset.IsNull() && LineIds.Num() > 0; }
+	int32 Num() const { return LineIds.Num(); }
+
+	/**
+	 * Resolve a single entry by index. Returns false if the index is out of range,
+	 * the asset can't be loaded, or the GUID doesn't match anything in the asset.
+	 */
+	bool TryResolve(int32 Index, FKzDialogueLine& OutLine) const;
+
+	/**
+	 * Resolve every entry. The output mirrors LineIds order; entries that fail to
+	 * resolve are skipped (so the output may be shorter than LineIds.Num()).
+	 * Returns true if at least one entry was resolved.
+	 */
+	bool TryResolveAll(TArray<FKzDialogueLine>& OutLines) const;
+
+	/**
+	 * Convert this list into individual FKzDialogueLineRef instances, each
+	 * sharing this list's Asset. The output mirrors LineIds order one-to-one.
+	 */
+	void GetLineRefs(TArray<FKzDialogueLineRef>& OutRefs) const;
+};
+
+/**
  * Per-channel configuration. Lives in UKzDialogueSettings and is consulted by the
  * subsystem on every Play() call to clamp priorities, decide interruption rules,
  * and (eventually) drive cross-channel ducking.

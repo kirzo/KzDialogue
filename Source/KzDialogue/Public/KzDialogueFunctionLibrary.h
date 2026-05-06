@@ -49,10 +49,42 @@ public:
 	 * Resolve a FKzDialogueLineRef to its concrete line without playing it. Useful
 	 * for previewing or driving custom UI without invoking the dialogue subsystem.
 	 */
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue", meta = (DisplayName = "Try Resolve Dialogue Line Ref"))
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
 	static bool TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);
 
+	/**
+	 * Play a list of dialogue lines (or aliases) sequentially on the given channel. The
+	 * first one starts immediately if bStartImmediately is true; subsequent entries are
+	 * queued behind it on the same channel.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	static UKzDialoguePlayer* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+
+	/**
+	 * Resolve a FKzDialogueLineList into its concrete lines without playing them. The
+	 * output preserves order; entries that fail to resolve are skipped silently.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
+	static bool TryResolveDialogueLineList(const FKzDialogueLineList& List, TArray<FKzDialogueLine>& OutLines);
+
+	/**
+	 * Convert a FKzDialogueLineList into a list of FKzDialogueLineRef. Each output ref
+	 * points at the same asset and one of the list's GUIDs. Useful as an adapter when
+	 * downstream code consumes refs (one-by-one playback, custom UI, gameplay logic
+	 * that picks one entry at random, etc.).
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
+	static void GetDialogueLineRefsFromList(const FKzDialogueLineList& List, TArray<FKzDialogueLineRef>& OutRefs);
+
+	/**
+	 * Returns true when a dialogue player exists for the given channel and is currently
+	 * playing a line. Useful to gate input, branch logic ("don't trigger this barks if
+	 * something is talking on Main"), or trigger animations.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
+	static bool IsDialogueChannelPlaying(const UObject* WorldContextObject, FGameplayTag Channel);
+
 	/** Stop the dialogue on a channel. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static void StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);
 };
