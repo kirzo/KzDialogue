@@ -116,6 +116,7 @@ void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle
 							.ItemName(LOCTEXT("LineItemName", "Line"))
 							.ItemNamePlural(LOCTEXT("LinePlural", "Lines"))
 							.RowCustomizer(LineRowCustomizer)
+							.ListPadding(FMargin(0.0f, 5.0f))
 					]
 			];
 	}
