@@ -91,8 +91,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 		// What we want the executor to do this evaluation.
 		enum class EAction : uint8 { None, FireIfNew, Pause, Resume } Action = EAction::None;
 
-		virtual void Execute(const FMovieSceneContext& InContext, const FMovieSceneEvaluationOperand& InOperand,
-			FPersistentEvaluationData& InPersistentData, IMovieScenePlayer& InPlayer) override
+		virtual void Execute(const FMovieSceneContext& InContext, const FMovieSceneEvaluationOperand& InOperand, FPersistentEvaluationData& InPersistentData, IMovieScenePlayer& InPlayer) override
 		{
 			UObject* PlaybackContextObj = InPlayer.GetPlaybackContext();
 			UWorld* World = PlaybackContextObj ? PlaybackContextObj->GetWorld() : nullptr;
@@ -103,8 +102,11 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 			{
 			case EAction::FireIfNew:
 			{
-				FMovieSceneKzDialogueSectionState* State = InPersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>();
-				if (!State || State->bFired) { return; }
+				// Lazily create the per-section state. Setup() isn't always called
+				// before Execute in the modern Sequencer evaluation flow, so we can't
+				// rely on FindSectionData returning non-null.
+				FMovieSceneKzDialogueSectionState& State = InPersistentData.GetOrAddSectionData<FMovieSceneKzDialogueSectionState>();
+				if (State.bFired) { return; }
 
 				UKzDialogueAsset* AssetPtr = WeakAsset.Get();
 				if (!IsValid(AssetPtr)) { return; }
@@ -119,7 +121,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 				// we still mark as fired so we don't keep retrying every frame the
 				// section is active. The caller can re-trigger with Stop+Play.
 				Sub->PlayLine(LineCopy, Channel);
-				State->bFired = true;
+				State.bFired = true;
 				break;
 			}
 
@@ -157,7 +159,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 	Token.SectionDurationSeconds = SectionDurationSeconds;
 
 	// Read the cached state to detect transitions. We can't write to it from a const
-	// Evaluate, so the actual mutation happens in the token's Execute.
+	// Evaluate, so the actual mutation happens in the StatusUpdateToken's Execute.
 	const FMovieSceneKzDialogueSectionState* State = PersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>();
 	const EMovieScenePlayerStatus::Type LastStatus = State ? State->LastStatus : EMovieScenePlayerStatus::Stopped;
 
@@ -204,10 +206,9 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 		virtual void Execute(const FMovieSceneContext&, const FMovieSceneEvaluationOperand&,
 			FPersistentEvaluationData& InPersistentData, IMovieScenePlayer&) override
 		{
-			if (FMovieSceneKzDialogueSectionState* State = InPersistentData.FindSectionData<FMovieSceneKzDialogueSectionState>())
-			{
-				State->LastStatus = NewStatus;
-			}
+			// Lazily create the state — same reason as in FToken::Execute.
+			FMovieSceneKzDialogueSectionState& State = InPersistentData.GetOrAddSectionData<FMovieSceneKzDialogueSectionState>();
+			State.LastStatus = NewStatus;
 		}
 	};
 	FStatusUpdateToken StatusToken;
