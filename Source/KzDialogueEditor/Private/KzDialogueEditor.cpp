@@ -21,7 +21,20 @@ void FKzDialogueEditorModule::OnStartupModule()
 {
 	FKzDialogueEditorStyle::Initialize();
 
-	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FKzDialogueEditorStyle::BrandColor.ToFColor(true), {INVTEXT("Dialogues")}, GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines), INVTEXT("Line"), MakeShared<FKzDialogueLineRowCustomizer>());
+	TArray<FKzArrayEditorTabConfig> DialogueTabs;
+	DialogueTabs.Add(FKzArrayEditorTabConfig(
+		GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines),
+		INVTEXT("Line"),
+		MakeShared<FKzDialogueLineRowCustomizer>()));
+
+	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(
+		KzAssetCategoryBit,
+		INVTEXT("Dialogue"),
+		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
+		{ INVTEXT("Dialogues") },
+		DialogueTabs);
+
+	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FKzDialogueEditorStyle::BrandColor.ToFColor(true), {INVTEXT("Dialogues")}, DialogueTabs);
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));
