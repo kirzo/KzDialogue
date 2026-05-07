@@ -45,6 +45,7 @@ public:
 
 	SLATE_BEGIN_ARGS(SKzDialogueLinePicker)
 		: _bShowAliases(true)
+		, _bRequireExactSpeakerMatch(false)
 		{
 		}
 		/** The dialogue asset to pull lines from. */
