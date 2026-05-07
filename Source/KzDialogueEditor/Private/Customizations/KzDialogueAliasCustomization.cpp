@@ -28,8 +28,6 @@ void FKzDialogueAliasCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> 
 	StructHandle = StructPropertyHandle;
 	PropertyUtilities = StructCustomizationUtils.GetPropertyUtilities();
 
-	AliasNameHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, AliasName));
-	SpeakerHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, Speaker));
 	LineIdsHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, LineIds));
 
 	HeaderRow
@@ -57,10 +55,23 @@ void FKzDialogueAliasCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> 
 		];
 }
 
-void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> /*StructPropertyHandle*/, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
+void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
 {
-	if (AliasNameHandle.IsValid()) { StructBuilder.AddProperty(AliasNameHandle.ToSharedRef()); }
-	if (SpeakerHandle.IsValid()) { StructBuilder.AddProperty(SpeakerHandle.ToSharedRef()); }
+	// Names of children we render manually below — everything else is added with default UI.
+	static const FName LineIdsName = GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, LineIds);
+
+	uint32 NumChildren = 0;
+	StructPropertyHandle->GetNumChildren(NumChildren);
+	for (uint32 i = 0; i < NumChildren; ++i)
+	{
+		TSharedPtr<IPropertyHandle> ChildHandle = StructPropertyHandle->GetChildHandle(i);
+		if (!ChildHandle.IsValid()) { continue; }
+
+		const FName ChildName = ChildHandle->GetProperty() ? ChildHandle->GetProperty()->GetFName() : NAME_None;
+		if (ChildName == LineIdsName) { continue; }   // rendered below as a SKzPropertyStack
+
+		StructBuilder.AddProperty(ChildHandle.ToSharedRef());
+	}
 
 	if (LineIdsHandle.IsValid())
 	{

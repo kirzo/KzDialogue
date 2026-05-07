@@ -161,6 +161,33 @@ struct KZDIALOGUE_API FKzDialogueLine
 	}
 };
 
+/** Selection policy used to pick a line when an alias is resolved at runtime. */
+UENUM(BlueprintType)
+enum class EKzAliasSelectionMode : uint8
+{
+	/** Uniform random over all lines. May repeat the same line back-to-back. */
+	Random,
+
+	/**
+	 * Uniform random, but never picks the same line twice in a row. With N=2 it
+	 * oscillates strictly. Equivalent to Random when there's only one line.
+	 */
+	RandomNoRepeat,
+
+	/**
+	 * Shuffles all lines, plays each one once in shuffle order, then reshuffles.
+	 * When reshuffling, ensures the first line of the new bag isn't the last line
+	 * of the previous bag (no perceived repeat across bag boundaries).
+	 */
+	ShuffleBag,
+
+	/**
+	 * Plays lines in the order declared in the alias. Loops back to the first
+	 * line after the last one.
+	 */
+	Sequential
+};
+
 /**
  * A randomized group of dialogue lines that share a speaker.
  *
@@ -178,22 +205,26 @@ struct FKzDialogueAlias
 	GENERATED_BODY()
 
 	/** Stable identifier for the alias. Survives renames so external references hold. */
-	UPROPERTY(VisibleAnywhere, Category = "Dialogue|Alias")
+	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
 	FGuid AliasId;
 
 	/** Author-facing identifier, e.g. "Greeting", "Surprise", "Insult". Must be unique
 	 *  within the asset. Used by gameplay code as a stable key. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	FName AliasName;
 
 	/** Speaker constraint: every line referenced by this alias must use this speaker.
 	 *  An empty/invalid speaker tag means the alias is for narration-style lines (no
 	 *  speaker assigned). */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	FKzDialogueSpeaker Speaker;
 
+	/** How the subsystem picks a line each time the alias is resolved. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	EKzAliasSelectionMode SelectionMode = EKzAliasSelectionMode::ShuffleBag;
+
 	/** Lines this alias resolves to. Picking the alias picks one at random. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Alias")
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	TArray<FGuid> LineIds;
 
 	FKzDialogueAlias() = default;

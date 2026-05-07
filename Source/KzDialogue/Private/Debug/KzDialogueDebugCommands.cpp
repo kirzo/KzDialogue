@@ -279,6 +279,38 @@ namespace KzDialogueCmd
 		HandleListChannels(Args);
 		HandleListSpeakers(Args);
 	}
+
+	static void HandleResetAliasStates(const TArray<FString>& /*Args*/)
+	{
+		UKzDialogueSubsystem* Sub = ResolveSubsystem();
+		if (!Sub) { return; }
+
+		Sub->ResetAllAliasStates();
+		LogToConsole(TEXT("KzDialogue: cleared all alias playback states."));
+	}
+
+	static void HandleResetAliasState(const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			LogToConsole(TEXT("Usage: Kz.Dialogue.ResetAliasState <AliasGuid>"));
+			return;
+		}
+
+		UKzDialogueSubsystem* Sub = ResolveSubsystem();
+		if (!Sub) { return; }
+
+		FGuid AliasId;
+		if (!FGuid::Parse(Args[0], AliasId))
+		{
+			LogToConsole(FString::Printf(TEXT("Invalid GUID: %s"), *Args[0]));
+			return;
+		}
+
+		Sub->ResetAliasState(AliasId);
+		LogToConsole(FString::Printf(TEXT("KzDialogue: reset alias state %s."),
+			*AliasId.ToString(EGuidFormats::Digits)));
+	}
 }
 
 // =======================================================================================
@@ -307,6 +339,8 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 	Make(TEXT("Kz.Dialogue.ListChannels"), TEXT("List active channels and their state"), HandleListChannels);
 	Make(TEXT("Kz.Dialogue.ListSpeakers"), TEXT("List speaker components in the active world"), HandleListSpeakers);
 	Make(TEXT("Kz.Dialogue.Status"), TEXT("Dump full dialogue state"), HandleStatus);
+	Make(TEXT("Kz.Dialogue.ResetAliasStates"), TEXT("Reset all cached alias playback states"), HandleResetAliasStates);
+	Make(TEXT("Kz.Dialogue.ResetAliasState"), TEXT("ResetAliasState <AliasGuid> — reset cached state for a single alias"), HandleResetAliasState);
 }
 
 FKzDialogueDebugCommands::~FKzDialogueDebugCommands()

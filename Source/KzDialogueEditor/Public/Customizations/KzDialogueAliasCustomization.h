@@ -32,8 +32,6 @@ public:
 
 private:
 	TSharedPtr<IPropertyHandle> StructHandle;
-	TSharedPtr<IPropertyHandle> AliasNameHandle;
-	TSharedPtr<IPropertyHandle> SpeakerHandle;
 	TSharedPtr<IPropertyHandle> LineIdsHandle;
 	TWeakPtr<class IPropertyUtilities> PropertyUtilities;
 

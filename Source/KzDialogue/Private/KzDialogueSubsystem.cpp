@@ -6,6 +6,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "Settings/KzDialogueSettings.h"
+#include "Algo/RandomShuffle.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
 
@@ -211,8 +212,23 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 {
 	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
 
+	FGuid LineIdToPlay = LineId;
+
+	FKzDialogueAlias Alias;
+	if (Asset->TryGetAliasById(LineId, Alias))
+	{
+		LineIdToPlay = ResolveAliasInternal(Alias);
+		if (!LineIdToPlay.IsValid())
+		{
+			return nullptr;
+		}
+	}
+
 	FKzDialogueLine Line;
-	if (!Asset->TryResolveLineOrAlias(LineId, Line)) { return nullptr; }
+	if (!Asset->TryGetLineById(LineIdToPlay, Line))
+	{
+		return nullptr;
+	}
 
 	return PlayLine(Line, InChannel, Priority, bStartImmediately);
 }
@@ -263,4 +279,113 @@ bool UKzDialogueSubsystem::IsActiveDialogueInterruptible(const UKzDialoguePlayer
 
 	// Unknown provider type: assume interruptible to avoid soft-locks.
 	return true;
+}
+
+void UKzDialogueSubsystem::ResetAliasState(FGuid AliasId)
+{
+	AliasStates.Remove(AliasId);
+}
+
+void UKzDialogueSubsystem::ResetAllAliasStates()
+{
+	AliasStates.Reset();
+}
+
+FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
+{
+	if (Alias.LineIds.Num() == 0) { return FGuid(); }
+	if (Alias.LineIds.Num() == 1) { return Alias.LineIds[0]; }
+
+	// Lazily create the state on first resolve.
+	FAliasPlaybackState& State = AliasStates.FindOrAdd(Alias.AliasId);
+
+	auto PickRandom = [&State](const TArray<FGuid>& Candidates) -> FGuid
+	{
+		const int32 Index = FMath::RandRange(0, Candidates.Num() - 1);
+		State.LastPickedLineId = Candidates[Index];
+		return State.LastPickedLineId;
+	};
+
+	switch (Alias.SelectionMode)
+	{
+		case EKzAliasSelectionMode::Random:
+		{
+			return PickRandom(Alias.LineIds);
+		}
+
+		case EKzAliasSelectionMode::RandomNoRepeat:
+		{
+			if (!State.LastPickedLineId.IsValid())
+			{
+				return PickRandom(Alias.LineIds);
+			}
+
+			TArray<FGuid> Candidates;
+			Candidates.Reserve(Alias.LineIds.Num() - 1);
+			for (const FGuid& Id : Alias.LineIds)
+			{
+				if (Id != State.LastPickedLineId)
+				{
+					Candidates.Add(Id);
+				}
+			}
+			if (Candidates.Num() == 0)
+			{
+				// Edge case: every line equals LastPickedLineId (shouldn't happen with
+				// EnsureLineGuids dedup, but guard anyway).
+				State.LastPickedLineId = Alias.LineIds[0];
+				return State.LastPickedLineId;
+			}
+
+			return PickRandom(Candidates);
+		}
+
+		case EKzAliasSelectionMode::ShuffleBag:
+		{
+			// Rebuild the bag if needed: empty, drained, or alias's LineIds changed
+			// (asset edited mid-session).
+			const bool bBagDrained = State.ShuffleCursor >= State.ShuffleBag.Num();
+			const bool bSourceChanged = State.ShuffleBagSourceIds != Alias.LineIds;
+			const bool bBagNeedsRebuild = State.ShuffleBag.Num() == 0 || bBagDrained || bSourceChanged;
+
+			if (bBagNeedsRebuild)
+			{
+				State.ShuffleBag = Alias.LineIds;
+				State.ShuffleBagSourceIds = Alias.LineIds;
+				State.ShuffleCursor = 0;
+
+				Algo::RandomShuffle(State.ShuffleBag);
+
+				// Avoid back-to-back repeat across bag boundary: if the new bag's first
+				// entry equals the last line we played, swap it with another entry.
+				// With N >= 2 this is always possible.
+				if (State.LastPickedLineId.IsValid() && State.ShuffleBag.Num() >= 2 && State.ShuffleBag[0] == State.LastPickedLineId)
+				{
+					const int32 SwapWith = FMath::RandRange(1, State.ShuffleBag.Num() - 1);
+					State.ShuffleBag.Swap(0, SwapWith);
+				}
+			}
+
+			const FGuid Picked = State.ShuffleBag[State.ShuffleCursor];
+			++State.ShuffleCursor;
+			State.LastPickedLineId = Picked;
+			return Picked;
+		}
+
+		case EKzAliasSelectionMode::Sequential:
+		{
+			// If the alias's LineIds changed, clamp the cursor.
+			if (State.SequentialCursor >= Alias.LineIds.Num())
+			{
+				State.SequentialCursor = 0;
+			}
+
+			const FGuid Picked = Alias.LineIds[State.SequentialCursor];
+			State.SequentialCursor = (State.SequentialCursor + 1) % Alias.LineIds.Num();
+			State.LastPickedLineId = Picked;
+			return Picked;
+		}
+	}
+
+	return FGuid();
 }

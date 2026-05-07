@@ -79,6 +79,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const;
 
+	/**
+	 * Reset the cached playback state of a single alias. Next time the alias is
+	 * resolved, it starts as if it had never been played.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	void ResetAliasState(FGuid AliasId);
+
+	/** Reset cached state for every alias. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	void ResetAllAliasStates();
+
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
@@ -104,4 +115,45 @@ private:
 
 	/** True if the dialogue currently playing on this player allows being interrupted. */
 	bool IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const;
+
+	/**
+	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.
+	 *
+	 * Holds whatever the alias's selection mode needs to remember between resolves
+	 * (last picked line for RandomNoRepeat, shuffle order + cursor for ShuffleBag,
+	 * cursor for Sequential, etc.).
+	 */
+	struct FAliasPlaybackState
+	{
+		/**
+		 * Last line returned.
+		 * Used by RandomNoRepeat and the cross-bag check in ShuffleBag.
+		 * Invalid means "nothing played yet".
+		 */
+		FGuid LastPickedLineId;
+
+		/** ShuffleBag: current bag of LineIds in shuffle order. Drained as lines play. */
+		TArray<FGuid> ShuffleBag;
+
+		/** ShuffleBag: index of the next line to take from the bag. */
+		int32 ShuffleCursor = 0;
+
+		/**
+		 * ShuffleBag: snapshot of the alias's LineIds when the bag was built.
+		 * If the alias's LineIds change (asset edited, hot reload), the bag
+		 * is rebuilt.
+		 */
+		TArray<FGuid> ShuffleBagSourceIds;
+
+		/** Sequential: index of the next line to play. */
+		int32 SequentialCursor = 0;
+	};
+
+	TMap<FGuid /*AliasId*/, FAliasPlaybackState> AliasStates;
+
+	/**
+	 * Resolve an alias to a concrete LineId according to its SelectionMode, updating
+	 * the cached state. Returns an invalid FGuid if the alias has no lines.
+	 */
+	FGuid ResolveAliasInternal(const FKzDialogueAlias& Alias);
 };
