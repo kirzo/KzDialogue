@@ -44,8 +44,8 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnEntryPicked, FKzDialogueAssetReference /*Reference*/, float /*DefaultDuration*/);
 
 	SLATE_BEGIN_ARGS(SKzDialogueLinePicker)
-		: _bShowAliases(true)
-		, _bRequireExactSpeakerMatch(false)
+		: _bRequireExactSpeakerMatch(false)
+		, _bShowAliases(true)
 		{
 		}
 		/** The dialogue asset to pull lines from. */
