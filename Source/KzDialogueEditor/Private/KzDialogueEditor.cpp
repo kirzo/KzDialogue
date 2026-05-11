@@ -44,7 +44,6 @@ void FKzDialogueEditorModule::OnStartupModule()
 		{ INVTEXT("Dialogues") },
 		DialogueTabs);
 
-	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(KzAssetCategoryBit, INVTEXT("Dialogue"), FKzDialogueEditorStyle::BrandColor.ToFColor(true), {INVTEXT("Dialogues")}, DialogueTabs);
 	RegisterPropertyLayout<FKzDialogueAlias, FKzDialogueAliasCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineRef, FKzDialogueLineRefCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineList, FKzDialogueLineListCustomization>();
