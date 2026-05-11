@@ -3,6 +3,8 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 
+#include "KzDialogueAsset.h"
+
 #include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
@@ -266,6 +268,7 @@ void UKzDialoguePlayer::Enter_LineEntering()
 	CurrentLine = Provider->Advance();
 
 	OnLineStarted.Broadcast(this, CurrentLine);
+	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
 
 	if (bStartAudioOnLineEnter)
 	{
@@ -308,6 +311,7 @@ void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
 	OnRequestLineExit.Broadcast(this, CurrentLine);
+	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
 
 	if (!bUsesFadeAnimations)
 	{
@@ -481,4 +485,112 @@ void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 		else { ActiveAudio->Stop(); }
 	}
 	ActiveAudio = nullptr;
+}
+
+// ---------------------------------------------------------------------------------------
+// Specific line bindings
+// ---------------------------------------------------------------------------------------
+
+TSet<FGuid> UKzDialoguePlayer::ResolveLineRefToMatchSet(const FKzDialogueLineRef& LineRef) const
+{
+	TSet<FGuid> Result;
+
+	if (!LineRef.IsValid()) { return Result; }
+
+	UKzDialogueAsset* Asset = LineRef.Asset.LoadSynchronous();
+	if (!Asset) { return Result; }
+
+	// If the GUID is a line, the match set is just that line.
+	if (Asset->IndexOfLine(LineRef.LineId) != INDEX_NONE)
+	{
+		Result.Add(LineRef.LineId);
+		return Result;
+	}
+
+	// Otherwise try as alias and expand to all referenced line ids.
+	FKzDialogueAlias Alias;
+	if (Asset->TryGetAliasById(LineRef.LineId, Alias))
+	{
+		Result.Reserve(Alias.LineIds.Num());
+		for (const FGuid& Id : Alias.LineIds)
+		{
+			Result.Add(Id);
+		}
+	}
+
+	return Result;
+}
+
+FGuid UKzDialoguePlayer::BindOnSpecificLineStarted(const FKzDialogueLineRef& LineRef, const FKzOnDialogueLineSingleEvent& Callback, bool bAutoUnbind)
+{
+	if (!Callback.IsBound()) { return FGuid(); }
+
+	TSet<FGuid> Matches = ResolveLineRefToMatchSet(LineRef);
+	if (Matches.Num() == 0) { return FGuid(); }
+
+	FSpecificLineBinding& Binding = SpecificLineStartedBindings.AddDefaulted_GetRef();
+	Binding.Handle = FGuid::NewGuid();
+	Binding.MatchingLineIds = MoveTemp(Matches);
+	Binding.Callback = Callback;
+	Binding.bAutoUnbind = bAutoUnbind;
+	return Binding.Handle;
+}
+
+FGuid UKzDialoguePlayer::BindOnSpecificLineFinished(const FKzDialogueLineRef& LineRef, const FKzOnDialogueLineSingleEvent& Callback, bool bAutoUnbind)
+{
+	if (!Callback.IsBound()) { return FGuid(); }
+
+	TSet<FGuid> Matches = ResolveLineRefToMatchSet(LineRef);
+	if (Matches.Num() == 0) { return FGuid(); }
+
+	FSpecificLineBinding& Binding = SpecificLineFinishedBindings.AddDefaulted_GetRef();
+	Binding.Handle = FGuid::NewGuid();
+	Binding.MatchingLineIds = MoveTemp(Matches);
+	Binding.Callback = Callback;
+	Binding.bAutoUnbind = bAutoUnbind;
+	return Binding.Handle;
+}
+
+void UKzDialoguePlayer::UnbindSpecificLine(FGuid BindingHandle)
+{
+	if (!BindingHandle.IsValid()) { return; }
+
+	// Same handle can't be in both arrays (each Bind generates a fresh one), but we
+	// don't track which one for simplicity. Removing by predicate is O(n) in both
+	// arrays; binding count is expected to be small (handful per player).
+	auto MatchesHandle = [BindingHandle](const FSpecificLineBinding& Binding) -> bool
+		{
+			return Binding.Handle == BindingHandle;
+		};
+
+	SpecificLineStartedBindings.RemoveAll(MatchesHandle);
+	SpecificLineFinishedBindings.RemoveAll(MatchesHandle);
+}
+
+void UKzDialoguePlayer::DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& Bindings, const FKzDialogueLine& Line)
+{
+	if (Bindings.Num() == 0) { return; }
+
+	// Two-pass to safely handle auto-unbind without mutating during iteration.
+	TArray<FGuid, TInlineAllocator<4>> HandlesToRemove;
+
+	for (const FSpecificLineBinding& Binding : Bindings)
+	{
+		if (!Binding.MatchingLineIds.Contains(Line.LineId)) { continue; }
+
+		Binding.Callback.ExecuteIfBound(this, Line);
+
+		if (Binding.bAutoUnbind)
+		{
+			HandlesToRemove.Add(Binding.Handle);
+		}
+	}
+
+	if (HandlesToRemove.Num() > 0)
+	{
+		Bindings.RemoveAll([&HandlesToRemove](const FSpecificLineBinding& Binding)
+			{
+				return HandlesToRemove.Contains(Binding.Handle);
+			});
+	}
 }

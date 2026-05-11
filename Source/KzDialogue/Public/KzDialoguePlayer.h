@@ -160,6 +160,30 @@ public:
 	void Skip();
 
 	// -------------------------------------------------------------------------------
+	// Specific line bindings
+	// -------------------------------------------------------------------------------
+
+	/**
+	 * Bind a callback that fires only when a specific line starts playing.
+	 * If LineRef points to an alias, fires whenever any of the alias's resolved lines starts.
+	 *
+	 * @param LineRef      The line or alias to listen for.
+	 * @param Callback     Delegate invoked on match.
+	 * @param bAutoUnbind  When true, the binding is removed after the first match.
+	 * @return             A handle to use with UnbindSpecificLine; invalid if the bind failed.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|Specific Line", meta = (AutoCreateRefTerm = "Callback", AdvancedDisplay = "bAutoUnbind"))
+	FGuid BindOnSpecificLineStarted(const FKzDialogueLineRef& LineRef, const FKzOnDialogueLineSingleEvent& Callback, bool bAutoUnbind = true);
+
+	/** Same as BindOnSpecificLineStarted but for OnLineFinished. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|Specific Line", meta = (AutoCreateRefTerm = "Callback", AdvancedDisplay = "bAutoUnbind"))
+	FGuid BindOnSpecificLineFinished(const FKzDialogueLineRef& LineRef, const FKzOnDialogueLineSingleEvent& Callback, bool bAutoUnbind = true);
+
+	/** Cancel a binding made via BindOnSpecificLine*. Safe to call with a stale handle. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|Specific Line")
+	void UnbindSpecificLine(FGuid BindingHandle);
+
+	// -------------------------------------------------------------------------------
 	// View binding helpers
 	// -------------------------------------------------------------------------------
 
@@ -237,4 +261,26 @@ private:
 	float PausedTimeRemaining = 0.0f;
 
 	FTimerHandle LineTimerHandle;
+
+	struct FSpecificLineBinding
+	{
+		FGuid Handle;
+		TSet<FGuid> MatchingLineIds;
+		FKzOnDialogueLineSingleEvent Callback;
+		bool bAutoUnbind = true;
+	};
+
+	TArray<FSpecificLineBinding> SpecificLineStartedBindings;
+	TArray<FSpecificLineBinding> SpecificLineFinishedBindings;
+
+	/**
+	 * Resolve a FKzDialogueLineRef into the set of LineIds it represents.
+	 * - Line GUID: one entry (the GUID itself).
+	 * - Alias GUID: every LineId the alias resolves to.
+	 * Returns an empty set if the ref is invalid or the asset can't load.
+	 */
+	TSet<FGuid> ResolveLineRefToMatchSet(const FKzDialogueLineRef& LineRef) const;
+
+	/** Iterate Bindings, invoke matching callbacks, prune auto-unbind ones. */
+	void DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& Bindings, const FKzDialogueLine& Line);
 };
