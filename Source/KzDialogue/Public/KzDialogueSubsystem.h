@@ -147,6 +147,14 @@ private:
 
 		/** Sequential: index of the next line to play. */
 		int32 SequentialCursor = 0;
+
+		/**
+		 * World time of the last successful resolution. Used to gate
+		 * further resolutions while CooldownSeconds hasn't elapsed.
+		 *
+		 * Negative means "never resolved" — the cooldown check always passes on first use.
+		 */
+		double LastResolvedWorldTime = -1.0;
 	};
 
 	TMap<FGuid /*AliasId*/, FAliasPlaybackState> AliasStates;

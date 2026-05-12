@@ -223,6 +223,18 @@ struct FKzDialogueAlias
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	EKzAliasSelectionMode SelectionMode = EKzAliasSelectionMode::ShuffleBag;
 
+	/**
+	 * Minimum seconds that must elapse between successful resolutions of this alias.
+	 * If the alias is resolved within this window, the resolution is rejected (returns
+	 * an invalid GUID, callers get a null player). Useful for "bark cooldowns" — three
+	 * variations of "ouch!" that shouldn't fire back-to-back even if the gameplay code
+	 * triggers them rapidly.
+	 *
+	 * 0 = no cooldown (default).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (ClampMin = 0, Units = "Seconds"))
+	float CooldownSeconds = 0.0f;
+
 	/** Lines this alias resolves to. Picking the alias picks one at random. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	TArray<FGuid> LineIds;

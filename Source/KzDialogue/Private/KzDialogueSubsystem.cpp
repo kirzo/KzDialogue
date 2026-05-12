@@ -299,25 +299,48 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 	// Lazily create the state on first resolve.
 	FAliasPlaybackState& State = AliasStates.FindOrAdd(Alias.AliasId);
 
-	auto PickRandom = [&State](const TArray<FGuid>& Candidates) -> FGuid
+	// Cooldown gating. Uses world time so pause/dilation are respected naturally.
+	if (Alias.CooldownSeconds > 0.0f && State.LastResolvedWorldTime >= 0.0)
+	{
+		const UWorld* World = GetWorld();
+		if (World)
+		{
+			if (World->TimeSince(State.LastResolvedWorldTime) < Alias.CooldownSeconds)
+			{
+				// Rejected: still in cooldown window.
+				return FGuid();
+			}
+		}
+	}
+
+	auto MarkResolved = [this, &State](const FGuid& Picked) -> FGuid
+	{
+		State.LastPickedLineId = Picked;
+		if (const UWorld* World = GetWorld())
+		{
+			State.LastResolvedWorldTime = World->GetTimeSeconds();
+		}
+		return Picked;
+	};
+
+	auto PickRandom = [](const TArray<FGuid>& Candidates) -> FGuid
 	{
 		const int32 Index = FMath::RandRange(0, Candidates.Num() - 1);
-		State.LastPickedLineId = Candidates[Index];
-		return State.LastPickedLineId;
+		return Candidates[Index];
 	};
 
 	switch (Alias.SelectionMode)
 	{
 		case EKzAliasSelectionMode::Random:
 		{
-			return PickRandom(Alias.LineIds);
+			return MarkResolved(PickRandom(Alias.LineIds));
 		}
 
 		case EKzAliasSelectionMode::RandomNoRepeat:
 		{
 			if (!State.LastPickedLineId.IsValid())
 			{
-				return PickRandom(Alias.LineIds);
+				return MarkResolved(PickRandom(Alias.LineIds));
 			}
 
 			TArray<FGuid> Candidates;
@@ -333,11 +356,10 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 			{
 				// Edge case: every line equals LastPickedLineId (shouldn't happen with
 				// EnsureLineGuids dedup, but guard anyway).
-				State.LastPickedLineId = Alias.LineIds[0];
-				return State.LastPickedLineId;
+				return MarkResolved(Alias.LineIds[0]);
 			}
 
-			return PickRandom(Candidates);
+			return MarkResolved(PickRandom(Candidates));
 		}
 
 		case EKzAliasSelectionMode::ShuffleBag:
@@ -368,8 +390,7 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 
 			const FGuid Picked = State.ShuffleBag[State.ShuffleCursor];
 			++State.ShuffleCursor;
-			State.LastPickedLineId = Picked;
-			return Picked;
+			return MarkResolved(Picked);
 		}
 
 		case EKzAliasSelectionMode::Sequential:
@@ -382,8 +403,7 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 
 			const FGuid Picked = Alias.LineIds[State.SequentialCursor];
 			State.SequentialCursor = (State.SequentialCursor + 1) % Alias.LineIds.Num();
-			State.LastPickedLineId = Picked;
-			return Picked;
+			return MarkResolved(Picked);
 		}
 	}
 
