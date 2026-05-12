@@ -250,7 +250,7 @@ void UKzDialoguePlayer::Enter_Entering()
 	OnRequestDialogueEnter.Broadcast(this);
 
 	// If no view is driving fade animations, skip to the first line immediately.
-	if (!bUsesFadeAnimations)
+	if (!bWaitForViewNotifications)
 	{
 		Enter_LineEntering();
 	}
@@ -277,7 +277,7 @@ void UKzDialoguePlayer::Enter_LineEntering()
 
 	OnRequestLineEnter.Broadcast(this, CurrentLine);
 
-	if (!bUsesFadeAnimations)
+	if (!bWaitForViewNotifications)
 	{
 		Enter_LinePlaying();
 	}
@@ -313,7 +313,7 @@ void UKzDialoguePlayer::Enter_LineExiting()
 	OnRequestLineExit.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
 
-	if (!bUsesFadeAnimations)
+	if (!bWaitForViewNotifications)
 	{
 		NotifyLineExitFinished();
 	}
@@ -325,7 +325,7 @@ void UKzDialoguePlayer::Enter_Exiting()
 	StopLineAudio();
 	OnRequestDialogueExit.Broadcast(this);
 
-	if (!bUsesFadeAnimations)
+	if (!bWaitForViewNotifications)
 	{
 		FinishWithReason(EKzDialogueFinishReason::Completed);
 	}

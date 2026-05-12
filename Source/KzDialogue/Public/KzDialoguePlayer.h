@@ -51,12 +51,12 @@ public:
 	float TimeScale = 1.0f;
 
 	/**
-	 * When true, the player waits for view-driven Notify*Finished calls to advance the fade phases.
-	 * When false, those phases auto-complete (no animation).
-	 * Set by views.
+	 * When true, the player waits for view-driven Notify*Finished calls to advance phases.
+	 * When false, those phases auto-complete (no view is driving presentation).
+	 * Set by views during binding.
 	 */
 	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Player")
-	bool bUsesFadeAnimations = false;
+	bool bWaitForViewNotifications = false;
 
 	/**
 	 * When true, audio is requested at LineEntering (overlapping the fade in).
@@ -189,7 +189,7 @@ public:
 
 	/** Configure whether the player should wait for view animation notifications. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
-	void SetUsesFadeAnimations(bool bInUsesFadeAnimations) { bUsesFadeAnimations = bInUsesFadeAnimations; }
+	void SetWaitForViewNotifications(bool bInWaitForViewNotifications) { bWaitForViewNotifications = bInWaitForViewNotifications; }
 
 	// -------------------------------------------------------------------------------
 	// View notifications (called by views when their animations end)

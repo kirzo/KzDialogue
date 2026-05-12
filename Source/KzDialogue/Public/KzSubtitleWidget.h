@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
 #include "KzSubtitleWidget.generated.h"
 
@@ -11,7 +12,7 @@ class UTextBlock;
 class UWidgetAnimation;
 class UKzDialoguePlayer;
 
-/** Enum to define where the affix will be placed relative to the speaker's name */
+/** Enum to define where the affix will be placed relative to the speaker's name. */
 UENUM(BlueprintType)
 enum class EKzSpeakerAffixPosition : uint8
 {
@@ -19,33 +20,76 @@ enum class EKzSpeakerAffixPosition : uint8
 	Suffix
 };
 
-/** Rule defining an affix to attach to the speaker's name */
+/** Rule defining an affix to attach to the speaker's name. */
 USTRUCT(BlueprintType)
 struct FKzSpeakerAffixRule
 {
 	GENERATED_BODY()
 
-public:
-	/** The text or symbol to add (e.g., ":", "~", "(") */
+	/** The text or symbol to add (e.g., ":", "~", "("). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
 	FString AffixText;
 
-	/** Whether to place it before or after the speaker's name */
+	/** Whether to place it before or after the speaker's name. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
 	EKzSpeakerAffixPosition Position = EKzSpeakerAffixPosition::Suffix;
 
-	/** Automatically inserts a space between the name and the affix */
+	/** Automatically inserts a space between the name and the affix. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
 	bool bAddSpace = false;
 };
 
 /**
- * Reference subtitle view. Binds to a UKzDialoguePlayer and renders its events as
- * fade-in/out widget animations + text updates.
+ * A view bundle for a single dialogue channel. Holds the text widgets and animations
+ * the subtitle widget uses to render lines coming from that channel.
  *
- * This is intentionally a minimal example. Projects should subclass or replace this
- * with their own widget — the whole point of the inversion-of-control design is that
- * the player doesn't care what the view looks like.
+ * The subclass returns one of these per supported channel via GetViewForChannel(),
+ * letting a single widget instance render N channels independently. Any member may
+ * be nullptr; the base class skips the corresponding step gracefully (e.g. no
+ * LineFadeIn => the player's LineEntering phase auto-completes).
+ */
+USTRUCT(BlueprintType)
+struct FKzSubtitleChannelView
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UTextBlock> SpeakerText = nullptr;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UTextBlock> SubtitlesText = nullptr;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UWidgetAnimation> StartFadeIn = nullptr;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UWidgetAnimation> EndFadeOut = nullptr;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UWidgetAnimation> LineFadeIn = nullptr;
+
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UWidgetAnimation> LineFadeOut = nullptr;
+
+	/** True if any animation is set; controls whether the player waits for view notifications. */
+	bool HasAnyAnimation() const
+	{
+		return StartFadeIn || EndFadeOut || LineFadeIn || LineFadeOut;
+	}
+};
+
+/**
+ * Multi-channel subtitle view. Binds to one or more UKzDialoguePlayer instances and
+ * renders their events into per-channel UI bundles supplied by the subclass.
+ *
+ * The subclass is responsible for providing a FKzSubtitleChannelView for every
+ * channel it wants to render via GetViewForChannel(). Channels without a view are
+ * silently ignored.
+ *
+ * Binding:
+ *  - Declarative: set ListenedChannels in the details panel; on construct the widget
+ *    resolves players via the dialogue subsystem.
+ *  - Imperative: call BindPlayer(P) / BindPlayers({P1, P2, ...}) at runtime.
  */
 UCLASS(Abstract)
 class KZDIALOGUE_API UKzSubtitleWidget : public UUserWidget
@@ -53,61 +97,62 @@ class KZDIALOGUE_API UKzSubtitleWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/**
-	 * Bind to a player. The widget will reflect that player's events from now on.
-	 * Pass nullptr to unbind.
-	 */
+	/** Bind a single player. No-op if already bound. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	void BindPlayer(UKzDialoguePlayer* InPlayer);
 
-	/** Currently bound player, if any. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
-	UKzDialoguePlayer* GetBoundPlayer() const { return Player.Get(); }
+	/** Bind multiple players in one call. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void BindPlayers(const TArray<UKzDialoguePlayer*>& InPlayers);
 
-	/** Clears speaker and subtitle text widgets. */
+	/** Unbind a single player. No-op if not bound. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void UnbindPlayer(UKzDialoguePlayer* InPlayer);
+
+	/** Unbind every player currently bound. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void UnbindAllPlayers();
+
+	/** Currently bound players (weak refs, may contain stale entries; see GetBoundPlayers). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
+	void GetBoundPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const;
+
+	/** Clears speaker and subtitle text widgets across every channel view. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	virtual void ClearTextWidgets();
 
 protected:
 	/**
-	 * Optional player to bind immediately upon widget creation.
-	 * Exposed on spawn so you can wire it directly in the CreateWidget node.
+	 * Channels the widget listens to. On construct, the corresponding players are
+	 * resolved via the dialogue subsystem and bound automatically. Leave empty if
+	 * you only want manual binding via BindPlayer.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (ExposeOnSpawn = "true"))
-	TObjectPtr<UKzDialoguePlayer> InitialPlayer = nullptr;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (Categories = "Dialogue.Channel"))
+	TArray<FGameplayTag> ListenedChannels;
 
-	/** Bind these in your derived UMG widget. Speaker is optional; only Subtitles is required. */
-	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> SpeakerText = nullptr;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidget))
-	TObjectPtr<UTextBlock> SubtitlesText = nullptr;
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> StartFadeIn = nullptr;
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> EndFadeOut = nullptr;
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> LineFadeIn = nullptr;
-
-	UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
-	TObjectPtr<UWidgetAnimation> LineFadeOut = nullptr;
-
-	/** Rules applied sequentially to format the speaker's name */
+	/** Rules applied sequentially to format the speaker's name. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
 	TArray<FKzSpeakerAffixRule> SpeakerFormattingRules;
 
-	/** Optional Blueprint hooks. Override in subclass for custom presentation. */
+	/**
+	 * Resolve the view bundle for a channel. Subclass must override this and return
+	 * a populated FKzSubtitleChannelView for every supported channel.
+	 *
+	 * Returning an empty struct (all nullptr) is valid and means "ignore events from
+	 * this channel". The base class won't apply text or play animations for it.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, BlueprintPure, Category = "Dialogue|Subtitles")
+	FKzSubtitleChannelView GetViewForChannel(FGameplayTag Channel) const;
+
+	/** Optional Blueprint hooks. Override for custom per-line presentation. */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Setup Line"))
-	void ReceiveSetupLine(const FKzDialogueLine& Line);
+	void ReceiveSetupLine(FGameplayTag Channel, const FKzDialogueLine& Line);
 
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Show"))
-	void ReceiveShow();
+	void ReceiveShow(FGameplayTag Channel);
 
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Hide"))
-	void ReceiveHide();
+	void ReceiveHide(FGameplayTag Channel);
 
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -120,16 +165,28 @@ protected:
 	UFUNCTION() void HandlePaused(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleResumed(UKzDialoguePlayer* InPlayer);
 
-	void ApplyLineToWidgets(const FKzDialogueLine& Line);
-	void PlayAnim(UWidgetAnimation* Anim);
-
 private:
-	void BindEvents();
-	void UnbindEvents();
+	/** Subscribe handlers to a player's events. */
+	void BindPlayerEvents(UKzDialoguePlayer* InPlayer);
+
+	/** Unsubscribe handlers from a player's events. */
+	void UnbindPlayerEvents(UKzDialoguePlayer* InPlayer);
+
+	/** Resolve players for ListenedChannels via the subsystem. */
+	void BindFromListenedChannels();
+
+	/** Apply line text to the given view's widgets (handling affix rules etc.). */
+	void ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel);
+
+	/** Start an animation and remember which player it belongs to. */
+	void PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePlayer* InPlayer);
+
+	/** Look up the player whose animation just finished. */
+	UKzDialoguePlayer* GetPlayerForAnim(UWidgetAnimation* Anim) const;
 
 	UPROPERTY(Transient)
-	TWeakObjectPtr<UKzDialoguePlayer> Player;
+	TArray<TWeakObjectPtr<UKzDialoguePlayer>> BoundPlayers;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UWidgetAnimation> CurrentAnim = nullptr;
+	/** Active animations -> originating player. Used to dispatch Notify*Finished correctly. */
+	TMap<TWeakObjectPtr<UWidgetAnimation>, TWeakObjectPtr<UKzDialoguePlayer>> ActiveAnimations;
 };

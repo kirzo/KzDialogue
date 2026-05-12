@@ -5,6 +5,8 @@
 #include "Components/TextBlock.h"
 #include "Animation/WidgetAnimation.h"
 #include "KzDialoguePlayer.h"
+#include "KzDialogueSubsystem.h"
+#include "Engine/World.h"
 
 void UKzSubtitleWidget::NativeConstruct()
 {
@@ -12,170 +14,290 @@ void UKzSubtitleWidget::NativeConstruct()
 
 	Super::NativeConstruct();
 
-	if (IsValid(InitialPlayer))
-	{
-		BindPlayer(InitialPlayer);
-		InitialPlayer = nullptr;
-	}
+	BindFromListenedChannels();
 }
 
 void UKzSubtitleWidget::NativeDestruct()
 {
-	UnbindEvents();
+	UnbindAllPlayers();
 	Super::NativeDestruct();
 }
 
+// ---------------------------------------------------------------------------------------
+// Binding
+// ---------------------------------------------------------------------------------------
+
 void UKzSubtitleWidget::BindPlayer(UKzDialoguePlayer* InPlayer)
 {
-	if (Player.Get() == InPlayer) { return; }
+	if (!IsValid(InPlayer)) { return; }
 
-	UnbindEvents();
-	Player = InPlayer;
-
-	if (Player.IsValid())
+	// No-op if already bound.
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Existing : BoundPlayers)
 	{
-		// Tell the player it should wait for our fade animations.
-		Player->SetUsesFadeAnimations(StartFadeIn != nullptr || EndFadeOut != nullptr || LineFadeIn != nullptr || LineFadeOut != nullptr);
-		BindEvents();
+		if (Existing.Get() == InPlayer) { return; }
+	}
 
-		// Fetch the current state of the player just in case we bound late.
-		EKzDialogueState CurrentState = Player->GetState();
+	BoundPlayers.Add(InPlayer);
 
-		if (CurrentState == EKzDialogueState::Entering)
+	// Tell the player whether to wait for our notifications, based on the view's
+	// animation setup. If the view has no animations, the player auto-completes phases.
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	InPlayer->SetWaitForViewNotifications(View.HasAnyAnimation());
+
+	BindPlayerEvents(InPlayer);
+
+	// If we bound late and the player is mid-line, sync the view to its current state.
+	const EKzDialogueState CurrentState = InPlayer->GetState();
+	if (CurrentState == EKzDialogueState::Entering)
+	{
+		ReceiveShow(InPlayer->Channel);
+	}
+	else if (CurrentState == EKzDialogueState::LineEntering ||
+		CurrentState == EKzDialogueState::LinePlaying ||
+		CurrentState == EKzDialogueState::LineExiting ||
+		CurrentState == EKzDialogueState::Paused)
+	{
+		ReceiveShow(InPlayer->Channel);
+		ApplyLineToView(View, InPlayer->GetCurrentLine(), InPlayer->Channel);
+	}
+}
+
+void UKzSubtitleWidget::BindPlayers(const TArray<UKzDialoguePlayer*>& InPlayers)
+{
+	for (UKzDialoguePlayer* Player : InPlayers)
+	{
+		BindPlayer(Player);
+	}
+}
+
+void UKzSubtitleWidget::UnbindPlayer(UKzDialoguePlayer* InPlayer)
+{
+	if (!InPlayer) { return; }
+
+	UnbindPlayerEvents(InPlayer);
+
+	BoundPlayers.RemoveAll([InPlayer](const TWeakObjectPtr<UKzDialoguePlayer>& Weak)
 		{
-			ReceiveShow();
+			return Weak.Get() == InPlayer;
+		});
+}
+
+void UKzSubtitleWidget::UnbindAllPlayers()
+{
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		if (UKzDialoguePlayer* Player = Weak.Get())
+		{
+			UnbindPlayerEvents(Player);
 		}
-		else if (CurrentState == EKzDialogueState::LineEntering ||
-			CurrentState == EKzDialogueState::LinePlaying ||
-			CurrentState == EKzDialogueState::LineExiting ||
-			CurrentState == EKzDialogueState::Paused) // Also handle if we bind while paused
+	}
+	BoundPlayers.Reset();
+	ActiveAnimations.Reset();
+}
+
+void UKzSubtitleWidget::GetBoundPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const
+{
+	OutPlayers.Reset();
+	OutPlayers.Reserve(BoundPlayers.Num());
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		if (UKzDialoguePlayer* Player = Weak.Get())
 		{
-			// The player is already mid-line. Force the UI to show the current line immediately.
-			ReceiveShow();
-			ApplyLineToWidgets(Player->GetCurrentLine());
+			OutPlayers.Add(Player);
 		}
 	}
 }
 
-void UKzSubtitleWidget::ClearTextWidgets()
+void UKzSubtitleWidget::BindFromListenedChannels()
 {
-	if (SpeakerText) { SpeakerText->SetText(FText::GetEmpty()); }
-	if (SubtitlesText) { SubtitlesText->SetText(FText::GetEmpty()); }
+	if (ListenedChannels.Num() == 0) { return; }
+
+	UWorld* World = GetWorld();
+	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+	if (!Subsystem) { return; }
+
+	for (const FGameplayTag& Channel : ListenedChannels)
+	{
+		if (UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Channel))
+		{
+			BindPlayer(Player);
+		}
+	}
 }
 
-void UKzSubtitleWidget::BindEvents()
+void UKzSubtitleWidget::BindPlayerEvents(UKzDialoguePlayer* InPlayer)
 {
-	if (!Player.IsValid()) { return; }
-	Player->OnRequestDialogueEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
-	Player->OnRequestDialogueExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
-	Player->OnRequestLineEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
-	Player->OnRequestLineExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
-	Player->OnPaused.AddDynamic(this, &UKzSubtitleWidget::HandlePaused);
-	Player->OnResumed.AddDynamic(this, &UKzSubtitleWidget::HandleResumed);
+	if (!InPlayer) { return; }
+	InPlayer->OnRequestDialogueEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
+	InPlayer->OnRequestDialogueExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
+	InPlayer->OnRequestLineEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
+	InPlayer->OnRequestLineExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
+	InPlayer->OnPaused.AddDynamic(this, &UKzSubtitleWidget::HandlePaused);
+	InPlayer->OnResumed.AddDynamic(this, &UKzSubtitleWidget::HandleResumed);
 }
 
-void UKzSubtitleWidget::UnbindEvents()
+void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
 {
-	if (!Player.IsValid()) { return; }
-	Player->OnRequestDialogueEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
-	Player->OnRequestDialogueExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
-	Player->OnRequestLineEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
-	Player->OnRequestLineExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
-	Player->OnPaused.RemoveDynamic(this, &UKzSubtitleWidget::HandlePaused);
-	Player->OnResumed.RemoveDynamic(this, &UKzSubtitleWidget::HandleResumed);
+	if (!InPlayer) { return; }
+	InPlayer->OnRequestDialogueEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
+	InPlayer->OnRequestDialogueExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
+	InPlayer->OnRequestLineEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
+	InPlayer->OnRequestLineExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
+	InPlayer->OnPaused.RemoveDynamic(this, &UKzSubtitleWidget::HandlePaused);
+	InPlayer->OnResumed.RemoveDynamic(this, &UKzSubtitleWidget::HandleResumed);
 }
+
+// ---------------------------------------------------------------------------------------
+// Event handlers
+// ---------------------------------------------------------------------------------------
 
 void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 {
-	ReceiveShow();
-	if (StartFadeIn) { PlayAnim(StartFadeIn); }
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	ReceiveShow(InPlayer->Channel);
+	if (View.StartFadeIn) { PlayAnimForPlayer(View.StartFadeIn, InPlayer); }
 	else { InPlayer->NotifyEnterFinished(); }
 }
 
 void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 {
-	if (EndFadeOut) { PlayAnim(EndFadeOut); }
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	if (View.EndFadeOut) { PlayAnimForPlayer(View.EndFadeOut, InPlayer); }
 	else { InPlayer->NotifyExitFinished(); }
-	ReceiveHide();
+	ReceiveHide(InPlayer->Channel);
 }
 
 void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
-	ApplyLineToWidgets(Line);
-	if (LineFadeIn) { PlayAnim(LineFadeIn); }
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	ApplyLineToView(View, Line, InPlayer->Channel);
+	if (View.LineFadeIn) { PlayAnimForPlayer(View.LineFadeIn, InPlayer); }
 	else { InPlayer->NotifyLineEnterFinished(); }
 }
 
 void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
-	if (LineFadeOut) { PlayAnim(LineFadeOut); }
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	if (View.LineFadeOut) { PlayAnimForPlayer(View.LineFadeOut, InPlayer); }
 	else { InPlayer->NotifyLineExitFinished(); }
 }
 
-void UKzSubtitleWidget::HandlePaused(UKzDialoguePlayer* /*InPlayer*/)
+void UKzSubtitleWidget::HandlePaused(UKzDialoguePlayer* InPlayer)
 {
-	if (CurrentAnim) { PauseAnimation(CurrentAnim); }
-}
-
-void UKzSubtitleWidget::HandleResumed(UKzDialoguePlayer* /*InPlayer*/)
-{
-	if (CurrentAnim)
+	// Pause any animation that belongs to this player.
+	for (const auto& Pair : ActiveAnimations)
 	{
-		PlayAnimation(CurrentAnim, GetAnimationCurrentTime(CurrentAnim), 1, EUMGSequencePlayMode::Forward);
+		if (Pair.Value.Get() == InPlayer)
+		{
+			if (UWidgetAnimation* Anim = Pair.Key.Get())
+			{
+				PauseAnimation(Anim);
+			}
+		}
 	}
 }
 
-void UKzSubtitleWidget::ApplyLineToWidgets(const FKzDialogueLine& Line)
+void UKzSubtitleWidget::HandleResumed(UKzDialoguePlayer* InPlayer)
 {
-	if (SpeakerText)
+	for (const auto& Pair : ActiveAnimations)
+	{
+		if (Pair.Value.Get() == InPlayer)
+		{
+			if (UWidgetAnimation* Anim = Pair.Key.Get())
+			{
+				PlayAnimation(Anim, GetAnimationCurrentTime(Anim), 1, EUMGSequencePlayMode::Forward);
+			}
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------
+// View application
+// ---------------------------------------------------------------------------------------
+
+void UKzSubtitleWidget::ClearTextWidgets()
+{
+	// We don't know which channels exist statically — clear whatever's bound right now.
+	// Subclasses with channels that aren't bound yet should clear their own widgets if needed.
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		UKzDialoguePlayer* Player = Weak.Get();
+		if (!Player) { continue; }
+		const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
+		if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
+		if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+	}
+}
+
+void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel)
+{
+	if (View.SpeakerText)
 	{
 		FString FinalSpeakerName = Line.Speaker.GetDisplayLabel().ToString();
 
-		// Process each formatting rule in order
 		for (const FKzSpeakerAffixRule& Rule : SpeakerFormattingRules)
 		{
-			FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
+			const FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
 			if (Rule.Position == EKzSpeakerAffixPosition::Prefix)
 			{
-				// Example: "~" + " " + "Bob" -> "~ Bob"
 				FinalSpeakerName = Rule.AffixText + SpaceStr + FinalSpeakerName;
 			}
 			else if (Rule.Position == EKzSpeakerAffixPosition::Suffix)
 			{
-				// Example: "Bob" + "" + ":" -> "Bob:"
 				FinalSpeakerName = FinalSpeakerName + SpaceStr + Rule.AffixText;
 			}
 		}
 
-		SpeakerText->SetText(FText::FromString(FinalSpeakerName));
+		View.SpeakerText->SetText(FText::FromString(FinalSpeakerName));
 	}
-	if (SubtitlesText)
+
+	if (View.SubtitlesText)
 	{
-		SubtitlesText->SetText(Line.Text);
+		View.SubtitlesText->SetText(Line.Text);
 	}
-	ReceiveSetupLine(Line);
+
+	ReceiveSetupLine(Channel, Line);
 }
 
-void UKzSubtitleWidget::PlayAnim(UWidgetAnimation* Anim)
+// ---------------------------------------------------------------------------------------
+// Animation tracking
+// ---------------------------------------------------------------------------------------
+
+void UKzSubtitleWidget::PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePlayer* InPlayer)
 {
-	if (!Anim) { return; }
-	CurrentAnim = Anim;
+	if (!Anim || !InPlayer) { return; }
+
+	// If this animation was already in flight (e.g. hot-swap within the same channel),
+	// the old entry is overwritten — UMG StopAnimation isn't strictly needed since
+	// PlayAnimation restarts from the beginning, but the map must reflect the new owner.
+	ActiveAnimations.Add(Anim, InPlayer);
 	PlayAnimation(Anim);
+}
+
+UKzDialoguePlayer* UKzSubtitleWidget::GetPlayerForAnim(UWidgetAnimation* Anim) const
+{
+	if (!Anim) { return nullptr; }
+	if (const TWeakObjectPtr<UKzDialoguePlayer>* Found = ActiveAnimations.Find(Anim))
+	{
+		return Found->Get();
+	}
+	return nullptr;
 }
 
 void UKzSubtitleWidget::OnAnimationFinished_Implementation(const UWidgetAnimation* Animation)
 {
 	Super::OnAnimationFinished_Implementation(Animation);
 
-	if (!Player.IsValid()) { return; }
-
-	UKzDialoguePlayer* P = Player.Get();
 	UWidgetAnimation* Finished = const_cast<UWidgetAnimation*>(Animation);
+	UKzDialoguePlayer* Player = GetPlayerForAnim(Finished);
+	if (!Player) { return; }
 
-	if (Finished == StartFadeIn) { P->NotifyEnterFinished(); }
-	else if (Finished == EndFadeOut) { P->NotifyExitFinished(); }
-	else if (Finished == LineFadeIn) { P->NotifyLineEnterFinished(); }
-	else if (Finished == LineFadeOut) { P->NotifyLineExitFinished(); }
+	// Notify the right phase based on which slot the animation occupies in the player's view.
+	const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
+	if (Finished == View.StartFadeIn) { Player->NotifyEnterFinished(); }
+	else if (Finished == View.EndFadeOut) { Player->NotifyExitFinished(); }
+	else if (Finished == View.LineFadeIn) { Player->NotifyLineEnterFinished(); }
+	else if (Finished == View.LineFadeOut) { Player->NotifyLineExitFinished(); }
 
-	if (Finished == CurrentAnim) { CurrentAnim = nullptr; }
+	ActiveAnimations.Remove(Finished);
 }
