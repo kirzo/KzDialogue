@@ -18,6 +18,10 @@ class KZDIALOGUE_API UKzDialogueFunctionLibrary : public UBlueprintFunctionLibra
 	GENERATED_BODY()
 
 public:
+	/** Returns true if the speaker is meaningfully set (has either an override name or a valid tag). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (DisplayName = "Is Valid", CompactNodeTitle = "IsValid"))
+	static bool IsDialogueSpeakerValid(const FKzDialogueSpeaker& Speaker);
+
 	/**
 	 * Retrieves the dialogue player for a specific channel.
 	 * @param bCreateIfNotFound If true, creates a new player if one is not currently active for the channel.

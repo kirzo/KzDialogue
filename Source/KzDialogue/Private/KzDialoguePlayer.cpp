@@ -2,7 +2,7 @@
 
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
-
+#include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
 
 #include "Sound/SoundWave.h"
@@ -26,6 +26,7 @@ UWorld* UKzDialoguePlayer::GetWorld() const
 void UKzDialoguePlayer::BeginDestroy()
 {
 	StopLineAudio(0.0f);
+	StopReleasedAudios(0.0f);
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(LineTimerHandle);
@@ -161,6 +162,7 @@ void UKzDialoguePlayer::Abort()
 		World->GetTimerManager().ClearTimer(LineTimerHandle);
 	}
 	StopLineAudio(0.0f);
+	StopReleasedAudios(0.0f);
 
 	FinishWithReason(EKzDialogueFinishReason::Aborted);
 }
@@ -177,6 +179,7 @@ void UKzDialoguePlayer::Interrupt()
 		World->GetTimerManager().ClearTimer(LineTimerHandle);
 	}
 	StopLineAudio(0.1f);
+	StopReleasedAudios(0.1f);
 
 	FinishWithReason(EKzDialogueFinishReason::Interrupted);
 }
@@ -226,7 +229,6 @@ void UKzDialoguePlayer::NotifyLineExitFinished()
 	if (State == EKzDialogueState::LineExiting)
 	{
 		OnLineFinished.Broadcast(this, CurrentLine);
-		StopLineAudio();
 
 		// Decide whether to play another line or wrap up.
 		if (IsValid(Provider) && Provider->HasNext())
@@ -265,7 +267,12 @@ void UKzDialoguePlayer::Enter_LineEntering()
 	}
 
 	State = EKzDialogueState::LineEntering;
+
+	const FKzDialogueLine PreviousLine = CurrentLine;
 	CurrentLine = Provider->Advance();
+
+	// Decide what to do with the previous line's audio now that we know the incoming one.
+	ResolveOutgoingAudio(PreviousLine, &CurrentLine);
 
 	OnLineStarted.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
@@ -322,7 +329,7 @@ void UKzDialoguePlayer::Enter_LineExiting()
 void UKzDialoguePlayer::Enter_Exiting()
 {
 	State = EKzDialogueState::Exiting;
-	StopLineAudio();
+	ResolveOutgoingAudio(CurrentLine, nullptr);
 	OnRequestDialogueExit.Broadcast(this);
 
 	if (!bWaitForViewNotifications)
@@ -362,6 +369,9 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 
 float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 {
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	const float Fallback = Settings ? Settings->DefaultDuration : 2.5f;
+
 	float Duration;
 	if (Line.Duration > UE_KINDA_SMALL_NUMBER)
 	{
@@ -370,11 +380,11 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 	else if (USoundBase* Sound = Line.Audio.Get())
 	{
 		const float SoundDuration = Sound->GetDuration();
-		Duration = (SoundDuration > UE_KINDA_SMALL_NUMBER) ? SoundDuration : DefaultDuration;
+		Duration = (SoundDuration > UE_KINDA_SMALL_NUMBER) ? SoundDuration : Fallback;
 	}
 	else
 	{
-		Duration = DefaultDuration;
+		Duration = Fallback;
 	}
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
@@ -384,8 +394,6 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 
 void UKzDialoguePlayer::StartLineAudio()
 {
-	StopLineAudio(0.05f);
-
 	USoundBase* Sound = CurrentLine.Audio.IsNull() ? nullptr : CurrentLine.Audio.LoadSynchronous();
 	if (!Sound)
 	{
@@ -485,6 +493,77 @@ void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 		else { ActiveAudio->Stop(); }
 	}
 	ActiveAudio = nullptr;
+}
+
+EKzLineAudioInterruptionPolicy UKzDialoguePlayer::ResolveAudioPolicy(const FKzDialogueLine& Line) const
+{
+	if (Line.AudioInterruptionPolicy != EKzLineAudioInterruptionPolicy::Inherit)
+	{
+		return Line.AudioInterruptionPolicy;
+	}
+
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	if (!Settings) { return EKzLineAudioInterruptionPolicy::Stop; }
+
+	if (const FKzDialogueChannelDefinition* ChannelDef = Settings->FindChannel(Channel))
+	{
+		if (ChannelDef->DefaultAudioInterruptionPolicy != EKzLineAudioInterruptionPolicy::Inherit)
+		{
+			return ChannelDef->DefaultAudioInterruptionPolicy;
+		}
+	}
+
+	return Settings->DefaultAudioInterruptionPolicy != EKzLineAudioInterruptionPolicy::Inherit
+		? Settings->DefaultAudioInterruptionPolicy
+		: EKzLineAudioInterruptionPolicy::Stop;
+}
+
+void UKzDialoguePlayer::ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine, const FKzDialogueLine* IncomingLine)
+{
+	if (!IsValid(ActiveAudio)) { return; }
+
+	const EKzLineAudioInterruptionPolicy Policy = ResolveAudioPolicy(OutgoingLine);
+
+	bool bStop = true;
+	switch (Policy)
+	{
+		case EKzLineAudioInterruptionPolicy::Continue:
+			bStop = false;
+			break;
+		case EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker:
+			bStop = !IncomingLine || IncomingLine->Speaker.SpeakerTag == OutgoingLine.Speaker.SpeakerTag;
+			break;
+		case EKzLineAudioInterruptionPolicy::Stop:
+		default:
+			break;
+	}
+
+	if (bStop)
+	{
+		StopLineAudio();
+	}
+	else
+	{
+		// Release: stop tracking ActiveAudio but keep a weak
+		// ref so Abort/Interrupt can still hard-stop it.
+		// The UAudioComponent has bAutoDestroy = true, so it
+		// self-cleans when the sound finishes.
+		ReleasedAudios.Add(ActiveAudio);
+		ActiveAudio = nullptr;
+	}
+}
+
+void UKzDialoguePlayer::StopReleasedAudios(float FadeTime)
+{
+	for (TWeakObjectPtr<UAudioComponent>& Weak : ReleasedAudios)
+	{
+		if (UAudioComponent* Audio = Weak.Get())
+		{
+			if (FadeTime > 0.0f) { Audio->FadeOut(FadeTime, 0.0f); }
+			else { Audio->Stop(); }
+		}
+	}
+	ReleasedAudios.Reset();
 }
 
 // ---------------------------------------------------------------------------------------

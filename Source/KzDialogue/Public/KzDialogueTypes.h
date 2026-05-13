@@ -59,11 +59,33 @@ struct KZDIALOGUE_API FKzDialogueSpeaker
 
 		if (SpeakerTag.IsValid())
 		{
-			return FText::FromName(SpeakerTag.GetTagLeafName());
+			const FString LeafName = SpeakerTag.GetTagLeafName().ToString();
+			return FText::FromString(FName::NameToDisplayString(LeafName, false));
 		}
 
 		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
 	}
+};
+
+/**
+ * Policy for what happens to a line's audio when the player transitions
+ * to the next line.
+ * Resolves in cascade: line override -> channel default -> player default.
+ */
+UENUM(BlueprintType)
+enum class EKzLineAudioInterruptionPolicy : uint8
+{
+	/** Use the value from the next layer up. Only valid as an override. */
+	Inherit,
+
+	/** Stop the audio when the line transitions away. */
+	Stop,
+
+	/** Let the audio finish if the incoming line has a different speaker; stop otherwise. */
+	ContinueIfDifferentSpeaker,
+
+	/** Always let the audio finish; subsequent lines' audios overlap. */
+	Continue
 };
 
 /** A single dialogue line. The smallest authorable unit in the system. */
@@ -102,6 +124,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** When true and Audio is set, the audio is spawned 2D regardless of speaker location. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	bool bPlayAudio2D = false;
+
+	/** Policy applied to this line's audio when the player transitions to the next line. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	EKzLineAudioInterruptionPolicy AudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
 
 	/** Free-form tags (mood, intent, channel hint, etc.). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
@@ -421,6 +447,10 @@ struct FKzDialogueChannelDefinition
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	bool bAllowInterruption = true;
+
+	/** Default audio interruption policy for lines on this channel. Lines may override per-line. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
 
 	/**
 	 * When this channel is active, other channels' audio is reduced by DuckedVolume.

@@ -39,10 +39,6 @@ public:
 	// Configuration
 	// -------------------------------------------------------------------------------
 
-	/** Fallback line duration when neither the line nor its audio defines one. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Player", meta = (ClampMin = 0.1))
-	float DefaultDuration = 2.5f;
-
 	/**
 	 * Multiplies all line durations and audio fades. 1.0 = normal speed. Useful for
 	 * console-driven debugging (Kz.Dialogue.SetSpeed) and for fast-forward features.
@@ -239,6 +235,9 @@ private:
 	void StartLineAudio();
 	void StopLineAudio(float FadeTime = 0.1f);
 	float ResolveLineDuration(const FKzDialogueLine& Line) const;
+	EKzLineAudioInterruptionPolicy ResolveAudioPolicy(const FKzDialogueLine& Line) const;
+	void ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine, const FKzDialogueLine* IncomingLine);
+	void StopReleasedAudios(float FadeTime = 0.1f);
 	void HandleLineTimerElapsed();
 	void FinishWithReason(EKzDialogueFinishReason Reason);
 
@@ -247,6 +246,12 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> ActiveAudio = nullptr;
+
+	/**
+	 * Audio components from previous lines that were released to play past their line transition.
+	 * Pruned lazily; stopped on Abort/Interrupt.
+	 */
+	TArray<TWeakObjectPtr<UAudioComponent>> ReleasedAudios;
 
 	UPROPERTY(Transient)
 	FKzDialogueLine CurrentLine;
