@@ -13,6 +13,11 @@ static UKzDialogueSubsystem* GetDialogueSubsystem(const UObject* WorldContextObj
 	return World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
 }
 
+bool UKzDialogueFunctionLibrary::IsDialogueSpeakerValid(const FKzDialogueSpeaker& Speaker)
+{
+	return Speaker.IsValid();
+}
+
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* WorldContextObject, FGameplayTag InChannel, bool bCreateIfNotFound)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);

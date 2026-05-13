@@ -59,7 +59,8 @@ struct KZDIALOGUE_API FKzDialogueSpeaker
 
 		if (SpeakerTag.IsValid())
 		{
-			return FText::FromName(SpeakerTag.GetTagLeafName());
+			const FString LeafName = SpeakerTag.GetTagLeafName().ToString();
+			return FText::FromString(FName::NameToDisplayString(LeafName, false));
 		}
 
 		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
