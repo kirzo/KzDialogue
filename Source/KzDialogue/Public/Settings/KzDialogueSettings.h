@@ -34,9 +34,16 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
-	/** Fallback line duration applied when neither the line nor its audio define one. */
-	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ClampMin = 0.1))
+	/** Fallback line duration when neither the line nor its audio defines one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "General", meta = (ClampMin = 0.1))
 	float DefaultDuration = 2.5f;
+
+	/**
+	 * Default policy for what happens to a line's audio when the player transitions to the next line.
+	 * Lines and channels may override.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category = "General")
+	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker;
 
 	/**
 	 * Per-channel configuration. Channels not listed here are still accepted at runtime
