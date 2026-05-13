@@ -21,6 +21,10 @@ class KZDIALOGUE_API UKzDialogueAsset : public UPrimaryDataAsset
 public:
 	UKzDialogueAsset();
 
+	/** Stable identifier used as the localization namespace suffix for this asset's FTexts. Generated once on creation and preserved across renames. */
+	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
+	FGuid AssetId;
+
 	/**
 	 * Logical identifier for the dialogue.
 	 * Optional, useful for analytics or to reference dialogues by tag from gameplay.
@@ -91,8 +95,13 @@ public:
 	virtual void PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent) override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostLoad() override;
+	virtual void PostInitProperties() override;
 
-	/** Editor helpers. Used by the custom asset editor. */
-	void EnsureLineGuids();
+private:
+	/** Editor-only invariant pass: ensures unique GUIDs, anchors FText keys, and refreshes source text hashes. Idempotent. */
+	void RefreshLineMetadata();
+
+	/** Re-anchor every FText in the asset to its stable, GUID-derived (Namespace, Key). Idempotent. */
+	void RebindFTextKeys();
 #endif
 };

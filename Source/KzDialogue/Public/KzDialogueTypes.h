@@ -115,6 +115,14 @@ struct KZDIALOGUE_API FKzDialogueLine
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	FInstancedPropertyBag AudioParams;
 
+	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */
+	UPROPERTY()
+	uint32 SourceTextHash = 0;
+
+	/** CRC32 of Speaker.DisplayNameOverride's source string. Same role as SourceTextHash for the speaker override. */
+	UPROPERTY()
+	uint32 SourceSpeakerHash = 0;
+
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
 	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }

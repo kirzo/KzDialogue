@@ -1,8 +1,25 @@
 // Copyright 2026 kirzo
 
 #include "KzDialogueAsset.h"
+#include "Misc/Crc.h"
+#include "Internationalization/Text.h"
 
 UE_DISABLE_OPTIMIZATION
+
+#if WITH_EDITOR
+namespace
+{
+	uint32 ComputeSourceHash(const FText& Text)
+	{
+		// GetSourceString returns the authored string,
+		// ignoring the active culture's translation.
+		// Text.ToString() would hash the translation,
+		// which defeats the whole point of drift detection.
+		const FString* Source = FTextInspector::GetSourceString(Text);
+		return Source ? FCrc::StrCrc32(**Source) : 0;
+	}
+}
+#endif
 
 UKzDialogueAsset::UKzDialogueAsset()
 {
@@ -95,7 +112,7 @@ bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& O
 	// Try lines first (cheaper than alias resolution which loops twice).
 	if (TryGetLineById(Id, OutLine)) { return true; }
 
-	// Fall back to alias resolution. EnsureLineGuids guarantees Lines and Aliases
+	// Fall back to alias resolution. RefreshLineMetadata guarantees Lines and Aliases
 	// don't share GUIDs, so a hit here is unambiguous.
 	return TryResolveAlias(Id, OutLine);
 }
@@ -118,38 +135,77 @@ FPrimaryAssetId UKzDialogueAsset::GetPrimaryAssetId() const
 void UKzDialogueAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	EnsureLineGuids();
+	RefreshLineMetadata();
 }
 
 void UKzDialogueAsset::PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeChainProperty(PropertyChangedEvent);
-	EnsureLineGuids();
+	RefreshLineMetadata();
 }
 
 void UKzDialogueAsset::PostDuplicate(bool bDuplicateForPIE)
 {
 	Super::PostDuplicate(bDuplicateForPIE);
-	if (!bDuplicateForPIE)
+	if (bDuplicateForPIE) return;
+
+	AssetId = FGuid::NewGuid();
+
+	// Force regeneration after duplication so duplicated lines don't share GUIDs
+	// with the originals (which would break Sequencer references in copies).
+	for (FKzDialogueLine& Line : Lines)
 	{
-		// Force regeneration after duplication so duplicated lines don't share GUIDs
-		// with the originals (which would break Sequencer references in copies).
-		for (FKzDialogueLine& Line : Lines)
-		{
-			Line.LineId = FGuid::NewGuid();
-		}
+		Line.LineId = FGuid::NewGuid();
 	}
+
+	for (FKzDialogueAlias& Alias : Aliases)
+	{
+		Alias.AliasId = FGuid::NewGuid();
+	}
+
+	// Re-anchor FText keys to the freshly generated GUIDs.
+	RefreshLineMetadata();
 }
 
 void UKzDialogueAsset::PostLoad()
 {
 	Super::PostLoad();
-	EnsureLineGuids();
+
+	// Migration: assets saved before AssetId existed get one now.
+	if (!AssetId.IsValid())
+	{
+		AssetId = FGuid::NewGuid();
+		MarkPackageDirty();
+	}
+
+	RefreshLineMetadata();
 }
 
-void UKzDialogueAsset::EnsureLineGuids()
+void UKzDialogueAsset::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	// Only generate for freshly-created instances, not for the CDO or for objects
+	// currently being loaded (PostLoad handles the migration path).
+	if (!HasAnyFlags(RF_ClassDefaultObject | RF_NeedLoad | RF_NeedPostLoad))
+	{
+		if (!AssetId.IsValid())
+		{
+			AssetId = FGuid::NewGuid();
+		}
+	}
+}
+
+void UKzDialogueAsset::RefreshLineMetadata()
 {
 	bool bDirty = false;
+
+	// AssetId safety net (PostInitProperties/PostLoad usually cover this).
+	if (!AssetId.IsValid())
+	{
+		AssetId = FGuid::NewGuid();
+		bDirty = true;
+	}
 
 	// Lines
 	{
@@ -181,9 +237,48 @@ void UKzDialogueAsset::EnsureLineGuids()
 		}
 	}
 
+	// Re-anchor every FText to its stable (Namespace, Key).
+	RebindFTextKeys();
+
+	// Refresh source text hashes. Compared on import to flag stale translations
+	// for review when the authored text drifts.
+	for (FKzDialogueLine& Line : Lines)
+	{
+		const uint32 NewTextHash = ComputeSourceHash(Line.Text);
+		if (NewTextHash != Line.SourceTextHash)
+		{
+			Line.SourceTextHash = NewTextHash;
+			bDirty = true;
+		}
+
+		const uint32 NewSpeakerHash = ComputeSourceHash(Line.Speaker.DisplayNameOverride);
+		if (NewSpeakerHash != Line.SourceSpeakerHash)
+		{
+			Line.SourceSpeakerHash = NewSpeakerHash;
+			bDirty = true;
+		}
+	}
+
 	if (bDirty)
 	{
 		MarkPackageDirty();
+	}
+}
+
+void UKzDialogueAsset::RebindFTextKeys()
+{
+	if (!AssetId.IsValid()) { return; }
+
+	const FString Namespace = FString::Printf(TEXT("KzDialogue.%s"), *AssetId.ToString(EGuidFormats::Digits));
+
+	for (FKzDialogueLine& Line : Lines)
+	{
+		if (!Line.LineId.IsValid()) { continue; }
+
+		const FString LineGuid = Line.LineId.ToString(EGuidFormats::Digits);
+
+		Line.Text = FText::ChangeKey(Namespace, LineGuid + TEXT("-Text"), Line.Text);
+		Line.Speaker.DisplayNameOverride = FText::ChangeKey(Namespace, LineGuid + TEXT("-Speaker"), Line.Speaker.DisplayNameOverride);
 	}
 }
 
