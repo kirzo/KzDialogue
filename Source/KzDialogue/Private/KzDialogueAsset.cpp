@@ -2,8 +2,6 @@
 
 #include "KzDialogueAsset.h"
 
-UE_DISABLE_OPTIMIZATION
-
 UKzDialogueAsset::UKzDialogueAsset()
 {
 }
@@ -188,5 +186,3 @@ void UKzDialogueAsset::EnsureLineGuids()
 }
 
 #endif
-
-UE_ENABLE_OPTIMIZATION
