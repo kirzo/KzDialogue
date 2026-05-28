@@ -151,6 +151,7 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Show"))
 	void ReceiveShow(FGameplayTag Channel);
 
+	/** Called when the dialogue hides on a channel. May fire without a preceding EndFadeOut on hard cancellations (Abort / Interrupt). */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Hide"))
 	void ReceiveHide(FGameplayTag Channel);
 
@@ -164,6 +165,7 @@ protected:
 	UFUNCTION() void HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line);
 	UFUNCTION() void HandlePaused(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleResumed(UKzDialoguePlayer* InPlayer);
+	UFUNCTION() void HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzDialogueFinishReason Reason);
 
 private:
 	/** Subscribe handlers to a player's events. */

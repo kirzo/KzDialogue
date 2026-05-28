@@ -91,4 +91,16 @@ public:
 	/** Stop the dialogue on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static void StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);
+
+	/** Stop all dialogues. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
+	static void StopAllDialogues(const UObject* WorldContextObject);
+
+	/** Interrupts the dialogue on a channel. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
+	static void InterruptDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);
+
+	/** Interrupt all dialogues. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
+	static void InterruptAllDialogues(const UObject* WorldContextObject);
 };

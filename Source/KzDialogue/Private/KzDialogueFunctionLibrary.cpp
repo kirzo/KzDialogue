@@ -116,3 +116,27 @@ void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContext
 		Sub->StopChannel(Channel);
 	}
 }
+
+void UKzDialogueFunctionLibrary::StopAllDialogues(const UObject* WorldContextObject)
+{
+	if (UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject))
+	{
+		Sub->StopAll();
+	}
+}
+
+void UKzDialogueFunctionLibrary::InterruptDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)
+{
+	if (UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject))
+	{
+		Sub->InterruptChannel(Channel);
+	}
+}
+
+void UKzDialogueFunctionLibrary::InterruptAllDialogues(const UObject* WorldContextObject)
+{
+	if (UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject))
+	{
+		Sub->InterruptAll();
+	}
+}
