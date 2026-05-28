@@ -249,6 +249,22 @@ void UKzDialogueSubsystem::StopAll()
 	}
 }
 
+void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
+{
+	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))
+	{
+		Player->Interrupt();
+	}
+}
+
+void UKzDialogueSubsystem::InterruptAll()
+{
+	for (auto& Pair : Players)
+	{
+		if (IsValid(Pair.Value)) { Pair.Value->Interrupt(); }
+	}
+}
+
 void UKzDialogueSubsystem::GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const
 {
 	OutPlayers.Reset();

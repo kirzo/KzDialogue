@@ -73,6 +73,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void StopAll();
 
+	/** Interrupt the dialogue on a channel (hard-stop). */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	void InterruptChannel(FGameplayTag InChannel);
+
+	/** Interrupt all channels. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
+	void InterruptAll();
+
 	/**
 	 * Fill OutPlayers with every player currently held by the subsystem.
 	 * Order is not guaranteed. Useful for debug commands and overlays. */

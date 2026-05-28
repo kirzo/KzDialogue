@@ -134,6 +134,7 @@ void UKzSubtitleWidget::BindPlayerEvents(UKzDialoguePlayer* InPlayer)
 	InPlayer->OnRequestLineExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
 	InPlayer->OnPaused.AddDynamic(this, &UKzSubtitleWidget::HandlePaused);
 	InPlayer->OnResumed.AddDynamic(this, &UKzSubtitleWidget::HandleResumed);
+	InPlayer->OnDialogueFinished.AddDynamic(this, &UKzSubtitleWidget::HandleDialogueFinished);
 }
 
 void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
@@ -145,6 +146,7 @@ void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
 	InPlayer->OnRequestLineExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
 	InPlayer->OnPaused.RemoveDynamic(this, &UKzSubtitleWidget::HandlePaused);
 	InPlayer->OnResumed.RemoveDynamic(this, &UKzSubtitleWidget::HandleResumed);
+	InPlayer->OnDialogueFinished.RemoveDynamic(this, &UKzSubtitleWidget::HandleDialogueFinished);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -209,6 +211,34 @@ void UKzSubtitleWidget::HandleResumed(UKzDialoguePlayer* InPlayer)
 			}
 		}
 	}
+}
+
+void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzDialogueFinishReason Reason)
+{
+	// Only react here to hard cancellations (Abort / Interrupt).
+	if (Reason == EKzDialogueFinishReason::Completed || !IsValid(InPlayer))
+	{
+		return;
+	}
+
+	// Stop any in-flight animatios.
+	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
+	{
+		if (It->Value.Get() != InPlayer) { continue; }
+		if (UWidgetAnimation* Anim = It->Key.Get())
+		{
+			StopAnimation(Anim);
+		}
+		It.RemoveCurrent();
+	}
+
+	// Snap the channel to a clean visual state without playing exit animations: a hard
+	// cancel is meant to be immediate. ReceiveHide may be called here without a prior
+	// EndFadeOut — subclasses that customize hide should account for that.
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
+	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+	ReceiveHide(InPlayer->Channel);
 }
 
 // ---------------------------------------------------------------------------------------
