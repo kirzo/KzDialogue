@@ -650,26 +650,36 @@ void UKzDialoguePlayer::DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& 
 {
 	if (Bindings.Num() == 0) { return; }
 
-	// Two-pass to safely handle auto-unbind without mutating during iteration.
-	TArray<FGuid, TInlineAllocator<4>> HandlesToRemove;
+	// A callback may bind or unbind specific-line bindings.
+	// Snapshot the matching bindings before invoking any callback.
+	struct FPendingDispatch
+	{
+		FKzOnDialogueLineSingleEvent Callback;
+		FGuid Handle;
+		bool bAutoUnbind;
+	};
 
+	TArray<FPendingDispatch, TInlineAllocator<4>> Pending;
 	for (const FSpecificLineBinding& Binding : Bindings)
 	{
-		if (!Binding.MatchingLineIds.Contains(Line.LineId)) { continue; }
-
-		Binding.Callback.ExecuteIfBound(this, Line);
-
-		if (Binding.bAutoUnbind)
+		if (Binding.MatchingLineIds.Contains(Line.LineId))
 		{
-			HandlesToRemove.Add(Binding.Handle);
+			Pending.Add({ Binding.Callback, Binding.Handle, Binding.bAutoUnbind });
 		}
 	}
 
-	if (HandlesToRemove.Num() > 0)
+	for (const FPendingDispatch& Dispatch : Pending)
 	{
-		Bindings.RemoveAll([&HandlesToRemove](const FSpecificLineBinding& Binding)
-			{
-				return HandlesToRemove.Contains(Binding.Handle);
-			});
+		Dispatch.Callback.ExecuteIfBound(this, Line);
+	}
+
+	// Remove auto-unbind entries still present (a callback may already have unbound itself).
+	for (const FPendingDispatch& Dispatch : Pending)
+	{
+		if (Dispatch.bAutoUnbind)
+		{
+			const FGuid Handle = Dispatch.Handle;
+			Bindings.RemoveAll([Handle](const FSpecificLineBinding& Binding) { return Binding.Handle == Handle; });
+		}
 	}
 }
