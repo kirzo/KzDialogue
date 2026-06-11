@@ -40,6 +40,26 @@ struct FKzSpeakerAffixRule
 };
 
 /**
+ * View-level mute rule: while any bound player whose channel matches Channel is playing,
+ * lines from channels matching MutedChannels are not rendered by this widget. Both sides
+ * match hierarchically (Dialogue.Channel.Bark covers every Bark.* channel). Purely visual:
+ * the muted players keep playing (timing, audio, events) for everyone else.
+ */
+USTRUCT(BlueprintType)
+struct FKzSubtitleMuteRule
+{
+	GENERATED_BODY()
+
+	/** While a player matching this channel (or scope) is playing... */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag Channel;
+
+	/** ...channels matching these tags (or scopes) are not rendered by this widget. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTagContainer MutedChannels;
+};
+
+/**
  * A view bundle for a single dialogue channel. Holds the text widgets and animations
  * the subtitle widget uses to render lines coming from that channel.
  *
@@ -121,14 +141,28 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	virtual void ClearTextWidgets();
 
+	/** True when Channel is currently muted on this widget by any rule in MuteRules. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
+	bool IsChannelMuted(FGameplayTag Channel) const;
+
 protected:
 	/**
-	 * Channels the widget listens to. On construct, the corresponding players are
-	 * resolved via the dialogue subsystem and bound automatically. Leave empty if
-	 * you only want manual binding via BindPlayer.
+	 * Channels the widget listens to, matched hierarchically: listening to
+	 * Dialogue.Channel.Bark binds every Bark.* channel, a leaf tag binds just that one.
+	 * Existing players bind on construct; players created later bind automatically as
+	 * they appear. Leave empty if you only want manual binding via BindPlayer.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (Categories = "Dialogue.Channel"))
 	TArray<FGameplayTag> ListenedChannels;
+
+	/**
+	 * View-level mute rules, independent of ListenedChannels (order matters in neither).
+	 * Example: { Channel: Dialogue.Channel.Main, Muted: [Dialogue.Channel.Bark] } hides every
+	 * bark subtitle on this widget while Main is talking; barks keep sounding and re-show
+	 * mid-line when Main ends.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
+	TArray<FKzSubtitleMuteRule> MuteRules;
 
 	/** Rules applied sequentially to format the speaker's name. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
@@ -166,6 +200,7 @@ protected:
 	UFUNCTION() void HandlePaused(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleResumed(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzDialogueFinishReason Reason);
+	UFUNCTION() void HandlePlayerCreated(FGameplayTag Channel, UKzDialoguePlayer* InPlayer);
 
 private:
 	/** Subscribe handlers to a player's events. */
@@ -174,8 +209,23 @@ private:
 	/** Unsubscribe handlers from a player's events. */
 	void UnbindPlayerEvents(UKzDialoguePlayer* InPlayer);
 
-	/** Resolve players for ListenedChannels via the subsystem. */
+	/** Bind existing players matching ListenedChannels and watch for ones created later. */
 	void BindFromListenedChannels();
+
+	/** True when Channel matches any listened scope. */
+	bool MatchesListenedChannels(FGameplayTag Channel) const;
+
+	/** True when this player's channel is in the cached muted set. */
+	bool IsPlayerMuted(const UKzDialoguePlayer* InPlayer) const;
+
+	/** Re-evaluates the muted set; hides views that become muted and re-shows ones that no longer are. */
+	void RefreshMuteStates();
+
+	/** Stops the player's in-flight animations (their finish notifies the player) and hides its view. */
+	void ApplyMute(UKzDialoguePlayer* InPlayer);
+
+	/** Re-shows the player's view mid-line after a mute is lifted. */
+	void SyncViewToPlayer(UKzDialoguePlayer* InPlayer);
 
 	/** Apply line text to the given view's widgets (handling affix rules etc.). */
 	void ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel);
@@ -191,4 +241,7 @@ private:
 
 	/** Active animations -> originating player. Used to dispatch Notify*Finished correctly. */
 	TMap<TWeakObjectPtr<UWidgetAnimation>, TWeakObjectPtr<UKzDialoguePlayer>> ActiveAnimations;
+
+	/** Players whose channel is currently muted on this widget. Kept in sync by RefreshMuteStates. */
+	TSet<TWeakObjectPtr<UKzDialoguePlayer>> MutedPlayers;
 };

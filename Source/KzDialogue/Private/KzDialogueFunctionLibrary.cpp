@@ -99,8 +99,13 @@ bool UKzDialogueFunctionLibrary::IsDialogueChannelPlaying(const UObject* WorldCo
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	if (!IsValid(Sub)) { return false; }
 
-	UKzDialoguePlayer* Player = Sub->FindPlayer(Channel);
-	return IsValid(Player) && Player->IsPlaying();
+	TArray<UKzDialoguePlayer*> Matching;
+	Sub->GetPlayersInScope(Channel, Matching);
+	for (const UKzDialoguePlayer* Player : Matching)
+	{
+		if (Player->IsPlaying()) { return true; }
+	}
+	return false;
 }
 
 void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)

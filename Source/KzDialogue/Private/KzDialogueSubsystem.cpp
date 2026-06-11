@@ -44,7 +44,26 @@ UKzDialoguePlayer* UKzDialogueSubsystem::GetOrCreatePlayer(FGameplayTag InChanne
 	UKzDialoguePlayer* NewPlayer = NewObject<UKzDialoguePlayer>(this);
 	NewPlayer->Channel = InChannel;
 	Players.Add(InChannel, NewPlayer);
+
+	// Broadcast BEFORE anything plays on it, so views can bind and configure the player
+	// (e.g. SetWaitForViewNotifications) ahead of the first StartDialogue.
+	OnPlayerCreated.Broadcast(InChannel, NewPlayer);
+
 	return NewPlayer;
+}
+
+void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const
+{
+	OutPlayers.Reset();
+	if (!Scope.IsValid()) { Scope = DefaultChannel; }
+
+	for (const auto& Pair : Players)
+	{
+		if (IsValid(Pair.Value) && Pair.Key.MatchesTag(Scope))
+		{
+			OutPlayers.Add(Pair.Value);
+		}
+	}
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::FindPlayer(FGameplayTag InChannel) const
@@ -61,15 +80,23 @@ const FKzDialogueChannelDefinition* UKzDialogueSubsystem::FindChannelDefinition(
 {
 	if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
 	{
-		const FKzDialogueChannelDefinition* Found = Settings->FindChannel(Tag);
-		if (!Found && Tag.IsValid())
+		// Walk up the hierarchy: Dialogue.Channel.Bark.MyCharacter inherits the definition
+		// declared for Dialogue.Channel.Bark, so per-character channels need no declaration.
+		for (FGameplayTag Cursor = Tag; Cursor.IsValid(); Cursor = Cursor.RequestDirectParent())
+		{
+			if (const FKzDialogueChannelDefinition* Found = Settings->FindChannel(Cursor))
+			{
+				return Found;
+			}
+		}
+
+		if (Tag.IsValid())
 		{
 			UE_LOG(LogKzDialogue, Warning,
-				TEXT("Playing on channel '%s' which is not defined in KzDialogueSettings. "
+				TEXT("Playing on channel '%s' with no definition for it or any ancestor in KzDialogueSettings. "
 					"Using fallback values. Consider adding it under Project Settings -> Plugins -> KzDialogue -> Channels."),
 				*Tag.ToString());
 		}
-		return Found;
 	}
 	return nullptr;
 }
@@ -307,7 +334,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLi
 
 void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 {
-	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))
+	TArray<UKzDialoguePlayer*> Matching;
+	GetPlayersInScope(InChannel, Matching);
+	for (UKzDialoguePlayer* Player : Matching)
 	{
 		Player->Stop();
 	}
@@ -323,7 +352,9 @@ void UKzDialogueSubsystem::StopAll()
 
 void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
 {
-	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))
+	TArray<UKzDialoguePlayer*> Matching;
+	GetPlayersInScope(InChannel, Matching);
+	for (UKzDialoguePlayer* Player : Matching)
 	{
 		Player->Interrupt();
 	}
