@@ -65,6 +65,7 @@ void UK2Node_KzDialogueAsyncAction::GetMenuActions(FBlueprintActionDatabaseRegis
 
 	ActionRegistrar.AddBlueprintAction(ActionKey, MakeSpawner(UKzAsyncPlayDialogueLine::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKzAsyncPlayDialogueLine, PlayDialogueLine)));
 	ActionRegistrar.AddBlueprintAction(ActionKey, MakeSpawner(UKzAsyncPlayDialogueLineList::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKzAsyncPlayDialogueLineList, PlayDialogueLineList)));
+	ActionRegistrar.AddBlueprintAction(ActionKey, MakeSpawner(UKzAsyncPlayDialogueLineRefs::StaticClass(), GET_FUNCTION_NAME_CHECKED(UKzAsyncPlayDialogueLineRefs, PlayDialogueLineRefs)));
 }
 
 #undef LOCTEXT_NAMESPACE

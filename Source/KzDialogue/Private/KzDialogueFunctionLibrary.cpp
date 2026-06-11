@@ -78,6 +78,12 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObjec
 	return Sub->PlayAssetLineList(Loaded, List.LineIds, Channel, Priority, bStartImmediately);
 }
 
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+{
+	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
+	return IsValid(Sub) ? Sub->PlayLineRefs(Refs, Channel, Priority, bStartImmediately) : nullptr;
+}
+
 bool UKzDialogueFunctionLibrary::TryResolveDialogueLineList(const FKzDialogueLineList& List, TArray<FKzDialogueLine>& OutLines)
 {
 	return List.TryResolveAll(OutLines);

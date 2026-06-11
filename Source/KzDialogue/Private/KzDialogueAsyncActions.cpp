@@ -155,6 +155,84 @@ UKzAsyncPlayDialogueLineInline* UKzAsyncPlayDialogueLineInline::PlayDialogueLine
 }
 
 // ------------------------------------------------------------------------------------------------
+// UKzAsyncDialogueSequenceAction
+// ------------------------------------------------------------------------------------------------
+
+void UKzAsyncDialogueSequenceAction::Activate()
+{
+	Super::Activate();
+
+	GatherEntryRefs(EntryRefs);
+	CurrentIndex = 0;
+
+	if (!WorldContext || EntryRefs.IsEmpty() || !AcquirePlayer())
+	{
+		NotifyCancelled();
+		return;
+	}
+
+	// Bind BEFORE playing so the first line cannot finish in between.
+	if (!BindNextEntry())
+	{
+		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no entry of the sequence resolves."), *GetName());
+		NotifyCancelled();
+		return;
+	}
+
+	UKzDialoguePlayer* Result = LaunchPlayback();
+	if (Result != DialoguePlayer)
+	{
+		NotifyCancelled();
+		return;
+	}
+
+	// Watchdog AFTER playing: launching may interrupt previous channel content, which
+	// broadcasts OnDialogueFinished during the call above.
+	SubscribeDialogueFinished();
+	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
+}
+
+bool UKzAsyncDialogueSequenceAction::BindNextEntry()
+{
+	// Unresolvable entries never play, so they would never fire: skip them like playback does.
+	while (CurrentIndex < EntryRefs.Num())
+	{
+		if (BindSpecificLineFinished(EntryRefs[CurrentIndex]))
+		{
+			return true;
+		}
+
+		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: skipping unresolvable sequence entry %d."), *GetName(), CurrentIndex);
+		++CurrentIndex;
+	}
+	return false;
+}
+
+void UKzAsyncDialogueSequenceAction::HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+{
+	// The binding auto-unbound on dispatch.
+	LineBindingHandle.Invalidate();
+
+	LineFinished.Broadcast(Player, Line);
+
+	++CurrentIndex;
+	if (CurrentIndex < EntryRefs.Num() && BindNextEntry())
+	{
+		return;
+	}
+
+	// Every playable entry completed (trailing unresolvable entries are skipped, like playback does).
+	Finished.Broadcast(Player, Line);
+	SetReadyToDestroy();
+}
+
+void UKzAsyncDialogueSequenceAction::NotifyCancelled()
+{
+	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
+	SetReadyToDestroy();
+}
+
+// ------------------------------------------------------------------------------------------------
 // UKzAsyncPlayDialogueLineList
 // ------------------------------------------------------------------------------------------------
 
@@ -173,76 +251,41 @@ UKzAsyncPlayDialogueLineList* UKzAsyncPlayDialogueLineList::PlayDialogueLineList
 	return Action;
 }
 
-void UKzAsyncPlayDialogueLineList::Activate()
+void UKzAsyncPlayDialogueLineList::GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const
 {
-	Super::Activate();
-
-	LaunchList.GetLineRefs(EntryRefs);
-	CurrentIndex = 0;
-
-	if (!WorldContext || EntryRefs.IsEmpty() || !AcquirePlayer())
-	{
-		NotifyCancelled();
-		return;
-	}
-
-	// Bind BEFORE playing so the first line cannot finish in between.
-	if (!BindNextEntry())
-	{
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no entry of the list resolves in '%s'."), *GetName(), *LaunchList.Asset.ToString());
-		NotifyCancelled();
-		return;
-	}
-
-	UKzDialoguePlayer* Result = UKzDialogueFunctionLibrary::PlayDialogueLineList(WorldContext, LaunchList, Channel, Priority, bStartImmediately);
-	if (Result != DialoguePlayer)
-	{
-		NotifyCancelled();
-		return;
-	}
-
-	// Watchdog AFTER playing: launching may interrupt previous channel content, which
-	// broadcasts OnDialogueFinished during the call above.
-	SubscribeDialogueFinished();
-	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
+	LaunchList.GetLineRefs(OutRefs);
 }
 
-bool UKzAsyncPlayDialogueLineList::BindNextEntry()
+UKzDialoguePlayer* UKzAsyncPlayDialogueLineList::LaunchPlayback()
 {
-	// Unresolvable entries never play, so they would never fire: skip them like playback does.
-	while (CurrentIndex < EntryRefs.Num())
-	{
-		if (BindSpecificLineFinished(EntryRefs[CurrentIndex]))
-		{
-			return true;
-		}
-
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: skipping unresolvable list entry %d."), *GetName(), CurrentIndex);
-		++CurrentIndex;
-	}
-	return false;
+	return UKzDialogueFunctionLibrary::PlayDialogueLineList(WorldContext, LaunchList, Channel, Priority, bStartImmediately);
 }
 
-void UKzAsyncPlayDialogueLineList::HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+// ------------------------------------------------------------------------------------------------
+// UKzAsyncPlayDialogueLineRefs
+// ------------------------------------------------------------------------------------------------
+
+UKzAsyncPlayDialogueLineRefs* UKzAsyncPlayDialogueLineRefs::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, FGameplayTag InChannel, int32 InPriority, bool bInStartImmediately)
 {
-	// The binding auto-unbound on dispatch.
-	LineBindingHandle.Invalidate();
-
-	LineFinished.Broadcast(Player, Line);
-
-	++CurrentIndex;
-	if (CurrentIndex < EntryRefs.Num() && BindNextEntry())
+	UKzAsyncPlayDialogueLineRefs* Action = NewObject<UKzAsyncPlayDialogueLineRefs>();
+	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
+	Action->LaunchRefs = Lines;
+	Action->Channel = InChannel;
+	Action->Priority = InPriority;
+	Action->bStartImmediately = bInStartImmediately;
+	if (WorldContextObject)
 	{
-		return;
+		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
 	}
-
-	// Every playable entry completed (trailing unresolvable entries are skipped, like playback does).
-	Finished.Broadcast(Player, Line);
-	SetReadyToDestroy();
+	return Action;
 }
 
-void UKzAsyncPlayDialogueLineList::NotifyCancelled()
+void UKzAsyncPlayDialogueLineRefs::GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const
 {
-	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
-	SetReadyToDestroy();
+	OutRefs = LaunchRefs;
+}
+
+UKzDialoguePlayer* UKzAsyncPlayDialogueLineRefs::LaunchPlayback()
+{
+	return UKzDialogueFunctionLibrary::PlayDialogueLineRefs(WorldContext, LaunchRefs, Channel, Priority, bStartImmediately);
 }

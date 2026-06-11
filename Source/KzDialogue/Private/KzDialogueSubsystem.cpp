@@ -208,9 +208,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine)
 {
-	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
+	if (!IsValid(Asset) || !LineId.IsValid()) { return false; }
 
 	FGuid LineIdToPlay = LineId;
 
@@ -220,12 +220,17 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 		LineIdToPlay = ResolveAliasInternal(Alias);
 		if (!LineIdToPlay.IsValid())
 		{
-			return nullptr;
+			return false;
 		}
 	}
 
+	return Asset->TryGetLineById(LineIdToPlay, OutLine);
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
 	FKzDialogueLine Line;
-	if (!Asset->TryGetLineById(LineIdToPlay, Line))
+	if (!ResolveAssetEntry(Asset, LineId, Line))
 	{
 		return nullptr;
 	}
@@ -243,22 +248,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 	for (const FGuid& LineId : LineIds)
 	{
-		if (!LineId.IsValid()) { continue; }
-
-		FGuid LineIdToPlay = LineId;
-
-		FKzDialogueAlias Alias;
-		if (Asset->TryGetAliasById(LineId, Alias))
-		{
-			LineIdToPlay = ResolveAliasInternal(Alias);
-			if (!LineIdToPlay.IsValid())
-			{
-				continue;
-			}
-		}
-
 		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(LineIdToPlay, Line))
+		if (ResolveAssetEntry(Asset, LineId, Line))
 		{
 			Lines.Add(MoveTemp(Line));
 		}
@@ -274,6 +265,41 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
+
+	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
+	if (Refs.IsEmpty()) { return nullptr; }
+
+	TArray<FKzDialogueLine> Lines;
+	Lines.Reserve(Refs.Num());
+
+	for (const FKzDialogueLineRef& Ref : Refs)
+	{
+		if (!Ref.IsValid()) { continue; }
+
+		UKzDialogueAsset* Asset = Ref.Asset.LoadSynchronous();
+
+		FKzDialogueLine Line;
+		if (ResolveAssetEntry(Asset, Ref.LineId, Line))
+		{
+			Lines.Add(MoveTemp(Line));
+		}
+		else
+		{
+			UE_LOG(LogKzDialogue, Warning, TEXT("PlayLineRefs: ref '%s' does not resolve; skipping."), *Ref.Asset.ToString());
+		}
+	}
+
+	if (Lines.IsEmpty()) { return nullptr; }
+
+	if (!InChannel.IsValid()) { InChannel = DefaultChannel; }
+
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
 
 	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
 	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);

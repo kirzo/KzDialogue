@@ -73,6 +73,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
 
+	/**
+	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
+	 * sequential dialogue. Aliases are resolved at launch (stateful); entries that fail to
+	 * resolve are skipped. No asset priority hint applies: explicit Priority, else channel default.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+
 	/** Stop the dialogue on a channel (graceful, with exit animations). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void StopChannel(FGameplayTag InChannel);
@@ -131,6 +139,9 @@ private:
 
 	/** True if the dialogue currently playing on this player allows being interrupted. */
 	bool IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const;
+
+	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
+	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);
 
 	/**
 	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.

@@ -116,13 +116,58 @@ public:
 };
 
 /**
- * Plays a list of dialogue lines as one sequential dialogue and completes when the LAST entry
- * finishes. LineFinished fires once per completed entry. Entries are awaited one at a time in
- * list order, so repeated ids and aliases resolve correctly. Cancelled fires when the dialogue
- * ends before the list completed.
+ * Shared logic for the multi-entry async actions: plays a sequence as one dialogue and completes
+ * when the LAST entry finishes. LineFinished fires once per completed entry. Entries are awaited
+ * one at a time in playback order, so repeated ids and aliases resolve correctly. Cancelled fires
+ * when the dialogue ends before the sequence completed.
  */
+UCLASS(Abstract)
+class KZDIALOGUE_API UKzAsyncDialogueSequenceAction : public UKzAsyncDialogueAction
+{
+	GENERATED_BODY()
+
+public:
+	/** Fired right after the sequence is requested. Carries the channel player; Line is not set yet. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Started;
+
+	/** Fired every time one entry of the sequence finishes playing. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent LineFinished;
+
+	/** Fired when the last entry of the sequence finishes playing. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Finished;
+
+	/** Fired when the dialogue ends before the sequence completed, or nothing could play. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Cancelled;
+
+	virtual void Activate() override;
+
+protected:
+	/** Fills OutRefs with the awaited entries, in playback order. */
+	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const {}
+
+	/** Requests playback of the whole sequence. Returns the playing channel player on success. */
+	virtual UKzDialoguePlayer* LaunchPlayback() { return nullptr; }
+
+	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
+	virtual void NotifyCancelled() override;
+
+	/** Binds the next awaitable entry starting at CurrentIndex, skipping unresolvable ones. False when none is left. */
+	bool BindNextEntry();
+
+	/** Per-entry refs, in playback order. */
+	TArray<FKzDialogueLineRef> EntryRefs;
+
+	/** Entry currently awaited. */
+	int32 CurrentIndex = 0;
+};
+
+/** Plays a FKzDialogueLineList (one asset, several ids) as one sequential dialogue. */
 UCLASS(meta = (HasDedicatedAsyncNode))
-class KZDIALOGUE_API UKzAsyncPlayDialogueLineList : public UKzAsyncDialogueAction
+class KZDIALOGUE_API UKzAsyncPlayDialogueLineList : public UKzAsyncDialogueSequenceAction
 {
 	GENERATED_BODY()
 
@@ -131,37 +176,29 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Priority,bStartImmediately"))
 	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
-	/** Fired right after the list is requested. Carries the channel player; Line is not set yet. */
-	UPROPERTY(BlueprintAssignable)
-	FKzAsyncDialogueLineEvent Started;
-
-	/** Fired every time one entry of the list finishes playing. */
-	UPROPERTY(BlueprintAssignable)
-	FKzAsyncDialogueLineEvent LineFinished;
-
-	/** Fired when the last entry of the list finishes playing. */
-	UPROPERTY(BlueprintAssignable)
-	FKzAsyncDialogueLineEvent Finished;
-
-	/** Fired when the dialogue ends before the list completed, or nothing could play. */
-	UPROPERTY(BlueprintAssignable)
-	FKzAsyncDialogueLineEvent Cancelled;
-
-	virtual void Activate() override;
-
 protected:
-	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
-	virtual void NotifyCancelled() override;
-
-	/** Binds the next awaitable entry starting at CurrentIndex, skipping unresolvable ones. False when none is left. */
-	bool BindNextEntry();
+	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const override;
+	virtual UKzDialoguePlayer* LaunchPlayback() override;
 
 	/** List awaited by this action. */
 	FKzDialogueLineList LaunchList;
+};
 
-	/** Per-entry refs, in playback order. */
-	TArray<FKzDialogueLineRef> EntryRefs;
+/** Plays an array of FKzDialogueLineRef (possibly spanning assets) as one sequential dialogue. */
+UCLASS(meta = (HasDedicatedAsyncNode))
+class KZDIALOGUE_API UKzAsyncPlayDialogueLineRefs : public UKzAsyncDialogueSequenceAction
+{
+	GENERATED_BODY()
 
-	/** Entry currently awaited. */
-	int32 CurrentIndex = 0;
+public:
+	/** Plays an array of dialogue line refs sequentially and waits until the last one finishes. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Priority,bStartImmediately"))
+	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+
+protected:
+	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const override;
+	virtual UKzDialoguePlayer* LaunchPlayback() override;
+
+	/** Refs awaited by this action. */
+	TArray<FKzDialogueLineRef> LaunchRefs;
 };
