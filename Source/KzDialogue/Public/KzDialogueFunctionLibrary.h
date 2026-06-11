@@ -57,9 +57,9 @@ public:
 	static bool TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);
 
 	/**
-	 * Play a list of dialogue lines (or aliases) sequentially on the given channel. The
-	 * first one starts immediately if bStartImmediately is true; subsequent entries are
-	 * queued behind it on the same channel.
+	 * Play a list of dialogue lines (or aliases) as ONE sequential dialogue on the given
+	 * channel. Aliases are resolved at launch; entries that fail to resolve are skipped.
+	 * Line events fire per entry and OnDialogueFinished once at the end.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);

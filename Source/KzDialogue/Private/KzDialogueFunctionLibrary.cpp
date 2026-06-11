@@ -75,19 +75,7 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObjec
 	UKzDialogueAsset* Loaded = List.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	UKzDialoguePlayer* Player = nullptr;
-	for (int32 i = 0; i < List.LineIds.Num(); ++i)
-	{
-		// First entry: respect bStartImmediately as the caller passed it.
-		// Subsequent entries: queue them (bStartImmediately=false) so they run after
-		// the previous one finishes on the channel.
-		const bool bFirstEntry = (i == 0);
-		const bool bThisStartImmediately = bFirstEntry && bStartImmediately;
-
-		UKzDialoguePlayer* Result = Sub->PlayAssetLine(Loaded, List.LineIds[i], Channel, Priority, bThisStartImmediately);
-		if (bFirstEntry) { Player = Result; }
-	}
-	return Player;
+	return Sub->PlayAssetLineList(Loaded, List.LineIds, Channel, Priority, bStartImmediately);
 }
 
 bool UKzDialogueFunctionLibrary::TryResolveDialogueLineList(const FKzDialogueLineList& List, TArray<FKzDialogueLine>& OutLines)

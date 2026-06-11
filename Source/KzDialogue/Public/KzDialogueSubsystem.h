@@ -65,6 +65,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
 
+	/**
+	 * Play several lines or aliases from one dialogue asset as a SINGLE sequential dialogue.
+	 * Aliases are resolved at launch (stateful: shuffle bags, cooldowns...); entries that fail
+	 * to resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+
 	/** Stop the dialogue on a channel (graceful, with exit animations). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void StopChannel(FGameplayTag InChannel);

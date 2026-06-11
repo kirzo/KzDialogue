@@ -134,6 +134,16 @@ void UK2Node_PlayDialogueLine::PinDefaultValueChanged(UEdGraphPin* Pin)
 	}
 }
 
+FString UK2Node_PlayDialogueLine::GetPinMetaData(FName InPinName, FName InKey)
+{
+	// The gameplay tag pin widget asks the owning node for the category filter.
+	if (InPinName == PN_Channel && InKey == TEXT("Categories"))
+	{
+		return TEXT("Dialogue.Channel");
+	}
+	return Super::GetPinMetaData(InPinName, InKey);
+}
+
 // =======================================================================================
 // Menu registration
 // =======================================================================================

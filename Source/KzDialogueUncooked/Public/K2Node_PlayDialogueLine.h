@@ -30,6 +30,9 @@ public:
 	virtual void PinConnectionListChanged(UEdGraphPin* Pin) override;
 	virtual void PinDefaultValueChanged(UEdGraphPin* Pin) override;
 
+	/** Drives the gameplay tag picker's category filter on the Channel pin. */
+	virtual FString GetPinMetaData(FName InPinName, FName InKey) override;
+
 	//~ UK2Node
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;
 	virtual FText GetMenuCategory() const override;

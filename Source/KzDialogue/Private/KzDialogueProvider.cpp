@@ -93,3 +93,26 @@ FKzDialogueLine UKzManualDialogueProvider::Advance_Implementation()
 	CursorIndex = 0;
 	return Line;
 }
+
+// =======================================================================================
+// UKzLineListDialogueProvider
+// =======================================================================================
+
+UKzLineListDialogueProvider* UKzLineListDialogueProvider::Create(UObject* Outer, const TArray<FKzDialogueLine>& InLines)
+{
+	if (!IsValid(Outer)) { return nullptr; }
+	UKzLineListDialogueProvider* Provider = NewObject<UKzLineListDialogueProvider>(Outer);
+	Provider->Lines = InLines;
+	return Provider;
+}
+
+FKzDialogueLine UKzLineListDialogueProvider::Advance_Implementation()
+{
+	CursorIndex = (CursorIndex == INDEX_NONE) ? 0 : CursorIndex + 1;
+	return Lines.IsValidIndex(CursorIndex) ? Lines[CursorIndex] : FKzDialogueLine{};
+}
+
+FKzDialogueLine UKzLineListDialogueProvider::Current_Implementation() const
+{
+	return Lines.IsValidIndex(CursorIndex) ? Lines[CursorIndex] : FKzDialogueLine{};
+}

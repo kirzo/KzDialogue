@@ -24,6 +24,7 @@ public class KzDialogueUncooked : ModuleRules
 			"UnrealEd",
 			"Slate",
 			"SlateCore",
+			"ToolMenus",
 		});
 	}
 }

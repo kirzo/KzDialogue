@@ -136,3 +136,28 @@ public:
 	virtual bool IsLast_Implementation() const override { return true; }
 	virtual void Reset_Implementation() override { bConsumed = false; }
 };
+
+// ---------------------------------------------------------------------------------------
+// Line list provider: linear playback of pre-resolved lines as ONE dialogue session.
+// Backs PlayDialogueLineList: line events fire per entry and OnDialogueFinished once at
+// the end, instead of one dialogue per entry.
+// ---------------------------------------------------------------------------------------
+
+UCLASS(BlueprintType, DisplayName = "Dialogue Provider (Line List)")
+class KZDIALOGUE_API UKzLineListDialogueProvider : public UKzDialogueProvider
+{
+	GENERATED_BODY()
+
+public:
+	/** Resolved lines, in playback order. */
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Provider")
+	TArray<FKzDialogueLine> Lines;
+
+	/** Convenience factory. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Provider", meta = (DefaultToSelf = "Outer"))
+	static UKzLineListDialogueProvider* Create(UObject* Outer, const TArray<FKzDialogueLine>& InLines);
+
+	virtual bool HasNext_Implementation() const override { return CursorIndex + 1 < Lines.Num(); }
+	virtual FKzDialogueLine Advance_Implementation() override;
+	virtual FKzDialogueLine Current_Implementation() const override;
+};
