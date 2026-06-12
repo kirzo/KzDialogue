@@ -6,6 +6,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "Settings/KzDialogueSettings.h"
+#include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
