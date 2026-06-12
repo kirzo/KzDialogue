@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Settings/KzDialogueSettings.h"
+#include "Sound/SoundClass.h"
 
 namespace Kz::Tags::Dialogue
 {
@@ -55,4 +56,15 @@ const FKzDialogueChannelDefinition* UKzDialogueSettings::FindChannel(const FGame
 		{
 			return Def.Tag == Tag;
 		});
+}
+
+FGameplayTag UKzDialogueSettings::FindChannelForSoundClass(const USoundClass* SoundClass) const
+{
+	if (!SoundClass) { return FGameplayTag(); }
+
+	// TSoftObjectPtr keys hash by path, so a pointer-built key matches the configured entry.
+	const FGameplayTag* Found = SoundClassChannels.Find(TSoftObjectPtr<USoundClass>(const_cast<USoundClass*>(SoundClass)));
+
+	// An entry mapped to an invalid channel counts as unmapped: the resolution chain moves on.
+	return (Found && Found->IsValid()) ? *Found : FGameplayTag();
 }

@@ -8,6 +8,7 @@
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
 
@@ -67,10 +68,35 @@ void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialo
 	}
 }
 
+// Line-level resolution: the line's own channel, else the channel mapped to its audio's
+// SoundClass in project settings. Empty when neither applies — the chain moves to the asset.
+// The SoundClass step is skipped when the line has no audio, the audio fails to load or has
+// no SoundClass, or settings don't map it (invalid mappings also count as unmapped).
+static FGameplayTag ResolveLineLevelChannel(const FKzDialogueLine& Line)
+{
+	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
+
+	if (!Line.Audio.IsNull())
+	{
+		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
+		{
+			if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
+			{
+				return Settings->FindChannelForSoundClass(Sound->GetSoundClass());
+			}
+		}
+	}
+
+	return FGameplayTag();
+}
+
 FGameplayTag UKzDialogueSubsystem::ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const
 {
 	if (ExplicitChannel.IsValid()) { return ExplicitChannel; }
-	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
+
+	const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
+	if (LineLevel.IsValid()) { return LineLevel; }
+
 	if (IsValid(Asset) && Asset->DefaultChannel.IsValid()) { return Asset->DefaultChannel; }
 	return DefaultChannel;
 }
@@ -106,11 +132,15 @@ FGameplayTag UKzDialogueSubsystem::ResolveChannelForEntry(FGameplayTag ExplicitC
 
 	if (IsValid(Asset) && EntryId.IsValid())
 	{
-		// Line entry: the line's own channel.
+		// Line entry: the line's own channel, else its audio's SoundClass mapping.
 		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(EntryId, Line) && Line.DefaultChannel.IsValid())
+		if (Asset->TryGetLineById(EntryId, Line))
 		{
-			return Line.DefaultChannel;
+			const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
+			if (LineLevel.IsValid())
+			{
+				return LineLevel;
+			}
 		}
 
 		// Alias entry: the alias's own channel, else its lines' unanimous one.

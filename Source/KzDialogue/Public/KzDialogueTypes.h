@@ -131,8 +131,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	/**
 	 * Channel this line plays on when the callsite doesn't pass one explicitly.
-	 * Resolution chain: callsite > line > asset > project settings. For alias entries the
-	 * line level only applies when every line of the alias agrees on the same channel.
+	 * Resolution chain: callsite > line > audio SoundClass mapping > asset > project settings.
+	 * For alias entries the line level only applies when every line of the alias agrees on the
+	 * same DefaultChannel.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
