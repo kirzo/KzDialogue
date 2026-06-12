@@ -33,7 +33,6 @@ public:
 	/** Pin names, matching the factory function's parameter names. */
 	static const FName PN_Asset;
 	static const FName PN_LineId;
-	static const FName PN_Channel;
 
 	/** Queries used by the shared line pin factory (mirrors UK2Node_PlayDialogueLine). */
 	bool ShouldShowLineDropdown() const;

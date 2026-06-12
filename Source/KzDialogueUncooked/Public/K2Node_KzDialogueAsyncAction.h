@@ -20,7 +20,6 @@ class KZDIALOGUEUNCOOKED_API UK2Node_KzDialogueAsyncAction : public UK2Node_Base
 public:
 	UK2Node_KzDialogueAsyncAction(const FObjectInitializer& ObjectInitializer);
 
-	virtual void AllocateDefaultPins() override;
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 	virtual FText GetMenuCategory() const override;
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;

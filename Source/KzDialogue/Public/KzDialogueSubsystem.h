@@ -48,6 +48,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const;
 
+	/**
+	 * Channel resolution chain for a concrete line: explicit > line default > asset default >
+	 * project settings default. Side-effect free. Asset may be null (manual lines).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const;
+
+	/**
+	 * Channel resolution chain for an asset entry by GUID. Line entries: explicit > line >
+	 * asset > settings. Alias entries: explicit > alias > lines' unanimous channel (only when
+	 * ALL the alias lines agree) > asset > settings. Side-effect free, so callers can resolve
+	 * the channel before playing — the play paths use the same chain and land on the same player.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag ResolveChannelForEntry(FGameplayTag ExplicitChannel, const UKzDialogueAsset* Asset, FGuid EntryId) const;
+
 	/** Sentinel meaning "no explicit priority"; falls back to asset, then channel default. */
 	static constexpr int32 InheritPriority = -1;
 

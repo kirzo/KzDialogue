@@ -10,6 +10,7 @@
 
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
+class UKzDialogueSubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzAsyncDialogueLineEvent, UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 
@@ -32,6 +33,13 @@ public:
 protected:
 	/** Resolves (and creates) the channel player. False when no player is available. */
 	bool AcquirePlayer();
+
+	/**
+	 * Resolves the definitive channel this action will play on, applying the same chain the
+	 * subsystem's play path applies (explicit > line/entry > asset > settings). Keeps the
+	 * pre-acquired player identical to the one playback lands on.
+	 */
+	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const { return Channel; }
 
 	/** Binds HandleSpecificLineFinished to Ref on the acquired player. False when the ref cannot be resolved. */
 	bool BindSpecificLineFinished(const FKzDialogueLineRef& Ref);
@@ -93,6 +101,7 @@ public:
 	virtual void Activate() override;
 
 protected:
+	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
 	virtual void NotifyCancelled() override;
 
@@ -146,6 +155,8 @@ public:
 	virtual void Activate() override;
 
 protected:
+	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
+
 	/** Fills OutRefs with the awaited entries, in playback order. */
 	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const {}
 

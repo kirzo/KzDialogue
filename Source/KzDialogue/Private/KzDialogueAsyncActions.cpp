@@ -4,6 +4,8 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueFunctionLibrary.h"
 #include "KzDialoguePlayer.h"
+#include "KzDialogueSubsystem.h"
+#include "Engine/World.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueAsync, Log, All);
 
@@ -13,7 +15,19 @@ DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueAsync, Log, All);
 
 bool UKzAsyncDialogueAction::AcquirePlayer()
 {
-	UKzDialoguePlayer* Player = UKzDialogueFunctionLibrary::GetDialoguePlayer(WorldContext, Channel, /*bCreateIfNotFound*/ true);
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+	if (!Subsystem)
+	{
+		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no dialogue subsystem available."), *GetName());
+		return false;
+	}
+
+	// Resolve the definitive channel up-front so the player bound here is the one playback
+	// lands on; LaunchPlayback then passes the resolved (explicit) channel through.
+	Channel = ResolveLaunchChannel(*Subsystem);
+
+	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Channel);
 	if (!IsValid(Player))
 	{
 		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no dialogue player available for channel '%s'."), *GetName(), *Channel.ToString());
@@ -88,6 +102,11 @@ UKzAsyncPlayDialogueLine* UKzAsyncPlayDialogueLine::PlayDialogueLine(const UObje
 	return Action;
 }
 
+FGameplayTag UKzAsyncPlayDialogueLine::ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const
+{
+	return Subsystem.ResolveChannelForEntry(Channel, LaunchRef.Asset.LoadSynchronous(), LaunchRef.LineId);
+}
+
 void UKzAsyncPlayDialogueLine::Activate()
 {
 	Super::Activate();
@@ -157,6 +176,16 @@ UKzAsyncPlayDialogueLineInline* UKzAsyncPlayDialogueLineInline::PlayDialogueLine
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncDialogueSequenceAction
 // ------------------------------------------------------------------------------------------------
+
+FGameplayTag UKzAsyncDialogueSequenceAction::ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const
+{
+	// First-entry rule, matching the subsystem's sequence play paths.
+	if (EntryRefs.IsEmpty())
+	{
+		return Channel;
+	}
+	return Subsystem.ResolveChannelForEntry(Channel, EntryRefs[0].Asset.LoadSynchronous(), EntryRefs[0].LineId);
+}
 
 void UKzAsyncDialogueSequenceAction::Activate()
 {
