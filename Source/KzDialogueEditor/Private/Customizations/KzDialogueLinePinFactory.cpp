@@ -4,7 +4,9 @@
 #include "Widgets/SKzDialogueLinePicker.h"
 
 #include "K2Node_PlayDialogueLine.h"
+#include "K2Node_PlayDialogueLineAsync.h"
 #include "K2Node_MakeDialogueLineRef.h"
+#include "K2Node_MakeDialogueLineList.h"
 #include "KzDialogueAsset.h"
 
 #include "EdGraph/EdGraphPin.h"
@@ -23,25 +25,18 @@ namespace KzDialogueLinePinFactoryInternal
 {
 	/**
 	 * Resolves a node into its dialogue-aware accessors. Returns true if the node is
-	 * one of our K2Nodes (PlayDialogueLine or MakeDialogueLineRef) and fills the
-	 * out parameters; false otherwise.
+	 * one of our K2Nodes and fills the out parameters; false otherwise.
 	 *
 	 * We pattern-match here instead of introducing a shared interface because UE's
 	 * K2Node hierarchy doesn't play well with multiple inheritance, and the surface
-	 * area we need is tiny (three queries).
+	 * area we need is tiny (two queries).
 	 */
-	static bool TryResolveDialogueNode(UEdGraphNode* Node,
-		bool& bOutShowDropdown,
-		UKzDialogueAsset*& OutLiteralAsset,
-		UEdGraphPin*& OutLineIdPin,
-		FName& OutLineIdPinName)
+	static bool TryResolveDialogueNode(UEdGraphNode* Node, bool& bOutShowDropdown, UKzDialogueAsset*& OutLiteralAsset)
 	{
 		if (UK2Node_PlayDialogueLine* Play = Cast<UK2Node_PlayDialogueLine>(Node))
 		{
 			bOutShowDropdown = Play->ShouldShowLineDropdown();
 			OutLiteralAsset = Play->GetLiteralAsset();
-			OutLineIdPin = Play->GetLineIdPin();
-			OutLineIdPinName = UK2Node_PlayDialogueLine::PN_LineId;
 			return true;
 		}
 
@@ -49,10 +44,35 @@ namespace KzDialogueLinePinFactoryInternal
 		{
 			bOutShowDropdown = Make->ShouldShowLineDropdown();
 			OutLiteralAsset = Make->GetLiteralAsset();
-			OutLineIdPin = Make->GetLineIdPin();
-			OutLineIdPinName = UK2Node_MakeDialogueLineRef::PN_LineId;
 			return true;
 		}
+
+		if (UK2Node_PlayDialogueLineAsync* PlayAsync = Cast<UK2Node_PlayDialogueLineAsync>(Node))
+		{
+			bOutShowDropdown = PlayAsync->ShouldShowLineDropdown();
+			OutLiteralAsset = PlayAsync->GetLiteralAsset();
+			return true;
+		}
+
+		if (UK2Node_MakeDialogueLineList* MakeList = Cast<UK2Node_MakeDialogueLineList>(Node))
+		{
+			bOutShowDropdown = MakeList->ShouldShowLineDropdown();
+			OutLiteralAsset = MakeList->GetLiteralAsset();
+			return true;
+		}
+
+		return false;
+	}
+
+	/** True when Pin is a line-id pin of one of our K2Nodes (some nodes carry several). */
+	static bool IsLineIdPin(UEdGraphNode* Node, const UEdGraphPin* Pin)
+	{
+		if (!Pin) { return false; }
+
+		if (Cast<UK2Node_PlayDialogueLine>(Node)) { return Pin->PinName == UK2Node_PlayDialogueLine::PN_LineId; }
+		if (Cast<UK2Node_MakeDialogueLineRef>(Node)) { return Pin->PinName == UK2Node_MakeDialogueLineRef::PN_LineId; }
+		if (Cast<UK2Node_PlayDialogueLineAsync>(Node)) { return Pin->PinName == UK2Node_PlayDialogueLineAsync::PN_LineId; }
+		if (const UK2Node_MakeDialogueLineList* MakeList = Cast<UK2Node_MakeDialogueLineList>(Node)) { return MakeList->IsLinePin(Pin); }
 
 		return false;
 	}
@@ -97,9 +117,7 @@ private:
 	{
 		using namespace KzDialogueLinePinFactoryInternal;
 		if (!GraphPinObj) { return false; }
-		UEdGraphPin* Ignored = nullptr;
-		FName IgnoredName;
-		return TryResolveDialogueNode(GraphPinObj->GetOwningNode(), bOutShowDropdown, OutLiteralAsset, Ignored, IgnoredName);
+		return TryResolveDialogueNode(GraphPinObj->GetOwningNode(), bOutShowDropdown, OutLiteralAsset);
 	}
 
 	UKzDialogueAsset* GetCurrentAsset() const
@@ -216,18 +234,8 @@ TSharedPtr<SGraphPin> FKzDialogueLinePinFactory::CreatePin(UEdGraphPin* InPin) c
 
 	if (!InPin) { return nullptr; }
 
-	// Resolve the owning node into our shared interface. Only proceed for our two K2Nodes.
-	bool bShowDropdown = false;
-	UKzDialogueAsset* LiteralAsset = nullptr;
-	UEdGraphPin* LineIdPin = nullptr;
-	FName LineIdPinName;
-	if (!TryResolveDialogueNode(InPin->GetOwningNode(), bShowDropdown, LiteralAsset, LineIdPin, LineIdPinName))
-	{
-		return nullptr;
-	}
-
-	// Only intercept the LineId pin of those nodes.
-	if (InPin->PinName != LineIdPinName) { return nullptr; }
+	// Only intercept the line-id pins of our K2Nodes.
+	if (!IsLineIdPin(InPin->GetOwningNode(), InPin)) { return nullptr; }
 
 	return SNew(SKzDialogueLineGraphPin, InPin);
 }

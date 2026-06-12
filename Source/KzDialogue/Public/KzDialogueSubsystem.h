@@ -28,6 +28,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subsystem")
 	FGameplayTag DefaultChannel;
 
+	/** Fired whenever a channel player is lazily created, BEFORE anything plays on it. Lets views bind to channels that don't exist yet (e.g. per-character bark channels). */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
+	FKzOnDialoguePlayerCreated OnPlayerCreated;
+
 	/** Get (and lazily create) the player associated with a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	UKzDialoguePlayer* GetOrCreatePlayer(FGameplayTag InChannel);
@@ -35,6 +39,30 @@ public:
 	/** Get the player for a channel without creating one. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	UKzDialoguePlayer* FindPlayer(FGameplayTag InChannel) const;
+
+	/**
+	 * Fill OutPlayers with every player whose channel matches Scope hierarchically: the scope
+	 * Dialogue.Channel.Bark matches Dialogue.Channel.Bark.MyCharacter (and itself). Pass a leaf
+	 * tag for an exact lookup.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	void GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const;
+
+	/**
+	 * Channel resolution chain for a concrete line: explicit > line default > asset default >
+	 * project settings default. Side-effect free. Asset may be null (manual lines).
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const;
+
+	/**
+	 * Channel resolution chain for an asset entry by GUID. Line entries: explicit > line >
+	 * asset > settings. Alias entries: explicit > alias > lines' unanimous channel (only when
+	 * ALL the alias lines agree) > asset > settings. Side-effect free, so callers can resolve
+	 * the channel before playing — the play paths use the same chain and land on the same player.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag ResolveChannelForEntry(FGameplayTag ExplicitChannel, const UKzDialogueAsset* Asset, FGuid EntryId) const;
 
 	/** Sentinel meaning "no explicit priority"; falls back to asset, then channel default. */
 	static constexpr int32 InheritPriority = -1;
@@ -65,7 +93,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
 
-	/** Stop the dialogue on a channel (graceful, with exit animations). */
+	/**
+	 * Play several lines or aliases from one dialogue asset as a SINGLE sequential dialogue.
+	 * Aliases are resolved at launch (stateful: shuffle bags, cooldowns...); entries that fail
+	 * to resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+
+	/**
+	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
+	 * sequential dialogue. Aliases are resolved at launch (stateful); entries that fail to
+	 * resolve are skipped. No asset priority hint applies: explicit Priority, else channel default.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+
+	/** Stop the dialogue on every channel matching the scope (graceful, with exit animations). E.g. Dialogue.Channel.Bark stops all bark channels; a leaf tag stops just that one. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void StopChannel(FGameplayTag InChannel);
 
@@ -73,7 +117,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void StopAll();
 
-	/** Interrupt the dialogue on a channel (hard-stop). */
+	/** Interrupt the dialogue on every channel matching the scope (hard-stop). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void InterruptChannel(FGameplayTag InChannel);
 
@@ -117,12 +161,16 @@ private:
 	 */
 	int32 ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const;
 
-	/** Look up the channel definition in settings, or null if not declared. Logs a
-	 *  warning the first time an undeclared channel is used. */
+	/** Look up the channel definition in settings, walking up the tag hierarchy so children
+	 *  inherit their closest declared ancestor (declare Dialogue.Channel.Bark once and every
+	 *  Bark.* channel uses it). Null and a warning when no ancestor is declared either. */
 	const FKzDialogueChannelDefinition* FindChannelDefinition(const FGameplayTag& Tag) const;
 
 	/** True if the dialogue currently playing on this player allows being interrupted. */
 	bool IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const;
+
+	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
+	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);
 
 	/**
 	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.

@@ -6,6 +6,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "Settings/KzDialogueSettings.h"
+#include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
@@ -44,7 +45,97 @@ UKzDialoguePlayer* UKzDialogueSubsystem::GetOrCreatePlayer(FGameplayTag InChanne
 	UKzDialoguePlayer* NewPlayer = NewObject<UKzDialoguePlayer>(this);
 	NewPlayer->Channel = InChannel;
 	Players.Add(InChannel, NewPlayer);
+
+	// Broadcast BEFORE anything plays on it, so views can bind and configure the player
+	// (e.g. SetWaitForViewNotifications) ahead of the first StartDialogue.
+	OnPlayerCreated.Broadcast(InChannel, NewPlayer);
+
 	return NewPlayer;
+}
+
+void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const
+{
+	OutPlayers.Reset();
+	if (!Scope.IsValid()) { Scope = DefaultChannel; }
+
+	for (const auto& Pair : Players)
+	{
+		if (IsValid(Pair.Value) && Pair.Key.MatchesTag(Scope))
+		{
+			OutPlayers.Add(Pair.Value);
+		}
+	}
+}
+
+FGameplayTag UKzDialogueSubsystem::ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const
+{
+	if (ExplicitChannel.IsValid()) { return ExplicitChannel; }
+	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
+	if (IsValid(Asset) && Asset->DefaultChannel.IsValid()) { return Asset->DefaultChannel; }
+	return DefaultChannel;
+}
+
+// Returns the channel shared by every resolvable line of the alias, or empty when they disagree.
+static FGameplayTag GetAliasUnanimousChannel(const UKzDialogueAsset& Asset, const FKzDialogueAlias& Alias)
+{
+	FGameplayTag Unanimous;
+	bool bFirst = true;
+
+	for (const FGuid& LineId : Alias.LineIds)
+	{
+		FKzDialogueLine Line;
+		if (!Asset.TryGetLineById(LineId, Line)) { continue; }
+
+		if (bFirst)
+		{
+			Unanimous = Line.DefaultChannel;
+			bFirst = false;
+		}
+		else if (Line.DefaultChannel != Unanimous)
+		{
+			return FGameplayTag();
+		}
+	}
+
+	return Unanimous;
+}
+
+FGameplayTag UKzDialogueSubsystem::ResolveChannelForEntry(FGameplayTag ExplicitChannel, const UKzDialogueAsset* Asset, FGuid EntryId) const
+{
+	if (ExplicitChannel.IsValid()) { return ExplicitChannel; }
+
+	if (IsValid(Asset) && EntryId.IsValid())
+	{
+		// Line entry: the line's own channel.
+		FKzDialogueLine Line;
+		if (Asset->TryGetLineById(EntryId, Line) && Line.DefaultChannel.IsValid())
+		{
+			return Line.DefaultChannel;
+		}
+
+		// Alias entry: the alias's own channel, else its lines' unanimous one.
+		FKzDialogueAlias Alias;
+		if (Asset->TryGetAliasById(EntryId, Alias))
+		{
+			if (Alias.DefaultChannel.IsValid())
+			{
+				return Alias.DefaultChannel;
+			}
+
+			const FGameplayTag Unanimous = GetAliasUnanimousChannel(*Asset, Alias);
+			if (Unanimous.IsValid())
+			{
+				return Unanimous;
+			}
+		}
+	}
+
+	if (IsValid(Asset) && Asset->DefaultChannel.IsValid())
+	{
+		return Asset->DefaultChannel;
+	}
+
+	return DefaultChannel;
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::FindPlayer(FGameplayTag InChannel) const
@@ -61,15 +152,23 @@ const FKzDialogueChannelDefinition* UKzDialogueSubsystem::FindChannelDefinition(
 {
 	if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
 	{
-		const FKzDialogueChannelDefinition* Found = Settings->FindChannel(Tag);
-		if (!Found && Tag.IsValid())
+		// Walk up the hierarchy: Dialogue.Channel.Bark.MyCharacter inherits the definition
+		// declared for Dialogue.Channel.Bark, so per-character channels need no declaration.
+		for (FGameplayTag Cursor = Tag; Cursor.IsValid(); Cursor = Cursor.RequestDirectParent())
+		{
+			if (const FKzDialogueChannelDefinition* Found = Settings->FindChannel(Cursor))
+			{
+				return Found;
+			}
+		}
+
+		if (Tag.IsValid())
 		{
 			UE_LOG(LogKzDialogue, Warning,
-				TEXT("Playing on channel '%s' which is not defined in KzDialogueSettings. "
+				TEXT("Playing on channel '%s' with no definition for it or any ancestor in KzDialogueSettings. "
 					"Using fallback values. Consider adding it under Project Settings -> Plugins -> KzDialogue -> Channels."),
 				*Tag.ToString());
 		}
-		return Found;
 	}
 	return nullptr;
 }
@@ -147,10 +246,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGam
 		return nullptr;
 	}
 
-	if (!InChannel.IsValid())
-	{
-		InChannel = Asset->DefaultChannel.IsValid() ? Asset->DefaultChannel : DefaultChannel;
-	}
+	// First-entry rule: the session channel resolves from the asset's first line.
+	InChannel = ResolveChannel(InChannel, Asset->Lines.IsEmpty() ? FKzDialogueLine{} : Asset->Lines[0], Asset);
 
 	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(InheritPriority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
@@ -161,7 +258,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGam
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
-	if (!InChannel.IsValid()) { InChannel = DefaultChannel; }
+	InChannel = ResolveChannel(InChannel, Line, /*Asset*/ nullptr);
 
 	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
@@ -208,9 +305,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine)
 {
-	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
+	if (!IsValid(Asset) || !LineId.IsValid()) { return false; }
 
 	FGuid LineIdToPlay = LineId;
 
@@ -220,22 +317,103 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 		LineIdToPlay = ResolveAliasInternal(Alias);
 		if (!LineIdToPlay.IsValid())
 		{
-			return nullptr;
+			return false;
 		}
 	}
 
+	return Asset->TryGetLineById(LineIdToPlay, OutLine);
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
 	FKzDialogueLine Line;
-	if (!Asset->TryGetLineById(LineIdToPlay, Line))
+	if (!ResolveAssetEntry(Asset, LineId, Line))
 	{
 		return nullptr;
 	}
 
+	// Resolve on the authored ENTRY (not the alias-picked line) so pre-play resolution by
+	// callers (async actions) always lands on the same player.
+	InChannel = ResolveChannelForEntry(InChannel, Asset, LineId);
+
 	return PlayLine(Line, InChannel, Priority, bStartImmediately);
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
+	if (!IsValid(Asset) || LineIds.IsEmpty()) { return nullptr; }
+
+	// Resolve every entry up-front (aliases go through the stateful resolver, like PlayAssetLine).
+	TArray<FKzDialogueLine> Lines;
+	Lines.Reserve(LineIds.Num());
+
+	for (const FGuid& LineId : LineIds)
+	{
+		FKzDialogueLine Line;
+		if (ResolveAssetEntry(Asset, LineId, Line))
+		{
+			Lines.Add(MoveTemp(Line));
+		}
+		else
+		{
+			UE_LOG(LogKzDialogue, Warning, TEXT("PlayAssetLineList: id '%s' does not resolve in '%s'; skipping."), *LineId.ToString(), *Asset->GetName());
+		}
+	}
+
+	if (Lines.IsEmpty()) { return nullptr; }
+
+	// First-entry rule: the session channel resolves from the first AUTHORED entry, so
+	// pre-play resolution by callers stays deterministic even when entries get skipped.
+	InChannel = ResolveChannelForEntry(InChannel, Asset, LineIds[0]);
+
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
+
+	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+{
+	if (Refs.IsEmpty()) { return nullptr; }
+
+	TArray<FKzDialogueLine> Lines;
+	Lines.Reserve(Refs.Num());
+
+	for (const FKzDialogueLineRef& Ref : Refs)
+	{
+		if (!Ref.IsValid()) { continue; }
+
+		UKzDialogueAsset* Asset = Ref.Asset.LoadSynchronous();
+
+		FKzDialogueLine Line;
+		if (ResolveAssetEntry(Asset, Ref.LineId, Line))
+		{
+			Lines.Add(MoveTemp(Line));
+		}
+		else
+		{
+			UE_LOG(LogKzDialogue, Warning, TEXT("PlayLineRefs: ref '%s' does not resolve; skipping."), *Ref.Asset.ToString());
+		}
+	}
+
+	if (Lines.IsEmpty()) { return nullptr; }
+
+	// First-entry rule, on the first AUTHORED ref (see PlayAssetLineList).
+	InChannel = ResolveChannelForEntry(InChannel, Refs[0].Asset.LoadSynchronous(), Refs[0].LineId);
+
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
+
+	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
 }
 
 void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 {
-	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))
+	TArray<UKzDialoguePlayer*> Matching;
+	GetPlayersInScope(InChannel, Matching);
+	for (UKzDialoguePlayer* Player : Matching)
 	{
 		Player->Stop();
 	}
@@ -251,7 +429,9 @@ void UKzDialogueSubsystem::StopAll()
 
 void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
 {
-	if (UKzDialoguePlayer* Player = FindPlayer(InChannel))
+	TArray<UKzDialoguePlayer*> Matching;
+	GetPlayersInScope(InChannel, Matching);
+	for (UKzDialoguePlayer* Player : Matching)
 	{
 		Player->Interrupt();
 	}

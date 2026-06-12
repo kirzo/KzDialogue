@@ -19,6 +19,14 @@ void UKzSubtitleWidget::NativeConstruct()
 
 void UKzSubtitleWidget::NativeDestruct()
 {
+	if (UWorld* World = GetWorld())
+	{
+		if (UKzDialogueSubsystem* Subsystem = World->GetSubsystem<UKzDialogueSubsystem>())
+		{
+			Subsystem->OnPlayerCreated.RemoveDynamic(this, &UKzSubtitleWidget::HandlePlayerCreated);
+		}
+	}
+
 	UnbindAllPlayers();
 	Super::NativeDestruct();
 }
@@ -46,20 +54,15 @@ void UKzSubtitleWidget::BindPlayer(UKzDialoguePlayer* InPlayer)
 
 	BindPlayerEvents(InPlayer);
 
+	// A trigger channel may already be sounding: start muted when a rule says so.
+	if (IsChannelMuted(InPlayer->Channel))
+	{
+		MutedPlayers.Add(InPlayer);
+		return;
+	}
+
 	// If we bound late and the player is mid-line, sync the view to its current state.
-	const EKzDialogueState CurrentState = InPlayer->GetState();
-	if (CurrentState == EKzDialogueState::Entering)
-	{
-		ReceiveShow(InPlayer->Channel);
-	}
-	else if (CurrentState == EKzDialogueState::LineEntering ||
-		CurrentState == EKzDialogueState::LinePlaying ||
-		CurrentState == EKzDialogueState::LineExiting ||
-		CurrentState == EKzDialogueState::Paused)
-	{
-		ReceiveShow(InPlayer->Channel);
-		ApplyLineToView(View, InPlayer->GetCurrentLine(), InPlayer->Channel);
-	}
+	SyncViewToPlayer(InPlayer);
 }
 
 void UKzSubtitleWidget::BindPlayers(const TArray<UKzDialoguePlayer*>& InPlayers)
@@ -75,6 +78,7 @@ void UKzSubtitleWidget::UnbindPlayer(UKzDialoguePlayer* InPlayer)
 	if (!InPlayer) { return; }
 
 	UnbindPlayerEvents(InPlayer);
+	MutedPlayers.Remove(InPlayer);
 
 	BoundPlayers.RemoveAll([InPlayer](const TWeakObjectPtr<UKzDialoguePlayer>& Weak)
 		{
@@ -93,6 +97,7 @@ void UKzSubtitleWidget::UnbindAllPlayers()
 	}
 	BoundPlayers.Reset();
 	ActiveAnimations.Reset();
+	MutedPlayers.Reset();
 }
 
 void UKzSubtitleWidget::GetBoundPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const
@@ -116,12 +121,40 @@ void UKzSubtitleWidget::BindFromListenedChannels()
 	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
 	if (!Subsystem) { return; }
 
-	for (const FGameplayTag& Channel : ListenedChannels)
+	// Bind every existing player matching a listened scope...
+	for (const FGameplayTag& Scope : ListenedChannels)
 	{
-		if (UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Channel))
+		TArray<UKzDialoguePlayer*> Matching;
+		Subsystem->GetPlayersInScope(Scope, Matching);
+		for (UKzDialoguePlayer* Player : Matching)
 		{
 			BindPlayer(Player);
 		}
+	}
+
+	// ...and watch for players created later. They are broadcast before anything plays on
+	// them, so the view is wired ahead of their first StartDialogue.
+	Subsystem->OnPlayerCreated.AddDynamic(this, &UKzSubtitleWidget::HandlePlayerCreated);
+
+	// Per-player mute evaluation during the loop above only sees the players bound so far;
+	// re-evaluate now that the full set is known.
+	RefreshMuteStates();
+}
+
+bool UKzSubtitleWidget::MatchesListenedChannels(FGameplayTag Channel) const
+{
+	for (const FGameplayTag& Scope : ListenedChannels)
+	{
+		if (Channel.MatchesTag(Scope)) { return true; }
+	}
+	return false;
+}
+
+void UKzSubtitleWidget::HandlePlayerCreated(FGameplayTag Channel, UKzDialoguePlayer* InPlayer)
+{
+	if (MatchesListenedChannels(Channel))
+	{
+		BindPlayer(InPlayer);
 	}
 }
 
@@ -155,6 +188,16 @@ void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 {
+	// This player may be a mute-rule trigger: hide the views it silences before rendering.
+	RefreshMuteStates();
+
+	if (IsPlayerMuted(InPlayer))
+	{
+		// Render nothing, but keep the player's state machine moving (no-animation path).
+		InPlayer->NotifyEnterFinished();
+		return;
+	}
+
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	ReceiveShow(InPlayer->Channel);
 	if (View.StartFadeIn) { PlayAnimForPlayer(View.StartFadeIn, InPlayer); }
@@ -163,6 +206,13 @@ void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 {
+	if (IsPlayerMuted(InPlayer))
+	{
+		// The view was already hidden when the mute kicked in.
+		InPlayer->NotifyExitFinished();
+		return;
+	}
+
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.EndFadeOut) { PlayAnimForPlayer(View.EndFadeOut, InPlayer); }
 	else { InPlayer->NotifyExitFinished(); }
@@ -171,6 +221,12 @@ void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
+	if (IsPlayerMuted(InPlayer))
+	{
+		InPlayer->NotifyLineEnterFinished();
+		return;
+	}
+
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	ApplyLineToView(View, Line, InPlayer->Channel);
 	if (View.LineFadeIn) { PlayAnimForPlayer(View.LineFadeIn, InPlayer); }
@@ -179,6 +235,12 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 
 void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
+	if (IsPlayerMuted(InPlayer))
+	{
+		InPlayer->NotifyLineExitFinished();
+		return;
+	}
+
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.LineFadeOut) { PlayAnimForPlayer(View.LineFadeOut, InPlayer); }
 	else { InPlayer->NotifyLineExitFinished(); }
@@ -215,8 +277,19 @@ void UKzSubtitleWidget::HandleResumed(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzDialogueFinishReason Reason)
 {
-	// Only react here to hard cancellations (Abort / Interrupt).
-	if (Reason == EKzDialogueFinishReason::Completed || !IsValid(InPlayer))
+	if (!IsValid(InPlayer))
+	{
+		return;
+	}
+
+	const bool bWasMuted = IsPlayerMuted(InPlayer);
+	MutedPlayers.Remove(InPlayer);
+
+	// This player may have been a mute-rule trigger: re-show the views it was silencing.
+	RefreshMuteStates();
+
+	// Beyond mute bookkeeping, only react here to hard cancellations (Abort / Interrupt).
+	if (Reason == EKzDialogueFinishReason::Completed || bWasMuted)
 	{
 		return;
 	}
@@ -239,6 +312,107 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 	ReceiveHide(InPlayer->Channel);
+}
+
+// ---------------------------------------------------------------------------------------
+// View-level mute
+// ---------------------------------------------------------------------------------------
+
+bool UKzSubtitleWidget::IsChannelMuted(FGameplayTag Channel) const
+{
+	for (const FKzSubtitleMuteRule& Rule : MuteRules)
+	{
+		if (!Rule.Channel.IsValid() || !Channel.MatchesAny(Rule.MutedChannels))
+		{
+			continue;
+		}
+
+		// The rule applies while any bound player matching its trigger is playing. Players that
+		// the rule itself mutes don't count as triggers, so broad trigger scopes can't self-mute.
+		for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+		{
+			const UKzDialoguePlayer* Trigger = Weak.Get();
+			if (Trigger && Trigger->IsPlaying() && Trigger->Channel.MatchesTag(Rule.Channel) && !Trigger->Channel.MatchesAny(Rule.MutedChannels))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool UKzSubtitleWidget::IsPlayerMuted(const UKzDialoguePlayer* InPlayer) const
+{
+	return MutedPlayers.Contains(const_cast<UKzDialoguePlayer*>(InPlayer));
+}
+
+void UKzSubtitleWidget::RefreshMuteStates()
+{
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		UKzDialoguePlayer* Player = Weak.Get();
+		if (!Player) { continue; }
+
+		const bool bMuted = IsChannelMuted(Player->Channel);
+		const bool bWasMuted = MutedPlayers.Contains(Weak);
+		if (bMuted == bWasMuted) { continue; }
+
+		if (bMuted)
+		{
+			MutedPlayers.Add(Weak);
+			ApplyMute(Player);
+		}
+		else
+		{
+			MutedPlayers.Remove(Weak);
+			SyncViewToPlayer(Player);
+		}
+	}
+}
+
+void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
+{
+	if (!InPlayer->IsPlaying()) { return; }
+
+	// Stop the player's in-flight animations. UMG fires OnAnimationFinished on stop, which
+	// dispatches the pending Notify*Finished, so the player's state machine keeps moving.
+	TArray<UWidgetAnimation*> ToStop;
+	for (const auto& Pair : ActiveAnimations)
+	{
+		if (Pair.Value.Get() == InPlayer)
+		{
+			if (UWidgetAnimation* Anim = Pair.Key.Get())
+			{
+				ToStop.Add(Anim);
+			}
+		}
+	}
+	for (UWidgetAnimation* Anim : ToStop)
+	{
+		StopAnimation(Anim);
+	}
+
+	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
+	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+	ReceiveHide(InPlayer->Channel);
+}
+
+void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
+{
+	const EKzDialogueState CurrentState = InPlayer->GetState();
+	if (CurrentState == EKzDialogueState::Entering)
+	{
+		ReceiveShow(InPlayer->Channel);
+	}
+	else if (CurrentState == EKzDialogueState::LineEntering ||
+		CurrentState == EKzDialogueState::LinePlaying ||
+		CurrentState == EKzDialogueState::LineExiting ||
+		CurrentState == EKzDialogueState::Paused)
+	{
+		ReceiveShow(InPlayer->Channel);
+		ApplyLineToView(GetViewForChannel(InPlayer->Channel), InPlayer->GetCurrentLine(), InPlayer->Channel);
+	}
 }
 
 // ---------------------------------------------------------------------------------------

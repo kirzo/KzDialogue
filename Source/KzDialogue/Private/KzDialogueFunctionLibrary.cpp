@@ -75,19 +75,13 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObjec
 	UKzDialogueAsset* Loaded = List.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	UKzDialoguePlayer* Player = nullptr;
-	for (int32 i = 0; i < List.LineIds.Num(); ++i)
-	{
-		// First entry: respect bStartImmediately as the caller passed it.
-		// Subsequent entries: queue them (bStartImmediately=false) so they run after
-		// the previous one finishes on the channel.
-		const bool bFirstEntry = (i == 0);
-		const bool bThisStartImmediately = bFirstEntry && bStartImmediately;
+	return Sub->PlayAssetLineList(Loaded, List.LineIds, Channel, Priority, bStartImmediately);
+}
 
-		UKzDialoguePlayer* Result = Sub->PlayAssetLine(Loaded, List.LineIds[i], Channel, Priority, bThisStartImmediately);
-		if (bFirstEntry) { Player = Result; }
-	}
-	return Player;
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+{
+	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
+	return IsValid(Sub) ? Sub->PlayLineRefs(Refs, Channel, Priority, bStartImmediately) : nullptr;
 }
 
 bool UKzDialogueFunctionLibrary::TryResolveDialogueLineList(const FKzDialogueLineList& List, TArray<FKzDialogueLine>& OutLines)
@@ -105,8 +99,13 @@ bool UKzDialogueFunctionLibrary::IsDialogueChannelPlaying(const UObject* WorldCo
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	if (!IsValid(Sub)) { return false; }
 
-	UKzDialoguePlayer* Player = Sub->FindPlayer(Channel);
-	return IsValid(Player) && Player->IsPlaying();
+	TArray<UKzDialoguePlayer*> Matching;
+	Sub->GetPlayersInScope(Channel, Matching);
+	for (const UKzDialoguePlayer* Player : Matching)
+	{
+		if (Player->IsPlaying()) { return true; }
+	}
+	return false;
 }
 
 void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)

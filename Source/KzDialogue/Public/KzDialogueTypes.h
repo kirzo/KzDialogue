@@ -129,6 +129,14 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	EKzLineAudioInterruptionPolicy AudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
 
+	/**
+	 * Channel this line plays on when the callsite doesn't pass one explicitly.
+	 * Resolution chain: callsite > line > asset > project settings. For alias entries the
+	 * line level only applies when every line of the alias agrees on the same channel.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag DefaultChannel;
+
 	/** Free-form tags (mood, intent, channel hint, etc.). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	FGameplayTagContainer Tags;
@@ -256,6 +264,14 @@ struct FKzDialogueAlias
 	/** How the subsystem picks a line each time the alias is resolved. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	EKzAliasSelectionMode SelectionMode = EKzAliasSelectionMode::ShuffleBag;
+
+	/**
+	 * Channel this alias plays on when the callsite doesn't pass one explicitly.
+	 * If empty, the alias falls back to its lines' channel when ALL of them agree on the
+	 * same one, then to the asset's, then to project settings.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))
+	FGameplayTag DefaultChannel;
 
 	/**
 	 * Minimum seconds that must elapse between successful resolutions of this alias.
@@ -525,3 +541,4 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueFinished, class UKzDia
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FKzOnDialogueLineSingleEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialoguePlayerEvent, class UKzDialoguePlayer*, Player);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialoguePlayerCreated, FGameplayTag, Channel, class UKzDialoguePlayer*, Player);
