@@ -218,7 +218,14 @@ int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 Asset
 	return Resolved;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+EKzDialogueAdvanceMode UKzDialogueSubsystem::ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const
+{
+	if (Override != EKzDialogueAdvanceMode::Inherit) { return Override; }
+	if (IsValid(Asset) && Asset->AdvanceMode != EKzDialogueAdvanceMode::Inherit) { return Asset->AdvanceMode; }
+	return EKzDialogueAdvanceMode::Automatic;
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Provider))
 	{
@@ -259,6 +266,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	}
 
 	Player->CurrentPriority = ResolvedPriority;
+	// Inherit at this level means "no asset to resolve against" (manual providers): fall to Automatic.
+	Player->AdvanceMode = (AdvanceMode == EKzDialogueAdvanceMode::Inherit) ? EKzDialogueAdvanceMode::Automatic : AdvanceMode;
 	Player->SetProvider(Provider);
 
 	if (bStartImmediately)
@@ -269,7 +278,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	return Player;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset))
 	{
@@ -283,7 +292,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGam
 	const int32 ResolvedPriority = ResolvePriority(InheritPriority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
 
 	UKzAssetDialogueProvider* Provider = UKzAssetDialogueProvider::Create(this, Asset);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately, ResolveAdvanceMode(AdvanceMode, Asset));
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)

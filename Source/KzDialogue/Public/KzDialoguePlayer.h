@@ -61,6 +61,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Player")
 	bool bStartAudioOnLineEnter = true;
 
+	/**
+	 * Automatic: each line auto-advances after its duration. Manual: each line holds until
+	 * Next() is called (RPG-style). Set per session by the subsystem (asset > callsite override).
+	 */
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Player")
+	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic;
+
 	/** Channel this player is associated with (set by the subsystem on creation). */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")
 	FGameplayTag Channel;
@@ -155,6 +162,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Skip();
 
+	/**
+	 * Advance to the next line. The driver of progression in Manual advance mode; in Automatic
+	 * mode it advances early, like Skip. No-op unless a line is showing. The player stays
+	 * input-agnostic: callers decide when to call this.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
+	void Next();
+
 	// -------------------------------------------------------------------------------
 	// Specific line bindings
 	// -------------------------------------------------------------------------------
@@ -230,6 +245,9 @@ private:
 	void Enter_LinePlaying();
 	void Enter_LineExiting();
 	void Enter_Exiting();
+
+	/** Shared by Skip() and Next(): cancel the line timer and move the showing line to LineExiting. */
+	void AdvanceCurrentLine();
 
 	// Helpers.
 	void StartLineAudio();

@@ -529,6 +529,18 @@ enum class EKzDialogueFinishReason : uint8
 	Interrupted
 };
 
+/** How a dialogue advances from one line to the next. */
+UENUM(BlueprintType)
+enum class EKzDialogueAdvanceMode : uint8
+{
+	/** Resolve from the next link in the chain (callsite override > asset > Automatic). */
+	Inherit,
+	/** Auto-advance once the line's resolved duration elapses. */
+	Automatic,
+	/** Hold each line until Next() is called. */
+	Manual
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueStarted, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueFinished, class UKzDialoguePlayer*, Player, EKzDialogueFinishReason, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);

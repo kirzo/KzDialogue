@@ -40,6 +40,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
+	/** How this dialogue advances by default: auto-timed, or holding each line until Next() (RPG-style). The callsite may override. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic;
+
 	/** The lines, in playback order. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueLine> Lines;

@@ -77,12 +77,12 @@ public:
 	 * Pass InheritPriority to fall back to the asset hint / channel default. Otherwise
 	 * the priority is clamped to the channel's [MinPriority, MaxPriority] range.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
+	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
 
-	/** Convenience wrapper: build an asset provider and play it. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true);
+	/** Convenience wrapper: build an asset provider and play it. AdvanceMode defaults to the asset's. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
+	UKzDialoguePlayer* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Convenience wrapper: build a manual single-line provider and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
@@ -173,6 +173,9 @@ private:
 
 	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
 	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);
+
+	/** Resolves the advance mode: explicit override > asset's mode > Automatic. */
+	EKzDialogueAdvanceMode ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const;
 
 	/**
 	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.

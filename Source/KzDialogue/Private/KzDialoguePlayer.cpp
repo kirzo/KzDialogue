@@ -186,6 +186,16 @@ void UKzDialoguePlayer::Interrupt()
 
 void UKzDialoguePlayer::Skip()
 {
+	AdvanceCurrentLine();
+}
+
+void UKzDialoguePlayer::Next()
+{
+	AdvanceCurrentLine();
+}
+
+void UKzDialoguePlayer::AdvanceCurrentLine()
+{
 	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{
 		if (UWorld* World = GetWorld())
@@ -297,6 +307,12 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 	if (!bStartAudioOnLineEnter)
 	{
 		StartLineAudio();
+	}
+
+	// Manual mode holds the line on screen until Next(); no auto-advance timer.
+	if (AdvanceMode == EKzDialogueAdvanceMode::Manual)
+	{
+		return;
 	}
 
 	const float Duration = (PausedTimeRemaining > 0.0f) ? PausedTimeRemaining : ResolveLineDuration(CurrentLine);

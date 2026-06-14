@@ -29,10 +29,10 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* 
 }
 
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
-	FGameplayTag Channel, bool bStartImmediately)
+	FGameplayTag Channel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, bStartImmediately) : nullptr;
+	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, bStartImmediately, AdvanceMode) : nullptr;
 }
 
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
