@@ -83,6 +83,28 @@ void UKzAsyncDialogueAction::SetReadyToDestroy()
 	Super::SetReadyToDestroy();
 }
 
+void UKzAsyncDialogueAction::Stop()
+{
+	if (!DialoguePlayer) return;
+
+	// Unbind first so the player's OnDialogueFinished (fired by Stop) doesn't also route through the
+	// watchdog; then resolve as cancelled ourselves.
+	UKzDialoguePlayer* Player = DialoguePlayer;
+	CleanupBindings();
+	Player->Stop();
+	NotifyCancelled();
+}
+
+void UKzAsyncDialogueAction::Interrupt()
+{
+	if (!DialoguePlayer) return;
+
+	UKzDialoguePlayer* Player = DialoguePlayer;
+	CleanupBindings();
+	Player->Interrupt();
+	NotifyCancelled();
+}
+
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncPlayDialogueLine
 // ------------------------------------------------------------------------------------------------

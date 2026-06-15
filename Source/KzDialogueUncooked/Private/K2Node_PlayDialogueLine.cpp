@@ -51,10 +51,11 @@ void UK2Node_PlayDialogueLine::AllocateDefaultPins()
 		TBaseStructure<FGuid>::Get(), PN_LineId);
 	LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line / Alias");
 
-	// Channel. Left empty by default so the line/asset/settings chain resolves it.
+	// Channel (advanced). Left empty by default so the line/asset/settings chain resolves it.
 	UEdGraphPin* ChannelPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct,
 		TBaseStructure<FGameplayTag>::Get(), PN_Channel);
 	ChannelPin->PinFriendlyName = LOCTEXT("ChannelPin", "Channel");
+	ChannelPin->bAdvancedView = true;
 
 	// Priority (advanced).
 	UEdGraphPin* PriorityPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Int, PN_Priority);
