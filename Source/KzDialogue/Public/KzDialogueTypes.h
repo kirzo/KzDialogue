@@ -12,6 +12,7 @@
 
 class USoundBase;
 class UKzDialogueAsset;
+class UKzDialogueTimeline;
 
 namespace Kz::Tags::Dialogue
 {
@@ -149,6 +150,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 */
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	FInstancedPropertyBag AudioParams;
+
+	/** Optional per-line timeline of notifies (anim, mood, ...) driven during playback. Null when the line has none. */
+	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Dialogue|Line")
+	TObjectPtr<UKzDialogueTimeline> Timeline = nullptr;
 
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
