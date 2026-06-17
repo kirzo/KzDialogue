@@ -4,6 +4,8 @@
 #include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
+#include "KzDialogueSpeakerComponent.h"
 
 #include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
@@ -25,6 +27,7 @@ UWorld* UKzDialoguePlayer::GetWorld() const
 
 void UKzDialoguePlayer::BeginDestroy()
 {
+	FlushTimeline();
 	StopLineAudio(0.0f);
 	StopReleasedAudios(0.0f);
 	if (UWorld* World = GetWorld())
@@ -309,6 +312,8 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		StartLineAudio();
 	}
 
+	BakeTimeline();
+
 	// Manual mode holds the line on screen until Next(); no auto-advance timer.
 	if (AdvanceMode == EKzDialogueAdvanceMode::Manual)
 	{
@@ -333,6 +338,7 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
+	FlushTimeline();
 	OnRequestLineExit.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
 
@@ -368,6 +374,8 @@ void UKzDialoguePlayer::HandleLineTimerElapsed()
 
 void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 {
+	FlushTimeline();
+
 	UKzDialogueProvider* PreviousProvider = Provider;
 
 	State = EKzDialogueState::Idle;
@@ -698,4 +706,190 @@ void UKzDialoguePlayer::DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& 
 			Bindings.RemoveAll([Handle](const FSpecificLineBinding& Binding) { return Binding.Handle == Handle; });
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------------------
+// Timeline evaluation
+// ---------------------------------------------------------------------------------------
+
+ETickableTickType UKzDialoguePlayer::GetTickableTickType() const
+{
+	return HasAnyFlags(RF_ClassDefaultObject) ? ETickableTickType::Never : ETickableTickType::Conditional;
+}
+
+bool UKzDialoguePlayer::IsTickable() const
+{
+	return State == EKzDialogueState::LinePlaying && ActiveNotifies.Num() > 0;
+}
+
+TStatId UKzDialoguePlayer::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UKzDialoguePlayer, STATGROUP_Tickables);
+}
+
+void UKzDialoguePlayer::Tick(float DeltaTime)
+{
+	if (State != EKzDialogueState::LinePlaying)
+	{
+		return;
+	}
+
+	TimelineClock += DeltaTime;
+
+	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	{
+		if (Entry.bDone || !IsValid(Entry.Notify))
+		{
+			continue;
+		}
+
+		if (Entry.bIsState)
+		{
+			UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify);
+			if (!StateNotify)
+			{
+				Entry.bDone = true;
+				continue;
+			}
+
+			if (!Entry.bActive && TimelineClock >= Entry.Start)
+			{
+				StateNotify->NotifyBegin(BuildNotifyContext(Entry));
+				Entry.bActive = true;
+			}
+
+			if (Entry.bActive)
+			{
+				if (!Entry.bFlushBound && TimelineClock >= Entry.End)
+				{
+					StateNotify->NotifyEnd(BuildNotifyContext(Entry));
+					Entry.bActive = false;
+					Entry.bDone = true;
+				}
+				else
+				{
+					StateNotify->NotifyTick(BuildNotifyContext(Entry), DeltaTime);
+				}
+			}
+		}
+		else if (TimelineClock >= Entry.Start)
+		{
+			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
+			{
+				PointNotify->Notify(BuildNotifyContext(Entry));
+			}
+			Entry.bDone = true;
+		}
+	}
+}
+
+void UKzDialoguePlayer::BakeTimeline()
+{
+	ActiveNotifies.Reset();
+	TimelineClock = 0.0f;
+	CachedLineSpeaker = nullptr;
+	CachedLineDuration = 0.0f;
+
+	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
+	if (!Timeline || Timeline->IsEmpty())
+	{
+		return;
+	}
+
+	CachedLineDuration = ResolveLineDuration(CurrentLine);
+	if (CurrentLine.Speaker.SpeakerTag.IsValid())
+	{
+		CachedLineSpeaker = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag);
+	}
+
+	FKzDialogueTimeResolveContext ResolveContext;
+	ResolveContext.LineDuration = CachedLineDuration;
+	ResolveContext.Audio = CurrentLine.Audio.Get();
+
+	for (const FKzDialogueNotifyTrack& Track : Timeline->Tracks)
+	{
+		for (const FKzDialogueNotifyEvent& Event : Track.Events)
+		{
+			if (!IsValid(Event.Notify))
+			{
+				continue;
+			}
+
+			const FKzDialogueTimeSource* Source = Event.TimeSource.GetPtr<FKzDialogueTimeSource>();
+			if (!Source)
+			{
+				continue;
+			}
+
+			float Start = 0.0f;
+			float End = 0.0f;
+			Source->Resolve(ResolveContext, Start, End);
+
+			FKzDialogueActiveNotify& Entry = ActiveNotifies.AddDefaulted_GetRef();
+			Entry.Notify = Event.Notify;
+			Entry.bIsState = Event.Notify->IsA<UKzDialogueNotifyState>();
+			Entry.Start = Start;
+			Entry.End = FMath::Max(Start, End);
+			Entry.bFlushBound = Entry.bIsState && (Entry.End >= CachedLineDuration - UE_KINDA_SMALL_NUMBER);
+			Entry.bFireIfSkipped = Event.bFireIfSkipped;
+		}
+	}
+}
+
+void UKzDialoguePlayer::FlushTimeline()
+{
+	if (ActiveNotifies.Num() == 0)
+	{
+		return;
+	}
+
+	// End active states in reverse (LIFO).
+	for (int32 Index = ActiveNotifies.Num() - 1; Index >= 0; --Index)
+	{
+		FKzDialogueActiveNotify& Entry = ActiveNotifies[Index];
+		if (Entry.bIsState && Entry.bActive && IsValid(Entry.Notify))
+		{
+			if (UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify))
+			{
+				StateNotify->NotifyEnd(BuildNotifyContext(Entry));
+			}
+			Entry.bActive = false;
+		}
+	}
+
+	// Fire skipped points that opted in.
+	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	{
+		if (!Entry.bIsState && !Entry.bDone && Entry.bFireIfSkipped && IsValid(Entry.Notify))
+		{
+			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
+			{
+				PointNotify->Notify(BuildNotifyContext(Entry));
+			}
+		}
+	}
+
+	ActiveNotifies.Reset();
+	CachedLineSpeaker = nullptr;
+}
+
+FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry)
+{
+	FKzDialogueNotifyContext Context;
+	Context.Player = this;
+	Context.LineSpeaker = CachedLineSpeaker;
+
+	UKzDialogueSpeakerComponent* Target = CachedLineSpeaker;
+	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride.IsValid())
+	{
+		Target = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, Entry.Notify->TargetSpeakerOverride);
+	}
+
+	Context.TargetSpeaker = Target;
+	Context.TargetActor = Target ? Target->GetOwner() : nullptr;
+	Context.LineDuration = CachedLineDuration;
+	Context.CurrentTime = TimelineClock;
+	Context.EventStart = Entry.Start;
+	Context.EventEnd = Entry.End;
+	return Context;
 }

@@ -5,11 +5,46 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "Engine/TimerHandle.h"
+#include "Tickable.h"
 #include "KzDialogueTypes.h"
+#include "KzDialogueNotify.h"
 #include "KzDialoguePlayer.generated.h"
 
 class UAudioComponent;
 class UKzDialogueProvider;
+class UKzDialogueSpeakerComponent;
+
+/**
+ * Runtime, baked-to-seconds copy of a timeline event for the currently playing line.
+ * Built at LinePlaying; the flags track point firing and state activity.
+ */
+USTRUCT()
+struct FKzDialogueActiveNotify
+{
+	GENERATED_BODY()
+
+	UPROPERTY(Transient)
+	TObjectPtr<UKzDialogueNotifyBase> Notify = nullptr;
+
+	/** Baked window in seconds. End == Start for point notifies. */
+	float Start = 0.0f;
+	float End = 0.0f;
+
+	/** Cached UKzDialogueNotifyState check. */
+	bool bIsState = false;
+
+	/** End reaches the line end, so the state ends at the flush, not by the clock. */
+	bool bFlushBound = false;
+
+	/** Mirror of the event flag: fire a skipped point at flush time. */
+	bool bFireIfSkipped = false;
+
+	/** State is currently begun. */
+	bool bActive = false;
+
+	/** Point already fired, or state already ended. */
+	bool bDone = false;
+};
 
 /**
  * Engine of the dialogue system. Owns the state machine, drives the provider, manages
@@ -28,7 +63,7 @@ class UKzDialogueProvider;
  * Views without animations: call SetUsesFadeAnimations(false) on bind.
  */
 UCLASS(BlueprintType)
-class KZDIALOGUE_API UKzDialoguePlayer : public UObject
+class KZDIALOGUE_API UKzDialoguePlayer : public UObject, public FTickableGameObject
 {
 	GENERATED_BODY()
 
@@ -238,6 +273,14 @@ public:
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
 
+	//~ FTickableGameObject
+	virtual void Tick(float DeltaTime) override;
+	virtual ETickableTickType GetTickableTickType() const override;
+	virtual bool IsTickable() const override;
+	virtual bool IsTickableWhenPaused() const override { return false; }
+	virtual UWorld* GetTickableGameObjectWorld() const override { return GetWorld(); }
+	virtual TStatId GetStatId() const override;
+
 private:
 	// State machine entry points. Each transitions and broadcasts as needed.
 	void Enter_Entering();
@@ -258,6 +301,11 @@ private:
 	void StopReleasedAudios(float FadeTime = 0.1f);
 	void HandleLineTimerElapsed();
 	void FinishWithReason(EKzDialogueFinishReason Reason);
+
+	// Notify timeline driven during LinePlaying.
+	void BakeTimeline();
+	void FlushTimeline();
+	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueProvider> Provider = nullptr;
@@ -284,6 +332,20 @@ private:
 	float PausedTimeRemaining = 0.0f;
 
 	FTimerHandle LineTimerHandle;
+
+	// Timeline runtime state (valid only while a timelined line is in LinePlaying).
+
+	UPROPERTY(Transient)
+	TArray<FKzDialogueActiveNotify> ActiveNotifies;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UKzDialogueSpeakerComponent> CachedLineSpeaker = nullptr;
+
+	/** The evaluator clock: elapsed line time in seconds. */
+	float TimelineClock = 0.0f;
+
+	/** Resolved line duration in seconds, cached at bake. */
+	float CachedLineDuration = 0.0f;
 
 	struct FSpecificLineBinding
 	{
