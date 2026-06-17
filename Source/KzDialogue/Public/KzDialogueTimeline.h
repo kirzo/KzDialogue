@@ -3,30 +3,76 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "StructUtils/InstancedStruct.h"
 #include "KzDialogueTimeline.generated.h"
 
+class USoundBase;
 class UKzDialogueNotifyBase;
 
+/** Inputs available when baking an event's time source to seconds at line start. */
+struct FKzDialogueTimeResolveContext
+{
+	/** Resolved line duration, in seconds. */
+	float LineDuration = 0.0f;
+
+	/** Audio currently loaded for the line (for anchor sources). May be null. */
+	const USoundBase* Audio = nullptr;
+};
+
 /**
- * A single timed entry on a timeline track. Time/Duration are seconds, or a [0,1]
- * fraction of the line when bNormalized; both are baked to seconds at line start.
+ * Base for an event's timing. Resolved to absolute seconds [Start, End] at line start.
+ * Relative timing survives localization; anchor-based sources (e.g. audio cue points)
+ * can be added later without touching the evaluator.
+ */
+USTRUCT()
+struct KZDIALOGUE_API FKzDialogueTimeSource
+{
+	GENERATED_BODY()
+
+	virtual ~FKzDialogueTimeSource() = default;
+
+	/** Bake to absolute seconds for the playing line. End == Start means instantaneous. */
+	virtual void Resolve(const FKzDialogueTimeResolveContext& Context, float& OutStart, float& OutEnd) const { OutStart = 0.0f; OutEnd = 0.0f; }
+};
+
+/**
+ * Time relative to the line: absolute seconds, or a [0,1] fraction of the line duration
+ * when bNormalized. Language-agnostic, since it scales to each language's duration.
+ */
+USTRUCT(meta = (DisplayName = "Relative"))
+struct KZDIALOGUE_API FKzDialogueTimeSource_Relative : public FKzDialogueTimeSource
+{
+	GENERATED_BODY()
+
+	/** Event start. Seconds, or [0,1] of the line when bNormalized. */
+	UPROPERTY(EditAnywhere, Category = "Time", meta = (ClampMin = 0))
+	float Time = 0.0f;
+
+	/** Window length for state notifies; 0 for point notifies. Seconds or fraction per bNormalized. */
+	UPROPERTY(EditAnywhere, Category = "Time", meta = (ClampMin = 0))
+	float Duration = 0.0f;
+
+	/** When true, Time/Duration are a [0,1] fraction of the line; otherwise absolute seconds. */
+	UPROPERTY(EditAnywhere, Category = "Time")
+	bool bNormalized = false;
+
+	virtual void Resolve(const FKzDialogueTimeResolveContext& Context, float& OutStart, float& OutEnd) const override;
+};
+
+/**
+ * A single timed entry on a timeline track. TimeSource resolves to absolute seconds at
+ * line start; the notify's class decides whether the window or just the start is used.
  */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueNotifyEvent
 {
 	GENERATED_BODY()
 
-	/** Event start. Seconds, or [0,1] of the line when bNormalized. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event", meta = (ClampMin = 0))
-	float Time = 0.0f;
+	FKzDialogueNotifyEvent();
 
-	/** Window length for state notifies; 0 for point notifies. Seconds or fraction per bNormalized. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event", meta = (ClampMin = 0))
-	float Duration = 0.0f;
-
-	/** When true, Time/Duration are a [0,1] fraction of the line; otherwise absolute seconds. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event")
-	bool bNormalized = false;
+	/** How this event's timing resolves to seconds. Relative by default; pluggable (e.g. an audio anchor) later. */
+	UPROPERTY(EditAnywhere, Category = "Event", meta = (BaseStruct = "/Script/KzDialogue.KzDialogueTimeSource", ExcludeBaseStruct))
+	FInstancedStruct TimeSource;
 
 	/** When true, a point notify still fires if the line is skipped past its time. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event")
