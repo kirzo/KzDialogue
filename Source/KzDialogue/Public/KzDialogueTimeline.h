@@ -112,6 +112,10 @@ class KZDIALOGUE_API UKzDialogueTimeline : public UObject
 	GENERATED_BODY()
 
 public:
+	/** Line this timeline belongs to. Set when the timeline is created for a line. */
+	UPROPERTY()
+	FGuid OwningLineId;
+
 	/** Named rows of notify events. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Timeline")
 	TArray<FKzDialogueNotifyTrack> Tracks;

@@ -8,6 +8,8 @@
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.generated.h"
 
+class UKzDialogueTimeline;
+
 /**
  * Authorable asset describing a linear dialogue: an ordered list of lines plus
  * metadata. Pluggable inside Sequencer tracks, dialogue subsystem, speaker components,
@@ -52,9 +54,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	TArray<FKzDialogueAlias> Aliases;
 
+	/** Per-line notify timelines, owned by the asset and keyed by line id. Managed by the line editor. */
+	UPROPERTY(Instanced)
+	TArray<TObjectPtr<UKzDialogueTimeline>> Timelines;
+
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
 	int32 IndexOfLine(const FGuid& LineId) const;
+
+	/** Find the notify timeline owned by the given line id, or null. */
+	UKzDialogueTimeline* FindTimelineForLine(const FGuid& LineId) const;
 
 	/** Get a line by its stable id. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")

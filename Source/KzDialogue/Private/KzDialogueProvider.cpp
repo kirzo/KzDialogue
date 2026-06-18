@@ -2,6 +2,7 @@
 
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
 
 // =======================================================================================
 // UKzAssetDialogueProvider
@@ -32,13 +33,18 @@ FKzDialogueLine UKzAssetDialogueProvider::Advance_Implementation()
 {
 	if (!IsValid(Asset)) { return {}; }
 	CursorIndex = (CursorIndex == INDEX_NONE) ? ResolveStartIndex() : CursorIndex + 1;
-	return Asset->Lines.IsValidIndex(CursorIndex) ? Asset->Lines[CursorIndex] : FKzDialogueLine{};
+	if (!Asset->Lines.IsValidIndex(CursorIndex)) { return FKzDialogueLine{}; }
+	FKzDialogueLine Line = Asset->Lines[CursorIndex];
+	Line.Timeline = Asset->FindTimelineForLine(Line.LineId);
+	return Line;
 }
 
 FKzDialogueLine UKzAssetDialogueProvider::Current_Implementation() const
 {
 	if (!IsValid(Asset) || !Asset->Lines.IsValidIndex(CursorIndex)) { return {}; }
-	return Asset->Lines[CursorIndex];
+	FKzDialogueLine Line = Asset->Lines[CursorIndex];
+	Line.Timeline = Asset->FindTimelineForLine(Line.LineId);
+	return Line;
 }
 
 void UKzAssetDialogueProvider::Reset_Implementation()

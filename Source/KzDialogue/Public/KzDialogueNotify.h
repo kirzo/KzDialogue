@@ -70,9 +70,15 @@ public:
 	/** Label shown on the timeline marker, the add menu and debug overlays. */
 	virtual FText GetNotifyName() const;
 
+#if WITH_EDITORONLY_DATA
+	/** Tint of this notify's marker in the timeline editor. */
+	UPROPERTY(EditAnywhere, Category = "Notify")
+	FLinearColor NotifyColor = FLinearColor(0.46f, 0.62f, 0.85f);
+#endif
+
 #if WITH_EDITOR
-	/** Row tint for the editor timeline. */
-	virtual FLinearColor GetEditorColor() const { return FLinearColor::White; }
+	/** Marker tint in the editor timeline. */
+	virtual FLinearColor GetEditorColor() const { return NotifyColor; }
 #endif
 };
 

@@ -4,5 +4,7 @@
 
 FText UKzDialogueNotifyBase::GetNotifyName() const
 {
-	return FText::FromString(FName::NameToDisplayString(GetClass()->GetName(), false));
+	FString RawName = GetClass()->GetName();
+	RawName.RemoveFromEnd(TEXT("_C"));
+	return FText::FromString(FName::NameToDisplayString(RawName, false));
 }

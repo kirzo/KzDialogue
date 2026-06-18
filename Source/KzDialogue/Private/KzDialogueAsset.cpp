@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
 
 UKzDialogueAsset::UKzDialogueAsset()
 {
@@ -9,6 +10,19 @@ UKzDialogueAsset::UKzDialogueAsset()
 int32 UKzDialogueAsset::IndexOfLine(const FGuid& LineId) const
 {
 	return Lines.IndexOfByPredicate([&LineId](const FKzDialogueLine& L) { return L.LineId == LineId; });
+}
+
+UKzDialogueTimeline* UKzDialogueAsset::FindTimelineForLine(const FGuid& LineId) const
+{
+	if (!LineId.IsValid()) { return nullptr; }
+	for (const TObjectPtr<UKzDialogueTimeline>& Timeline : Timelines)
+	{
+		if (Timeline && Timeline->OwningLineId == LineId)
+		{
+			return Timeline;
+		}
+	}
+	return nullptr;
 }
 
 bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& OutLine) const
@@ -177,6 +191,15 @@ void UKzDialogueAsset::EnsureLineGuids()
 			}
 			Seen.Add(Alias.AliasId);
 		}
+	}
+
+	// Prune timelines whose owning line no longer exists.
+	{
+		const int32 Removed = Timelines.RemoveAll([this](const TObjectPtr<UKzDialogueTimeline>& Timeline)
+		{
+			return !Timeline || IndexOfLine(Timeline->OwningLineId) == INDEX_NONE;
+		});
+		if (Removed > 0) { bDirty = true; }
 	}
 
 	if (bDirty)
