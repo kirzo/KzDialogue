@@ -889,6 +889,10 @@ void SKzDialogueTimeline::Rebuild()
 			[
 				SNew(SSearchBox)
 					.HintText(LOCTEXT("FilterTracksHint", "Filter"))
+					// Seed from FilterText so the active filter survives the Rebuild that each
+					// keystroke triggers; otherwise the box comes up empty while the filter stays
+					// applied, and there is no text left to clear to revert it.
+					.InitialText(FilterText)
 					.OnTextChanged_Lambda([this](const FText& InText) { FilterText = InText; Rebuild(); })
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2, 0, 0, 0)
