@@ -1211,6 +1211,20 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTransportControl()
 	{
 		FTransportControlWidget(ETransportControlWidgetType::BackwardEnd),
 		FTransportControlWidget(ETransportControlWidgetType::ForwardPlay),
+		// Custom Stop: stops playback and rewinds the playhead to 0 (the transport has no native stop).
+		FTransportControlWidget(FOnMakeTransportWidget::CreateLambda([this]() -> TSharedRef<SWidget>
+		{
+			return SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "Animation.PlayControlsButton")
+				.ContentPadding(0.0f)
+				.ToolTipText(LOCTEXT("StopTip", "Stop and rewind to the start"))
+				.OnClicked_Lambda([this]() { StopPlayback(); SetPlayhead(0.f); return FReply::Handled(); })
+				[
+					SNew(SImage)
+						.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+						.Image(FAppStyle::Get().GetBrush("Animation.Stop"))
+				];
+		})),
 		FTransportControlWidget(ETransportControlWidgetType::ForwardEnd),
 		FTransportControlWidget(ETransportControlWidgetType::Loop)
 	};
