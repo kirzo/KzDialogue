@@ -14,6 +14,8 @@
 #include "IAssetTools.h"
 #include "Factories/BlueprintFactory.h"
 #include "Engine/Blueprint.h"
+#include "Editor.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
@@ -112,6 +114,7 @@ public:
 	DECLARE_DELEGATE_ThreeParams(FOnZoom, float /*CursorSeconds*/, float /*WheelDelta*/, bool /*bPan*/);
 	DECLARE_DELEGATE_OneParam(FOnPan, float /*DeltaSeconds*/);
 	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*TargetTrack*/);
+	DECLARE_DELEGATE_OneParam(FOnActivateEvent, int32 /*EventIndex*/);
 
 	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
@@ -132,6 +135,7 @@ public:
 		SLATE_EVENT(FOnZoom, OnZoom)
 		SLATE_EVENT(FOnPan, OnPan)
 		SLATE_EVENT(FOnMoveToTrack, OnMoveToTrack)
+		SLATE_EVENT(FOnActivateEvent, OnActivateEvent)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs)
@@ -154,6 +158,7 @@ public:
 		OnZoom = InArgs._OnZoom;
 		OnPan = InArgs._OnPan;
 		OnMoveToTrack = InArgs._OnMoveToTrack;
+		OnActivateEvent = InArgs._OnActivateEvent;
 		SetClipping(EWidgetClipping::ClipToBounds);
 	}
 
@@ -442,6 +447,23 @@ public:
 		return FReply::Unhandled();
 	}
 
+	virtual FReply OnMouseButtonDoubleClick(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton) { return FReply::Unhandled(); }
+
+		const float W = MyGeometry.GetLocalSize().X;
+		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
+		EDragMode Mode;
+		const int32 Hit = HitTest(LocalX, W, Dur, Mode);
+		if (Hit == INDEX_NONE) { return FReply::Unhandled(); }
+
+		OnSelect.ExecuteIfBound(Hit);
+		Invalidate(EInvalidateWidgetReason::Paint);
+		OnActivateEvent.ExecuteIfBound(Hit);
+		return FReply::Handled();
+	}
+
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
 		if (!OnZoom.IsBound()) { return FReply::Unhandled(); }
@@ -556,6 +578,7 @@ private:
 	FOnZoom OnZoom;
 	FOnPan OnPan;
 	FOnMoveToTrack OnMoveToTrack;
+	FOnActivateEvent OnActivateEvent;
 	bool bPanning = false;
 	float PanLastX = 0.f;
 
@@ -1058,7 +1081,23 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTrackAreaRow(int32 TrackIndex)
 			.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
 			.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
 			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 ToTrack) { MoveEventToTrack(TrackIndex, EventIndex, ToTrack); })
+			.OnActivateEvent_Lambda([this, TrackIndex](int32 EventIndex) { OpenEventNotifyAsset(TrackIndex, EventIndex); })
 	];
+}
+
+void SKzDialogueTimeline::OpenEventNotifyAsset(int32 TrackIndex, int32 EventIndex)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
+
+	const UKzDialogueNotifyBase* Notify = T->Tracks[TrackIndex].Events[EventIndex].Notify;
+	if (!IsValid(Notify)) { return; }
+
+	// Only Blueprint notifies have an asset to open; native ones have nowhere to go.
+	if (UBlueprint* Blueprint = UBlueprint::GetBlueprintFromClass(Notify->GetClass()))
+	{
+		GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Blueprint);
+	}
 }
 
 TSharedRef<SWidget> SKzDialogueTimeline::MakeAddMenuForTrack(int32 TrackIndex, float TimeSeconds)

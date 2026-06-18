@@ -68,6 +68,7 @@ private:
 	void RetimeEvent(int32 TrackIndex, int32 EventIndex, float StartSeconds, float EndSeconds);
 	void EndRetime();
 	void MoveEventToTrack(int32 FromTrack, int32 EventIndex, int32 ToTrack);
+	void OpenEventNotifyAsset(int32 TrackIndex, int32 EventIndex);
 
 	FKzDialogueNotifyEvent* SelectedEvent() const;
 
