@@ -70,6 +70,13 @@ public:
 	/** Label shown on the timeline marker, the add menu and debug overlays. */
 	virtual FText GetNotifyName() const;
 
+	/** Cached by the player driving this notify so GetWorld() resolves at runtime (for blueprint
+	 * world-context nodes, spawning, timers). The context still carries the player per call. */
+	void SetOwningPlayer(UKzDialoguePlayer* InPlayer);
+
+	//~ UObject
+	virtual UWorld* GetWorld() const override;
+
 #if WITH_EDITORONLY_DATA
 	/** Tint of this notify's marker in the timeline editor. */
 	UPROPERTY(EditAnywhere, Category = "Notify")
@@ -80,6 +87,10 @@ public:
 	/** Marker tint in the editor timeline. */
 	virtual FLinearColor GetEditorColor() const { return NotifyColor; }
 #endif
+
+private:
+	/** Runtime-only back-reference to the driving player; weak so it never keeps it alive. */
+	TWeakObjectPtr<UKzDialoguePlayer> OwningPlayer;
 };
 
 /**

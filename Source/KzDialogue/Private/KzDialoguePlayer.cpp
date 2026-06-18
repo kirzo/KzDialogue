@@ -827,6 +827,7 @@ void UKzDialoguePlayer::BakeTimeline()
 
 			FKzDialogueActiveNotify& Entry = ActiveNotifies.AddDefaulted_GetRef();
 			Entry.Notify = Event.Notify;
+			Event.Notify->SetOwningPlayer(this);
 			Entry.bIsState = Event.Notify->IsA<UKzDialogueNotifyState>();
 			Entry.Start = Start;
 			Entry.End = FMath::Max(Start, End);
