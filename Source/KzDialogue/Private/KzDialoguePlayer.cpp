@@ -325,8 +325,7 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().SetTimer(LineTimerHandle, this,
-			&UKzDialoguePlayer::HandleLineTimerElapsed, Duration, /*loop=*/false);
+		World->GetTimerManager().SetTimer(LineTimerHandle, this, &UKzDialoguePlayer::HandleLineTimerElapsed, Duration, /*loop=*/false);
 	}
 	else
 	{

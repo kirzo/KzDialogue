@@ -32,6 +32,9 @@ bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& Ou
 		if (Line.LineId == InLineId)
 		{
 			OutLine = Line;
+			// Resolve the transient per-line timeline here so every asset-line lookup carries it,
+			// not just the iterating provider (single-line and Sequencer play paths go through here).
+			OutLine.Timeline = FindTimelineForLine(InLineId);
 			return true;
 		}
 	}
