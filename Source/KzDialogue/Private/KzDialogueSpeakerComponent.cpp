@@ -93,3 +93,49 @@ UKzDialoguePlayer* UKzDialogueSpeakerComponent::SpeakLine(const FKzDialogueLine&
 	}
 	return Sub->PlayLine(LineCopy, DefaultChannel);
 }
+
+void UKzDialogueSpeakerComponent::AddDialogueTags(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		int32& Count = ActiveDialogueTagCounts.FindOrAdd(Tag);
+		if (Count++ == 0)
+		{
+			ActiveDialogueTags.AddTag(Tag);
+		}
+	}
+}
+
+void UKzDialogueSpeakerComponent::RemoveDialogueTags(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		int32* Count = ActiveDialogueTagCounts.Find(Tag);
+		if (Count && --(*Count) <= 0)
+		{
+			ActiveDialogueTagCounts.Remove(Tag);
+			ActiveDialogueTags.RemoveTag(Tag);
+		}
+	}
+}
+
+void UKzDialogueSpeakerComponent::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer.Reset();
+	TagContainer.AppendTags(ActiveDialogueTags);
+}
+
+bool UKzDialogueSpeakerComponent::HasMatchingGameplayTag(FGameplayTag TagToCheck) const
+{
+	return ActiveDialogueTags.HasTag(TagToCheck);
+}
+
+bool UKzDialogueSpeakerComponent::HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
+{
+	return ActiveDialogueTags.HasAll(TagContainer);
+}
+
+bool UKzDialogueSpeakerComponent::HasAnyMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
+{
+	return ActiveDialogueTags.HasAny(TagContainer);
+}
