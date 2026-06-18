@@ -32,6 +32,7 @@ public class KzDialogueEditor : ModuleRules
 				"ApplicationCore",
 				"BlueprintGraph",
 				"ToolWidgets",
+				"EditorWidgets",
 				"Sequencer",
 				"MovieScene",
 				"MovieSceneTools",

@@ -3,6 +3,9 @@
 #include "Widgets/SKzDialogueTimeline.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueNotify.h"
+#include "KzDialogueAsset.h"
+
+#include "Sound/SoundWave.h"
 
 #include "UObject/UObjectHash.h"
 
@@ -16,6 +19,10 @@
 #include "Engine/Blueprint.h"
 #include "Editor.h"
 #include "Subsystems/AssetEditorSubsystem.h"
+#include "Components/AudioComponent.h"
+#include "Kismet/GameplayStatics.h"
+#include "EditorWidgetsModule.h"
+#include "ITransportControl.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "Fonts/FontMeasure.h"
@@ -97,6 +104,56 @@ namespace
 	}
 }
 
+// Downsampled min/max envelope of a sound wave, cached on the timeline widget and drawn in the
+// group band so the line's audio is visible along the time axis.
+struct FKzWaveformPreview
+{
+	TWeakObjectPtr<USoundWave> Wave;
+	TArray<FVector2f> Peaks;
+	float Duration = 0.f;
+	float Gain = 1.f;
+};
+
+static TSharedRef<FKzWaveformPreview> BuildWaveformPreview(USoundWave* Wave)
+{
+	TSharedRef<FKzWaveformPreview> Preview = MakeShared<FKzWaveformPreview>();
+	Preview->Wave = Wave;
+
+#if WITH_EDITOR
+	TArray<uint8> RawPCM;
+	uint32 SampleRate = 0;
+	uint16 NumChannels = 0;
+	if (Wave && Wave->GetImportedSoundWaveData(RawPCM, SampleRate, NumChannels) && NumChannels > 0 && SampleRate > 0 && RawPCM.Num() >= static_cast<int32>(sizeof(int16)))
+	{
+		const int16* Samples = reinterpret_cast<const int16*>(RawPCM.GetData());
+		const int32 NumFrames = (RawPCM.Num() / sizeof(int16)) / NumChannels;
+		const int32 BucketCount = FMath::Clamp(NumFrames, 1, 4096);
+		Preview->Peaks.SetNumUninitialized(BucketCount);
+
+		float Peak = 0.f;
+		for (int32 Bucket = 0; Bucket < BucketCount; ++Bucket)
+		{
+			const int32 FrameStart = static_cast<int32>(static_cast<int64>(Bucket) * NumFrames / BucketCount);
+			const int32 FrameEnd = FMath::Max(FrameStart + 1, static_cast<int32>(static_cast<int64>(Bucket + 1) * NumFrames / BucketCount));
+			float Mn = 0.f;
+			float Mx = 0.f;
+			for (int32 Frame = FrameStart; Frame < FrameEnd && Frame < NumFrames; ++Frame)
+			{
+				const float S = Samples[Frame * NumChannels] / 32768.0f;
+				Mn = FMath::Min(Mn, S);
+				Mx = FMath::Max(Mx, S);
+			}
+			Preview->Peaks[Bucket] = FVector2f(Mn, Mx);
+			Peak = FMath::Max(Peak, FMath::Max(-Mn, Mx));
+		}
+		Preview->Duration = static_cast<float>(NumFrames) / static_cast<float>(SampleRate);
+		Preview->Gain = Peak > KINDA_SMALL_NUMBER ? FMath::Min(1.0f / Peak, 10.0f) : 1.0f;
+	}
+#endif
+
+	return Preview;
+}
+
 // ---------------------------------------------------------------------------------------
 // SKzTimelineTrack: one lane's interactive notify track, mirroring the AnimMontage notify
 // track. Paints point/state markers along [0, duration], hit-tests them, and supports
@@ -116,15 +173,17 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*TargetTrack*/);
 	DECLARE_DELEGATE_OneParam(FOnActivateEvent, int32 /*EventIndex*/);
 
-	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE) {}
+	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
 		SLATE_ARGUMENT(int32, TrackIndex)
+		SLATE_ARGUMENT(TSharedPtr<FKzWaveformPreview>, Waveform)
 		SLATE_ATTRIBUTE(float, Duration)
 		SLATE_ATTRIBUTE(float, ViewStart)
 		SLATE_ATTRIBUTE(float, ViewEnd)
 		SLATE_ATTRIBUTE(float, SelectionStart)
 		SLATE_ATTRIBUTE(float, SelectionEnd)
 		SLATE_ATTRIBUTE(int32, SelectedEvent)
+		SLATE_ATTRIBUTE(float, Playhead)
 		SLATE_EVENT(FOnSelectEvent, OnSelect)
 		SLATE_EVENT(FSimpleDelegate, OnBeginRetime)
 		SLATE_EVENT(FOnRetimeEvent, OnRetime)
@@ -142,8 +201,10 @@ public:
 	{
 		Timeline = InArgs._Timeline;
 		TrackIndex = InArgs._TrackIndex;
+		Waveform = InArgs._Waveform;
 		Duration = InArgs._Duration;
 		SelectedEventAttr = InArgs._SelectedEvent;
+		Playhead = InArgs._Playhead;
 		SelectionStart = InArgs._SelectionStart;
 		SelectionEnd = InArgs._SelectionEnd;
 		OnSelect = InArgs._OnSelect;
@@ -194,6 +255,12 @@ public:
 				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(GridX, 0.f))), Box, ESlateDrawEffect::None, GridColor);
 			}
 		}
+		// Audio waveform on the group band (when the line has a drawable USoundWave).
+		if (Waveform.IsValid() && Waveform->Peaks.Num() > 0 && Waveform->Duration > KINDA_SMALL_NUMBER)
+		{
+			DrawWaveform(*Waveform, AllottedGeometry, OutDrawElements, LayerId, W, H);
+		}
+
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(W, 1.f), FSlateLayoutTransform(FVector2f(0.f, H - 1.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.08f));
 
 		// Line bounds: a green line at the start (0) and a red one at the end, when in view.
@@ -223,9 +290,17 @@ public:
 			}
 		}
 
+		// Playhead: a bright vertical line across the row, on top of everything else.
+		const float PlayheadSec = Playhead.Get(-1.f);
+		const float PlayheadViewLo = ViewStart.Get(0.f);
+		if (PlayheadSec >= PlayheadViewLo && PlayheadSec <= PlayheadViewLo + ViewSpan())
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(TimeToX(PlayheadSec, W), 0.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.9f));
+		}
+
 		// Events only on a real track; the group row stops here (decoration only).
 		UKzDialogueTimeline* T = Timeline.Get();
-		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return LayerId + 4; }
+		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return LayerId + 6; }
 		const FKzDialogueNotifyTrack& Track = T->Tracks[TrackIndex];
 		const int32 Sel = SelectedEventAttr.Get(INDEX_NONE);
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 8);
@@ -262,7 +337,7 @@ public:
 				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(LabelExtent.X), static_cast<float>(LabelExtent.Y)), FSlateLayoutTransform(FVector2f(L + 4.f, 3.f))), Label, Font, ESlateDrawEffect::None, TextColor);
 			}
 		}
-		return LayerId + 4;
+		return LayerId + 6;
 	}
 
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
@@ -521,6 +596,38 @@ private:
 		return static_cast<float>(TextWidth) + 8.f;
 	}
 
+	void DrawWaveform(const FKzWaveformPreview& Wave, const FGeometry& Geo, FSlateWindowElementList& Out, int32 Layer, float W, float H) const
+	{
+		const FSlateBrush* Box = FAppStyle::GetBrush("WhiteBrush");
+		const FLinearColor Color(0.40f, 0.62f, 0.88f, 0.55f);
+		const float CenterY = H * 0.5f;
+		const float HalfH = FMath::Max(H * 0.5f - 2.f, 1.f);
+		const int32 N = Wave.Peaks.Num();
+		const float WaveDur = Wave.Duration;
+		const int32 Width = FMath::FloorToInt(W);
+
+		for (int32 Px = 0; Px < Width; ++Px)
+		{
+			const float TLeft = XToTime(static_cast<float>(Px), W);
+			const float TRight = XToTime(static_cast<float>(Px) + 1.f, W);
+			if (TRight <= 0.f || TLeft >= WaveDur) { continue; }
+
+			const int32 B0 = FMath::Clamp(static_cast<int32>(FMath::Max(TLeft, 0.f) / WaveDur * N), 0, N - 1);
+			const int32 B1 = FMath::Clamp(FMath::CeilToInt(FMath::Min(TRight, WaveDur) / WaveDur * N), B0 + 1, N);
+			float Mn = 0.f;
+			float Mx = 0.f;
+			for (int32 B = B0; B < B1; ++B)
+			{
+				Mn = FMath::Min(Mn, Wave.Peaks[B].X);
+				Mx = FMath::Max(Mx, Wave.Peaks[B].Y);
+			}
+
+			const float YTop = CenterY - Mx * Wave.Gain * HalfH;
+			const float ColH = FMath::Max((Mx - Mn) * Wave.Gain * HalfH, 1.f);
+			FSlateDrawElement::MakeBox(Out, Layer, Geo.ToPaintGeometry(FVector2f(1.f, ColH), FSlateLayoutTransform(FVector2f(static_cast<float>(Px), YTop))), Box, ESlateDrawEffect::None, Color);
+		}
+	}
+
 	int32 HitTest(float LocalX, float W, float Dur, EDragMode& OutMode) const
 	{
 		OutMode = EDragMode::None;
@@ -562,8 +669,10 @@ private:
 
 	TWeakObjectPtr<UKzDialogueTimeline> Timeline;
 	int32 TrackIndex = INDEX_NONE;
+	TSharedPtr<FKzWaveformPreview> Waveform;
 	TAttribute<float> Duration;
 	TAttribute<int32> SelectedEventAttr;
+	TAttribute<float> Playhead;
 	TAttribute<float> SelectionStart;
 	TAttribute<float> SelectionEnd;
 	FOnSelectEvent OnSelect;
@@ -600,15 +709,18 @@ class SKzTimelineRuler : public SLeafWidget
 public:
 	DECLARE_DELEGATE_ThreeParams(FOnZoom, float /*CursorSeconds*/, float /*WheelDelta*/, bool /*bPan*/);
 	DECLARE_DELEGATE_OneParam(FOnPan, float /*DeltaSeconds*/);
+	DECLARE_DELEGATE_OneParam(FOnScrub, float /*Seconds*/);
 
-	SLATE_BEGIN_ARGS(SKzTimelineRuler) : _ViewStart(0.f), _ViewEnd(1.f), _Duration(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f) {}
+	SLATE_BEGIN_ARGS(SKzTimelineRuler) : _ViewStart(0.f), _ViewEnd(1.f), _Duration(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _Playhead(-1.f) {}
 		SLATE_ATTRIBUTE(float, ViewStart)
 		SLATE_ATTRIBUTE(float, ViewEnd)
 		SLATE_ATTRIBUTE(float, Duration)
 		SLATE_ATTRIBUTE(float, SelectionStart)
 		SLATE_ATTRIBUTE(float, SelectionEnd)
+		SLATE_ATTRIBUTE(float, Playhead)
 		SLATE_EVENT(FOnZoom, OnZoom)
 		SLATE_EVENT(FOnPan, OnPan)
+		SLATE_EVENT(FOnScrub, OnScrub)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs)
@@ -620,6 +732,8 @@ public:
 		SelectionEnd = InArgs._SelectionEnd;
 		OnZoom = InArgs._OnZoom;
 		OnPan = InArgs._OnPan;
+		OnScrub = InArgs._OnScrub;
+		Playhead = InArgs._Playhead;
 		SetClipping(EWidgetClipping::ClipToBounds);
 	}
 
@@ -671,6 +785,17 @@ public:
 		DrawMarkLine(SelectionStart.Get(-1.f), 2.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
 		DrawMarkLine(SelectionEnd.Get(-1.f), 2.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
 
+		// Playhead: a white line plus a small handle at the top, so the ruler reads as a scrubber.
+		const float PlayheadSec = Playhead.Get(-1.f);
+		if (PlayheadSec >= ViewMin && PlayheadSec <= ViewMax)
+		{
+			const float PX = (PlayheadSec - ViewMin) / Span * W;
+			// Native scrub handle (mirrors the anim timeline): a 13px box brush draws the head + line.
+			const FSlateBrush* ScrubHandle = FAppStyle::GetBrush("Sequencer.Timeline.VanillaScrubHandleDown");
+			// Center the 13px handle on the playhead line (its 1px center column sits at +6.5).
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(13.f, H), FSlateLayoutTransform(FVector2f(PX - 6.f, 0.f))), ScrubHandle, ESlateDrawEffect::None, FLinearColor(1.f, 0.2f, 0.1f, 0.75f));
+		}
+
 		return LayerId + 4;
 	}
 
@@ -686,13 +811,28 @@ public:
 		return FReply::Handled();
 	}
 
+	float LocalToTime(float LocalX, float W) const
+	{
+		const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f);
+		return ViewStart.Get(0.f) + (LocalX / FMath::Max(W, 1.f)) * Span;
+	}
+
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
-		// Drag the time bar (left or middle button) to pan.
-		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
+		const float W = MyGeometry.GetLocalSize().X;
+		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
+
+		// Left button scrubs the playhead; middle button pans the view.
+		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		{
+			bScrubbing = true;
+			OnScrub.ExecuteIfBound(LocalToTime(LocalX, W));
+			return FReply::Handled().CaptureMouse(SharedThis(this));
+		}
+		if (MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
 		{
 			bPanning = true;
-			PanLastX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
+			PanLastX = LocalX;
 			return FReply::Handled().CaptureMouse(SharedThis(this));
 		}
 		return FReply::Unhandled();
@@ -700,22 +840,33 @@ public:
 
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
-		if (!bPanning || !(MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton) || MouseEvent.IsMouseButtonDown(EKeys::MiddleMouseButton)))
-		{
-			return FReply::Unhandled();
-		}
 		const float W = MyGeometry.GetLocalSize().X;
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
-		const float DeltaX = LocalX - PanLastX;
-		PanLastX = LocalX;
-		const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f);
-		if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * Span); }
-		return FReply::Handled();
+
+		if (bScrubbing && MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
+		{
+			OnScrub.ExecuteIfBound(LocalToTime(LocalX, W));
+			return FReply::Handled();
+		}
+		if (bPanning && MouseEvent.IsMouseButtonDown(EKeys::MiddleMouseButton))
+		{
+			const float DeltaX = LocalX - PanLastX;
+			PanLastX = LocalX;
+			const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f);
+			if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * Span); }
+			return FReply::Handled();
+		}
+		return FReply::Unhandled();
 	}
 
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
-		if (bPanning && (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton || MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton))
+		if (bScrubbing && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
+		{
+			bScrubbing = false;
+			return FReply::Handled().ReleaseMouseCapture();
+		}
+		if (bPanning && MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
 		{
 			bPanning = false;
 			return FReply::Handled().ReleaseMouseCapture();
@@ -731,7 +882,10 @@ private:
 	TAttribute<float> SelectionEnd;
 	FOnZoom OnZoom;
 	FOnPan OnPan;
+	FOnScrub OnScrub;
+	TAttribute<float> Playhead;
 	bool bPanning = false;
+	bool bScrubbing = false;
 	float PanLastX = 0.f;
 };
 
@@ -759,7 +913,10 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 	Rebuild();
 }
 
-SKzDialogueTimeline::~SKzDialogueTimeline() = default;
+SKzDialogueTimeline::~SKzDialogueTimeline()
+{
+	StopPlayback();
+}
 
 float SKzDialogueTimeline::Duration() const
 {
@@ -859,8 +1016,181 @@ void SKzDialogueTimeline::Modified()
 	OnModified.ExecuteIfBound();
 }
 
+USoundBase* SKzDialogueTimeline::ResolveLineAudio() const
+{
+	// The line's audio lives on the owning asset, keyed by the timeline's line id.
+	if (UKzDialogueTimeline* T = Timeline.Get())
+	{
+		if (const UKzDialogueAsset* Asset = T->GetTypedOuter<UKzDialogueAsset>())
+		{
+			FKzDialogueLine Line;
+			if (Asset->TryGetLineById(T->OwningLineId, Line))
+			{
+				return Line.Audio.LoadSynchronous();
+			}
+		}
+	}
+	return nullptr;
+}
+
+TSharedPtr<FKzWaveformPreview> SKzDialogueTimeline::GetWaveformPreview()
+{
+	// Only a direct USoundWave is drawable (a SoundCue / MetaSound wrapper has no single waveform).
+	USoundWave* Wave = Cast<USoundWave>(ResolveLineAudio());
+	if (!Wave)
+	{
+		WaveformPreview.Reset();
+		return nullptr;
+	}
+
+	// Recompute the envelope only when the wave changes; cached across rebuilds (filter typing,
+	// expand toggle, etc.) so a keystroke doesn't re-decode the audio.
+	if (!WaveformPreview.IsValid() || WaveformPreview->Wave.Get() != Wave)
+	{
+		WaveformPreview = BuildWaveformPreview(Wave);
+	}
+	return WaveformPreview;
+}
+
+void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	// Refresh when the line's drawable wave changes (set / swapped / cleared); the audio is edited
+	// elsewhere in the asset editor, so the timeline isn't otherwise told to rebuild.
+	USoundWave* CurWave = Cast<USoundWave>(ResolveLineAudio());
+	USoundWave* CachedWave = WaveformPreview.IsValid() ? WaveformPreview->Wave.Get() : nullptr;
+	if (CurWave != CachedWave)
+	{
+		Rebuild();
+	}
+
+	// Advance the preview playhead while playing.
+	if (bPlaying)
+	{
+		const float Dur = Duration();
+		PlayheadTime += InDeltaTime;
+		if (PlayheadTime >= Dur)
+		{
+			if (bLooping)
+			{
+				PlayheadTime = 0.f;
+				StartPlayback();
+			}
+			else
+			{
+				PlayheadTime = Dur;
+				StopPlayback();
+			}
+		}
+		Invalidate(EInvalidateWidgetReason::Paint);
+	}
+}
+
+void SKzDialogueTimeline::SetPlayhead(float Seconds)
+{
+	PlayheadTime = FMath::Clamp(Seconds, 0.f, Duration());
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SKzDialogueTimeline::ScrubTo(float Seconds)
+{
+	SetPlayhead(Seconds);
+
+	// Keep keyboard focus on the timeline (not on a transport button) so Space toggles playback.
+	FSlateApplication::Get().SetKeyboardFocus(SharedThis(this), EFocusCause::Mouse);
+
+	// Scrubbing while playing re-seeks the audio and keeps going.
+	if (bPlaying)
+	{
+		if (PreviewAudio.IsValid()) { PreviewAudio->Play(PlayheadTime); }
+		else { StartPlayback(); }
+	}
+}
+
+void SKzDialogueTimeline::TogglePlayback()
+{
+	if (bPlaying)
+	{
+		StopPlayback();
+	}
+	else
+	{
+		if (PlayheadTime >= Duration() - KINDA_SMALL_NUMBER) { PlayheadTime = 0.f; }
+		StartPlayback();
+	}
+	Invalidate(EInvalidateWidgetReason::Paint);
+}
+
+void SKzDialogueTimeline::StartPlayback()
+{
+	StopPlayback();
+
+	USoundBase* Audio = ResolveLineAudio();
+	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (Audio && World)
+	{
+		if (UAudioComponent* Comp = UGameplayStatics::CreateSound2D(World, Audio, 1.f, 1.f, 0.f, nullptr, false, /*bAutoDestroy*/ false))
+		{
+			Comp->Play(PlayheadTime);
+			PreviewAudio = TStrongObjectPtr<UAudioComponent>(Comp);
+		}
+	}
+	bPlaying = true;
+}
+
+void SKzDialogueTimeline::StopPlayback()
+{
+	if (PreviewAudio.IsValid())
+	{
+		PreviewAudio->Stop();
+		PreviewAudio.Reset();
+	}
+	bPlaying = false;
+}
+
+TSharedRef<SWidget> SKzDialogueTimeline::BuildTransportControl()
+{
+	FEditorWidgetsModule& EditorWidgets = FModuleManager::LoadModuleChecked<FEditorWidgetsModule>("EditorWidgets");
+
+	FTransportControlArgs Args;
+	// Buttons are not focusable so Space is handled by the timeline (play/pause), not the focused button.
+	Args.bAreButtonsFocusable = false;
+	Args.OnBackwardEnd = FOnClicked::CreateLambda([this]()
+	{
+		SetPlayhead(0.f);
+		if (bPlaying) { StartPlayback(); }
+		return FReply::Handled();
+	});
+	Args.OnForwardPlay = FOnClicked::CreateLambda([this]() { TogglePlayback(); return FReply::Handled(); });
+	Args.OnForwardEnd = FOnClicked::CreateLambda([this]()
+	{
+		SetPlayhead(Duration());
+		// In loop mode while playing, stay playing and let Tick wrap back to the start naturally.
+		if (!(bLooping && bPlaying)) { StopPlayback(); }
+		return FReply::Handled();
+	});
+	Args.OnToggleLooping = FOnClicked::CreateLambda([this]() { bLooping = !bLooping; return FReply::Handled(); });
+	Args.OnGetLooping = FOnGetLooping::CreateLambda([this]() { return bLooping; });
+	Args.OnGetPlaybackMode = FOnGetPlaybackMode::CreateLambda([this]() { return bPlaying ? EPlaybackMode::PlayingForward : EPlaybackMode::Stopped; });
+	Args.WidgetsToCreate =
+	{
+		FTransportControlWidget(ETransportControlWidgetType::BackwardEnd),
+		FTransportControlWidget(ETransportControlWidgetType::ForwardPlay),
+		FTransportControlWidget(ETransportControlWidgetType::ForwardEnd),
+		FTransportControlWidget(ETransportControlWidgetType::Loop)
+	};
+
+	return EditorWidgets.CreateTransportControl(Args);
+}
+
 FReply SKzDialogueTimeline::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
+	if (InKeyEvent.GetKey() == EKeys::SpaceBar)
+	{
+		TogglePlayback();
+		return FReply::Handled();
+	}
 	if (InKeyEvent.GetKey() == EKeys::Delete && SelectedEvent())
 	{
 		RemoveSelected();
@@ -912,14 +1242,56 @@ void SKzDialogueTimeline::Rebuild()
 		SNew(SBox).HeightOverride(HeaderRowHeight)[ BuildRuler() ]
 	];
 
-	// "Notifies" group header | group band.
-	OutlinerColumn->AddSlot().AutoHeight()[ BuildNotifiesHeaderRow() ];
+	// Playback row, above the "Notifies" row so that row keeps its compact label height: the
+	// transport (right-justified) in the outliner column, the line's audio waveform on the right.
+	TSharedPtr<FKzWaveformPreview> Preview = GetWaveformPreview();
+	const bool bHasWaveform = Preview.IsValid() && Preview->Peaks.Num() > 0;
+	const float WaveRowHeight = bHasWaveform ? WaveformBandHeight : HeaderRowHeight;
+
+	OutlinerColumn->AddSlot().AutoHeight()
+	[
+		SNew(SBox).HeightOverride(WaveRowHeight).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f))
+		[
+			// Time readout next to the transport, centered in the cell.
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+			[
+				SNew(STextBlock)
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+					.Text_Lambda([this]() { return FText::FromString(FString::Printf(TEXT("%.2f / %.2f s"), PlayheadTime, Duration())); })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				BuildTransportControl()
+			]
+		]
+	];
+	TrackAreaColumn->AddSlot().AutoHeight()
+	[
+		SNew(SBox).HeightOverride(WaveRowHeight)
+		[
+			// Waveform band: grid / bounds / selection / playhead plus the line's audio waveform.
+			SNew(SKzTimelineTrack)
+				.Timeline(Timeline)
+				.TrackIndex(INDEX_NONE)
+				.Waveform(Preview)
+				.Duration_Lambda([this]() { return Duration(); })
+				.ViewStart_Lambda([this]() { return GetViewStart(); })
+				.ViewEnd_Lambda([this]() { return GetViewEnd(); })
+				.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
+				.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
+				.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
+				.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
+				.Playhead_Lambda([this]() { return GetPlayheadTime(); })
+		]
+	];
+
+	// "Notifies" group header | decorative band, compact (the waveform now lives in the row above).
+	OutlinerColumn->AddSlot().AutoHeight()[ BuildNotifiesHeaderRow(HeaderRowHeight) ];
 	TrackAreaColumn->AddSlot().AutoHeight()
 	[
 		SNew(SBox).HeightOverride(HeaderRowHeight)
 		[
-			// Decorative group row: draws the grid / bounds / selection (and zooms/pans) but
-			// has no events of its own (INDEX_NONE) and no right-click menu.
 			SNew(SKzTimelineTrack)
 				.Timeline(Timeline)
 				.TrackIndex(INDEX_NONE)
@@ -930,6 +1302,7 @@ void SKzDialogueTimeline::Rebuild()
 				.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
 				.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
 				.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
+				.Playhead_Lambda([this]() { return GetPlayheadTime(); })
 		]
 	];
 
@@ -987,14 +1360,16 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildRuler()
 		.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
 		.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
 		.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
-		.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); });
+		.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
+		.Playhead_Lambda([this]() { return GetPlayheadTime(); })
+		.OnScrub_Lambda([this](float Seconds) { ScrubTo(Seconds); });
 }
 
-TSharedRef<SWidget> SKzDialogueTimeline::BuildNotifiesHeaderRow()
+TSharedRef<SWidget> SKzDialogueTimeline::BuildNotifiesHeaderRow(float RowHeightOverride)
 {
 	// The "Notifies" group: expander + label + the "+ Track" dropdown, styled like the
 	// AnimMontage outliner header (FAnimTimelineTrack_Notifies::GenerateContainerWidgetForOutliner).
-	return SNew(SBox).HeightOverride(HeaderRowHeight)
+	return SNew(SBox).HeightOverride(RowHeightOverride)
 	[
 		SNew(SBorder)
 			.BorderImage(FAppStyle::GetBrush("Sequencer.Section.BackgroundTint"))
@@ -1086,6 +1461,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTrackAreaRow(int32 TrackIndex)
 			.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
 			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 ToTrack) { MoveEventToTrack(TrackIndex, EventIndex, ToTrack); })
 			.OnActivateEvent_Lambda([this, TrackIndex](int32 EventIndex) { OpenEventNotifyAsset(TrackIndex, EventIndex); })
+			.Playhead_Lambda([this]() { return GetPlayheadTime(); })
 	];
 }
 

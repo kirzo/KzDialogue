@@ -4,13 +4,19 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
+#include "UObject/StrongObjectPtr.h"
+#include "Components/AudioComponent.h"
 
 class UKzDialogueTimeline;
+class USoundWave;
+class USoundBase;
+class UAudioComponent;
 class FScopedTransaction;
 class IStructureDetailsView;
 class FStructOnScope;
 struct FKzDialogueNotifyEvent;
 struct FPropertyChangedEvent;
+struct FKzWaveformPreview;
 
 /**
  * Visual timeline editor for a UKzDialogueTimeline, copied from the AnimMontage notify
@@ -38,12 +44,13 @@ public:
 
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
 	void Rebuild();
 
 	TSharedRef<SWidget> BuildRuler();
-	TSharedRef<SWidget> BuildNotifiesHeaderRow();
+	TSharedRef<SWidget> BuildNotifiesHeaderRow(float RowHeightOverride);
 	TSharedRef<SWidget> BuildOutlinerTrackRow(int32 TrackIndex);
 	TSharedRef<SWidget> BuildTrackAreaRow(int32 TrackIndex);
 	TSharedRef<SWidget> MakeAddMenuForTrack(int32 TrackIndex, float TimeSeconds);
@@ -84,6 +91,22 @@ private:
 
 	void Modified();
 
+	/** Resolve + cache the line's audio waveform envelope for the group band; null if no drawable wave. */
+	TSharedPtr<FKzWaveformPreview> GetWaveformPreview();
+
+	/** The line's audio (USoundBase) for the editor preview; null if none. */
+	USoundBase* ResolveLineAudio() const;
+
+	/** Transport bar (To Front / Play-Pause / To End / Loop) driving the editor audio preview. */
+	TSharedRef<SWidget> BuildTransportControl();
+
+	void SetPlayhead(float Seconds);
+	void ScrubTo(float Seconds);
+	void StartPlayback();
+	void StopPlayback();
+	void TogglePlayback();
+	float GetPlayheadTime() const { return PlayheadTime; }
+
 	TWeakObjectPtr<UKzDialogueTimeline> Timeline;
 	TAttribute<float> DisplayDuration;
 	FSimpleDelegate OnModified;
@@ -111,6 +134,16 @@ private:
 	int32 ScopeTrack = INDEX_NONE;
 	int32 ScopeEvent = INDEX_NONE;
 
+	/** Cached audio waveform envelope drawn in the group band; rebuilt when the line's wave changes. */
+	TSharedPtr<FKzWaveformPreview> WaveformPreview;
+
+	/** Editor-only audio preview: playhead position (seconds), transport state, and the live component. */
+	float PlayheadTime = 0.f;
+	bool bPlaying = false;
+	bool bLooping = true;
+	TStrongObjectPtr<UAudioComponent> PreviewAudio;
+
 	static constexpr float RowHeight = 28.f;
 	static constexpr float HeaderRowHeight = 24.f;
+	static constexpr float WaveformBandHeight = 48.f;
 };
