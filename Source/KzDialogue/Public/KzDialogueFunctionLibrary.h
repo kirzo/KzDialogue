@@ -45,7 +45,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
-	/** One-shot helper: play a single line on a channel. */
+	/**
+	 * One-shot helper: play a single line on a channel, exactly as given. The line's notify Timeline
+	 * is only present if Line was resolved from an asset (via PlayDialogueLineFromAsset, a
+	 * FKzDialogueLineRef, or TryResolveDialogueLineRef before this call); a line built by hand carries
+	 * no timeline, since timelines live on the asset keyed by LineId.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 

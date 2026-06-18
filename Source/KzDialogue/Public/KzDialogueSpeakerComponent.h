@@ -46,7 +46,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
 	UKzDialoguePlayer* Speak(UKzDialogueAsset* Asset);
 
-	/** Speak a single ad-hoc line. */
+	/** Speak a single ad-hoc line, as given. Notifies fire only if Line was resolved from an asset;
+	 *  a hand-built line has no Timeline (timelines live on the asset keyed by LineId). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
 	UKzDialoguePlayer* SpeakLine(const FKzDialogueLine& Line);
 

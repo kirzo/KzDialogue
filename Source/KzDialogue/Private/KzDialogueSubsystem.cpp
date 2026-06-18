@@ -297,6 +297,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGam
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
+	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
+	// paths (PlayAssetLine/-List, PlayLineRefs) do this via ResolveAssetEntry; an ad-hoc line has none.
 	InChannel = ResolveChannel(InChannel, Line, /*Asset*/ nullptr);
 
 	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);

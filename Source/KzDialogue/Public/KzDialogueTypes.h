@@ -151,7 +151,11 @@ struct KZDIALOGUE_API FKzDialogueLine
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	FInstancedPropertyBag AudioParams;
 
-	/** Per-line timeline, owned by the asset and filled by the provider at resolve time. Not authored on the line. */
+	/**
+	 * Per-line timeline, owned by the asset (UKzDialogueAsset::Timelines, keyed by LineId) and
+	 * filled in whenever the line is resolved from its asset (TryGetLineById and the asset
+	 * provider). Transient and not authored on the line, so a line built by hand has none.
+	 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Line")
 	TObjectPtr<UKzDialogueTimeline> Timeline = nullptr;
 

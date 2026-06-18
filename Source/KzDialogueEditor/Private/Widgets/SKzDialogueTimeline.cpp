@@ -215,11 +215,11 @@ public:
 			const FLinearColor SelLineColor(1.f, 1.f, 1.f, 0.4f);
 			if (SelStart >= ViewMin && SelStart <= ViewMaxLocal)
 			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelStart, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelStart, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
 			}
 			if (SelEnd >= ViewMin && SelEnd <= ViewMaxLocal)
 			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelEnd, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelEnd, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
 			}
 		}
 
@@ -668,8 +668,8 @@ public:
 		};
 		DrawMarkLine(0.f, 2.f, FLinearColor(0.20f, 0.85f, 0.25f, 0.9f), false);
 		DrawMarkLine(Duration.Get(1.f), 2.f, FLinearColor(0.85f, 0.20f, 0.20f, 0.9f), true);
-		DrawMarkLine(SelectionStart.Get(-1.f), 1.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
-		DrawMarkLine(SelectionEnd.Get(-1.f), 1.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
+		DrawMarkLine(SelectionStart.Get(-1.f), 2.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
+		DrawMarkLine(SelectionEnd.Get(-1.f), 2.f, FLinearColor(1.f, 1.f, 1.f, 0.4f), false);
 
 		return LayerId + 4;
 	}
