@@ -102,6 +102,19 @@ namespace
 		}
 		return Spacing;
 	}
+
+	// Editor clipboard for notify events, shared across timeline widgets so copy/paste works between
+	// lines. The notify is kept alive via AddToRoot; the time source / flags are plain value data.
+	FInstancedStruct GClipboardTimeSource;
+	bool GClipboardFireIfSkipped = false;
+	bool GClipboardEnabled = true;
+	UKzDialogueNotifyBase* GClipboardNotify = nullptr;
+
+	// Pending notify selection (e.g. from a validation-issue click); consumed by the timeline whose
+	// OwningLineId matches, on its next tick. LineId invalid means "nothing pending".
+	FGuid GPendingSelectionLineId;
+	int32 GPendingSelectionTrack = INDEX_NONE;
+	int32 GPendingSelectionEvent = INDEX_NONE;
 }
 
 // Downsampled min/max envelope of a sound wave, cached on the timeline widget and drawn in the
@@ -314,8 +327,13 @@ public:
 			const float L = TimeToX(StartSec, W);
 			const float R = TimeToX(EndSec, W);
 			const bool bSelected = (e == Sel);
-			const FLinearColor Color = bSelected ? FLinearColor(0.98f, 0.86f, 0.36f) : (Track.Events[e].Notify ? Track.Events[e].Notify->GetEditorColor() : FLinearColor(0.46f, 0.62f, 0.85f));
-			const FLinearColor TextColor = Color.GetLuminance() > 0.5f ? FLinearColor::Black : FLinearColor::White;
+			FLinearColor Color = bSelected ? FLinearColor(0.98f, 0.86f, 0.36f) : (Track.Events[e].Notify ? Track.Events[e].Notify->GetEditorColor() : FLinearColor(0.46f, 0.62f, 0.85f));
+			FLinearColor TextColor = Color.GetLuminance() > 0.5f ? FLinearColor::Black : FLinearColor::White;
+			if (!Track.Events[e].bEnabled)
+			{
+				Color.A *= 0.35f;
+				TextColor.A *= 0.5f;
+			}
 			const FText Label = Track.Events[e].Notify ? Track.Events[e].Notify->GetNotifyName() : LOCTEXT("Empty", "(empty)");
 			const FVector2D LabelExtent = FontMeasure->Measure(Label.ToString(), Font);
 
@@ -1056,6 +1074,22 @@ void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double I
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
+	// Consume a pending notify selection (e.g. from a validation-issue click) once the timeline for
+	// the requested line is alive and ticking.
+	if (GPendingSelectionLineId.IsValid())
+	{
+		UKzDialogueTimeline* PendingTimeline = Timeline.Get();
+		if (PendingTimeline && PendingTimeline->OwningLineId == GPendingSelectionLineId)
+		{
+			const int32 PendingTrack = GPendingSelectionTrack;
+			const int32 PendingEvent = GPendingSelectionEvent;
+			GPendingSelectionLineId.Invalidate();
+			bNotifiesExpanded = true;
+			SetSelection(PendingTrack, PendingEvent);
+			Rebuild();
+		}
+	}
+
 	// Refresh when the line's drawable wave changes (set / swapped / cleared); the audio is edited
 	// elsewhere in the asset editor, so the timeline isn't otherwise told to rebuild.
 	USoundWave* CurWave = Cast<USoundWave>(ResolveLineAudio());
@@ -1250,9 +1284,10 @@ void SKzDialogueTimeline::Rebuild()
 
 	OutlinerColumn->AddSlot().AutoHeight()
 	[
-		SNew(SBox).HeightOverride(WaveRowHeight).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f))
+		SNew(SBox).HeightOverride(WaveRowHeight).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f)).Clipping(EWidgetClipping::ClipToBounds)
 		[
-			// Time readout next to the transport, centered in the cell.
+			// Time readout next to the transport, centered in the cell. Clipped so it never spills
+			// past the outliner column into the track area when the column is narrow.
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
 			[
@@ -1518,6 +1553,19 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeAddMenuForTrack(int32 TrackIndex, f
 	}
 	Menu.EndSection();
 
+	if (GClipboardNotify)
+	{
+		Menu.BeginSection(NAME_None, LOCTEXT("ClipboardSection", "Clipboard"));
+		{
+			Menu.AddMenuEntry(
+				LOCTEXT("PasteNotify", "Paste"),
+				LOCTEXT("PasteNotifyTip", "Paste the copied notify at this time."),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, TimeSeconds]() { PasteEvent(TrackIndex, TimeSeconds); })));
+		}
+		Menu.EndSection();
+	}
+
 	return Menu.MakeWidget();
 }
 
@@ -1569,9 +1617,27 @@ void SKzDialogueTimeline::CreateNewNotify(int32 TrackIndex, UClass* ParentClass,
 
 TSharedRef<SWidget> SKzDialogueTimeline::MakeEventMenuForTrack(int32 TrackIndex, int32 EventIndex)
 {
+	UKzDialogueTimeline* T = Timeline.Get();
+	const bool bEnabled = T && T->Tracks.IsValidIndex(TrackIndex) && T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex) && T->Tracks[TrackIndex].Events[EventIndex].bEnabled;
+
 	FMenuBuilder Menu(true, nullptr);
 	Menu.BeginSection(NAME_None, LOCTEXT("NotifyActions", "Notify"));
 	{
+		Menu.AddMenuEntry(
+			bEnabled ? LOCTEXT("DisableNotify", "Disable") : LOCTEXT("EnableNotify", "Enable"),
+			LOCTEXT("ToggleNotifyTip", "Mute or unmute this notify without deleting it."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, EventIndex]() { ToggleEventEnabled(TrackIndex, EventIndex); })));
+		Menu.AddMenuEntry(
+			LOCTEXT("CopyNotify", "Copy"),
+			LOCTEXT("CopyNotifyTip", "Copy this notify so it can be pasted onto any line."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, EventIndex]() { CopyEvent(TrackIndex, EventIndex); })));
+		Menu.AddMenuEntry(
+			LOCTEXT("DuplicateNotify", "Duplicate"),
+			LOCTEXT("DuplicateNotifyTip", "Add a copy of this notify on the same track."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, EventIndex]() { DuplicateEvent(TrackIndex, EventIndex); })));
 		Menu.AddMenuEntry(
 			LOCTEXT("DeleteNotify", "Delete"),
 			LOCTEXT("DeleteNotifyTip", "Remove this notify from the track."),
@@ -1715,6 +1781,92 @@ void SKzDialogueTimeline::RemoveEvent(int32 TrackIndex, int32 EventIndex)
 	Rebuild();
 }
 
+void SKzDialogueTimeline::ToggleEventEnabled(int32 TrackIndex, int32 EventIndex)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
+	const FScopedTransaction Transaction(LOCTEXT("ToggleEnabledTransaction", "Toggle Dialogue Notify"));
+	T->Modify();
+	bool& bEnabled = T->Tracks[TrackIndex].Events[EventIndex].bEnabled;
+	bEnabled = !bEnabled;
+	Modified();
+	Rebuild();
+}
+
+void SKzDialogueTimeline::DuplicateEvent(int32 TrackIndex, int32 EventIndex)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
+	const FScopedTransaction Transaction(LOCTEXT("DuplicateEventTransaction", "Duplicate Dialogue Notify"));
+	T->Modify();
+
+	// Read every field of the source before Add (which may reallocate the array).
+	const FKzDialogueNotifyEvent& Src = T->Tracks[TrackIndex].Events[EventIndex];
+	FKzDialogueNotifyEvent NewEvent;
+	NewEvent.TimeSource = Src.TimeSource;
+	NewEvent.bFireIfSkipped = Src.bFireIfSkipped;
+	NewEvent.bEnabled = Src.bEnabled;
+	NewEvent.Notify = Src.Notify ? DuplicateObject<UKzDialogueNotifyBase>(Src.Notify, T) : nullptr;
+
+	// Nudge the copy off the original so it is selectable.
+	if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+	{
+		const float Offset = Rel->bNormalized ? 0.02f : 0.1f;
+		const float MaxTime = Rel->bNormalized ? 1.f : Duration();
+		Rel->Time = FMath::Min(Rel->Time + Offset, MaxTime);
+	}
+
+	const int32 NewIndex = T->Tracks[TrackIndex].Events.Add(NewEvent);
+	SelTrack = TrackIndex;
+	SelEvent = NewIndex;
+	Modified();
+	Rebuild();
+}
+
+void SKzDialogueTimeline::CopyEvent(int32 TrackIndex, int32 EventIndex)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
+	const FKzDialogueNotifyEvent& Src = T->Tracks[TrackIndex].Events[EventIndex];
+
+	if (GClipboardNotify) { GClipboardNotify->RemoveFromRoot(); GClipboardNotify = nullptr; }
+	GClipboardTimeSource = Src.TimeSource;
+	GClipboardFireIfSkipped = Src.bFireIfSkipped;
+	GClipboardEnabled = Src.bEnabled;
+	if (Src.Notify)
+	{
+		// Duplicate into the transient package and root it so the clipboard survives until replaced.
+		GClipboardNotify = DuplicateObject<UKzDialogueNotifyBase>(Src.Notify, GetTransientPackage());
+		GClipboardNotify->AddToRoot();
+	}
+}
+
+void SKzDialogueTimeline::PasteEvent(int32 TrackIndex, float TimeSeconds)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !GClipboardNotify) { return; }
+	const FScopedTransaction Transaction(LOCTEXT("PasteEventTransaction", "Paste Dialogue Notify"));
+	T->Modify();
+
+	FKzDialogueNotifyEvent NewEvent;
+	NewEvent.TimeSource = GClipboardTimeSource;
+	NewEvent.bFireIfSkipped = GClipboardFireIfSkipped;
+	NewEvent.bEnabled = GClipboardEnabled;
+	NewEvent.Notify = DuplicateObject<UKzDialogueNotifyBase>(GClipboardNotify, T);
+
+	// Place it at the cursor time (converting to a fraction when the source is normalized).
+	if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+	{
+		Rel->Time = Rel->bNormalized ? (Duration() > 0.f ? FMath::Clamp(TimeSeconds / Duration(), 0.f, 1.f) : 0.f) : FMath::Max(0.f, TimeSeconds);
+	}
+
+	const int32 NewIndex = T->Tracks[TrackIndex].Events.Add(NewEvent);
+	SelTrack = TrackIndex;
+	SelEvent = NewIndex;
+	Modified();
+	Rebuild();
+}
+
 void SKzDialogueTimeline::SetSelection(int32 TrackIndex, int32 EventIndex)
 {
 	// No rebuild: the track reads selection as an attribute and repaints itself, so the
@@ -1728,6 +1880,13 @@ void SKzDialogueTimeline::SetSelection(int32 TrackIndex, int32 EventIndex)
 	{
 		FSlateApplication::Get().SetKeyboardFocus(SharedThis(this), EFocusCause::Mouse);
 	}
+}
+
+void SKzDialogueTimeline::RequestNotifySelection(const FGuid& OwningLineId, int32 TrackIndex, int32 EventIndex)
+{
+	GPendingSelectionLineId = OwningLineId;
+	GPendingSelectionTrack = TrackIndex;
+	GPendingSelectionEvent = EventIndex;
 }
 
 void SKzDialogueTimeline::BeginRetime()

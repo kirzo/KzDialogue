@@ -2,6 +2,9 @@
 
 #include "Validation/KzDialogueValidators.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
+#include "KzDialogueNotify.h"
+#include "Widgets/SKzDialogueTimeline.h"
 #include "Sound/SoundBase.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueValidators"
@@ -279,6 +282,95 @@ void UKzDialogueValidator_DuplicateAliasName::Validate_Implementation(const UObj
 		else
 		{
 			FirstOccurrence.Add(Alias.AliasName, i);
+		}
+	}
+}
+
+// =======================================================================================
+// Notify timelines
+// =======================================================================================
+
+bool UKzDialogueValidator_Timelines::CanValidate_Implementation(const UObject* Asset) const
+{
+	return Asset && Asset->IsA<UKzDialogueAsset>();
+}
+
+void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
+	if (!Dialogue) { return; }
+
+	const FName Id = GetValidatorId();
+	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+	{
+		const FKzDialogueLine& Line = Dialogue->Lines[i];
+		const UKzDialogueTimeline* Timeline = Dialogue->FindTimelineForLine(Line.LineId);
+		if (!Timeline) { continue; }
+
+		// Best-effort effective duration for the "past the line" check; skipped if unknown.
+		float LineDuration = Line.Duration;
+		const USoundBase* Audio = Line.Audio.IsNull() ? nullptr : Line.Audio.LoadSynchronous();
+		if (LineDuration <= 0.f && Audio) { LineDuration = Audio->GetDuration(); }
+
+		FKzDialogueTimeResolveContext ResolveCtx;
+		ResolveCtx.LineDuration = LineDuration;
+		ResolveCtx.Audio = Audio;
+
+		const FText LineLabel = FText::AsNumber(i + 1);
+		const FGuid LineId = Line.LineId;
+
+		for (int32 t = 0; t < Timeline->Tracks.Num(); ++t)
+		{
+			const FKzDialogueNotifyTrack& Track = Timeline->Tracks[t];
+			const FText TrackLabel = FText::FromName(Track.Name);
+			for (int32 e = 0; e < Track.Events.Num(); ++e)
+			{
+				const FKzDialogueNotifyEvent& Event = Track.Events[e];
+
+				// Activating an issue jumps to the line (ContextId) and then selects this exact notify.
+				auto AddIssue = [&](EKzValidationSeverity Severity, const FText& Message)
+				{
+					FKzValidationIssue Issue = FKzValidationIssue::WithContextId(Severity, Message, Id, LineId);
+					Issue.ContextIndex = i;
+					Issue.OnActivate = [LineId, t, e]() { SKzDialogueTimeline::RequestNotifySelection(LineId, t, e); };
+					OutIssues.Add(Issue);
+				};
+
+				if (!Event.Notify)
+				{
+					AddIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("NotifyUnset", "Line {0}, track '{1}': an event has no notify assigned."), LineLabel, TrackLabel));
+					continue;
+				}
+
+				const FText NotifyName = Event.Notify->GetNotifyName();
+
+				const FKzDialogueTimeSource* Source = Event.TimeSource.GetPtr<FKzDialogueTimeSource>();
+				if (!Source)
+				{
+					AddIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("TimeSourceUnset", "Line {0}, track '{1}', {2}: no time source set, so it will not fire."), LineLabel, TrackLabel, NotifyName));
+					continue;
+				}
+
+				TArray<FText> NotifyErrors;
+				Event.Notify->ValidateNotify(NotifyErrors);
+				for (const FText& Err : NotifyErrors)
+				{
+					AddIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("NotifyConfig", "Line {0}, track '{1}', {2}: {3}"), LineLabel, TrackLabel, NotifyName, Err));
+				}
+
+				// A point notify placed past the line never fires (a state ending past the line is
+				// the legitimate "hold to the end" case, so it is left alone).
+				if (LineDuration > 0.f && !Event.Notify->IsA<UKzDialogueNotifyState>())
+				{
+					float Start = 0.f;
+					float End = 0.f;
+					Source->Resolve(ResolveCtx, Start, End);
+					if (Start > LineDuration + KINDA_SMALL_NUMBER)
+					{
+						AddIssue(EKzValidationSeverity::Warning, FText::Format(LOCTEXT("PointPastLine", "Line {0}, track '{1}', {2}: fires at {3}s, past the line duration ({4}s); it will never play."), LineLabel, TrackLabel, NotifyName, FText::AsNumber(Start), FText::AsNumber(LineDuration)));
+					}
+				}
+			}
 		}
 	}
 }

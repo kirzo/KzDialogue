@@ -78,6 +78,10 @@ struct KZDIALOGUE_API FKzDialogueNotifyEvent
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event")
 	bool bFireIfSkipped = false;
 
+	/** When false, the event is ignored at bake -- a way to mute it without deleting it. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Event")
+	bool bEnabled = true;
+
 	/** Notify executed for this event. */
 	UPROPERTY(EditAnywhere, Instanced, BlueprintReadOnly, Category = "Event")
 	TObjectPtr<UKzDialogueNotifyBase> Notify = nullptr;

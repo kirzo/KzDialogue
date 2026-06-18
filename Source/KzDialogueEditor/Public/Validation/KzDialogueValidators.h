@@ -90,3 +90,17 @@ public:
 	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
 	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
 };
+
+/**
+ * Reports notify-timeline problems that fail silently at runtime: events with no notify or
+ * no time source, point notifies placed past the line, and per-notify config errors (an unset
+ * montage / sound / etc., reported via each notify's ValidateNotify).
+ */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_Timelines : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};

@@ -46,6 +46,10 @@ public:
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
+	/** Ask the open timeline for the given line to select a specific notify (e.g. from a validation
+	 *  issue click). The matching widget consumes the request on its next tick. */
+	static void RequestNotifySelection(const FGuid& OwningLineId, int32 TrackIndex, int32 EventIndex);
+
 private:
 	void Rebuild();
 
@@ -67,6 +71,10 @@ private:
 	void AddEventAt(int32 TrackIndex, UClass* NotifyClass, float TimeSeconds);
 	void RemoveSelected();
 	void RemoveEvent(int32 TrackIndex, int32 EventIndex);
+	void ToggleEventEnabled(int32 TrackIndex, int32 EventIndex);
+	void DuplicateEvent(int32 TrackIndex, int32 EventIndex);
+	void CopyEvent(int32 TrackIndex, int32 EventIndex);
+	void PasteEvent(int32 TrackIndex, float TimeSeconds);
 	void SetSelection(int32 TrackIndex, int32 EventIndex);
 	void SyncEventDetails();
 	void OnEventDetailsChanged(const FPropertyChangedEvent& PropertyChangedEvent);

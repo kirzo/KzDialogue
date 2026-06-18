@@ -86,6 +86,9 @@ public:
 #if WITH_EDITOR
 	/** Marker tint in the editor timeline. */
 	virtual FLinearColor GetEditorColor() const { return NotifyColor; }
+
+	/** Editor-only: append config errors (e.g. an unset asset) so the asset validator can report them. */
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const {}
 #endif
 
 private:

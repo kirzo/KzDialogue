@@ -809,7 +809,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	{
 		for (const FKzDialogueNotifyEvent& Event : Track.Events)
 		{
-			if (!IsValid(Event.Notify))
+			if (!Event.bEnabled || !IsValid(Event.Notify))
 			{
 				continue;
 			}

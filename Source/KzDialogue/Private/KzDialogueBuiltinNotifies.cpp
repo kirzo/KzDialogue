@@ -134,3 +134,35 @@ void UKzDialogueNotifyState_SetTag::NotifyEnd_Implementation(const FKzDialogueNo
 		Speaker->RemoveDialogueTags(Tags);
 	}
 }
+
+#if WITH_EDITOR
+void UKzDialogueNotify_PlayMontage::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Montage) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "MontageUnset", "Montage is not set.")); }
+}
+
+void UKzDialogueNotifyState_PlayMontage::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Montage) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "MontageUnset", "Montage is not set.")); }
+}
+
+void UKzDialogueNotify_PlaySound::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Sound) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "SoundUnset", "Sound is not set.")); }
+}
+
+void UKzDialogueNotify_CameraShake::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!ShakeClass) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "ShakeUnset", "Camera shake class is not set.")); }
+}
+
+void UKzDialogueNotify_ForceFeedback::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Effect) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "EffectUnset", "Force feedback effect is not set.")); }
+}
+
+void UKzDialogueNotifyState_SetTag::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (Tags.IsEmpty()) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "TagsUnset", "No tags set.")); }
+}
+#endif

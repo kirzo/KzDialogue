@@ -36,6 +36,10 @@ public:
 
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontage", "Play Montage"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
 
 /**
@@ -64,6 +68,10 @@ public:
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontageState", "Play Montage (State)"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
 
 /** Point: plays a one-shot sound attached to the target speaker (or 2D), separate from the line VO. */
@@ -95,6 +103,10 @@ public:
 
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySound", "Play Sound"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
 
 /** Point: plays a camera shake on the local player's camera. */
@@ -114,6 +126,10 @@ public:
 
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "CameraShake", "Camera Shake"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
 
 /** Point: plays a force feedback (rumble) effect on the local player's controller. */
@@ -129,6 +145,10 @@ public:
 
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "ForceFeedback", "Force Feedback"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
 
 /**
@@ -150,4 +170,8 @@ public:
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "SetTag", "Set Tag"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
 };
