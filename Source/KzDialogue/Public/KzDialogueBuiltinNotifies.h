@@ -8,6 +8,7 @@
 #include "KzDialogueBuiltinNotifies.generated.h"
 
 class UAnimMontage;
+class UAnimSequenceBase;
 class USoundBase;
 class UCameraShakeBase;
 class UForceFeedbackEffect;
@@ -66,6 +67,87 @@ public:
 	float BlendOutTime = 0.25f;
 
 	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontageState", "Play Montage (State)"); }
+	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
+	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
+};
+
+/**
+ * Point: plays an anim sequence on a slot (wrapped in a dynamic montage internally), like Sequencer,
+ * so no montage asset is needed. Fire-and-forget; not stopped if the line is cut short.
+ */
+UCLASS(EditInlineNew, Blueprintable, meta = (DisplayName = "Play Animation"))
+class KZDIALOGUE_API UKzDialogueNotify_PlaySlotAnimation : public UKzDialogueNotify
+{
+	GENERATED_BODY()
+
+public:
+	/** Anim sequence to play on the target's mesh (no montage asset required). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	TObjectPtr<UAnimSequenceBase> Animation;
+
+	/** Anim Blueprint slot to play on; must exist in the target's AnimGraph. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	FName SlotName = TEXT("DefaultSlot");
+
+	/** Playback speed multiplier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float PlayRate = 1.0f;
+
+	/** Blend-in time, in seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float BlendIn = 0.25f;
+
+	/** Blend-out time, in seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float BlendOut = 0.25f;
+
+	/** Number of times to play the animation; 0 or less loops forever. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	int32 NumLoops = 1;
+
+	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnim", "Play Animation"); }
+	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
+
+#if WITH_EDITOR
+	virtual void ValidateNotify(TArray<FText>& OutErrors) const override;
+#endif
+};
+
+/**
+ * State: plays an anim sequence on a slot for the window (looping just enough to cover it), and
+ * stops the slot on end. Like the montage state but takes a plain anim sequence -- no montage asset.
+ */
+UCLASS(EditInlineNew, Blueprintable, meta = (DisplayName = "Play Animation (State)"))
+class KZDIALOGUE_API UKzDialogueNotifyState_PlaySlotAnimation : public UKzDialogueNotifyState
+{
+	GENERATED_BODY()
+
+public:
+	/** Anim sequence to play on the target's mesh for the window. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	TObjectPtr<UAnimSequenceBase> Animation;
+
+	/** Anim Blueprint slot to play on; must exist in the target's AnimGraph. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	FName SlotName = TEXT("DefaultSlot");
+
+	/** Playback speed multiplier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float PlayRate = 1.0f;
+
+	/** Blend-in time, in seconds. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float BlendIn = 0.25f;
+
+	/** Blend-out time used when the state ends. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	float BlendOut = 0.25f;
+
+	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnimState", "Play Animation (State)"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
 

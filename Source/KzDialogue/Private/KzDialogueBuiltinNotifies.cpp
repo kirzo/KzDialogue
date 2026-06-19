@@ -6,6 +6,7 @@
 
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimSequenceBase.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/ForceFeedbackEffect.h"
@@ -65,6 +66,37 @@ void UKzDialogueNotifyState_PlayMontage::NotifyEnd_Implementation(const FKzDialo
 	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
 	{
 		Anim->Montage_Stop(BlendOutTime, Montage);
+	}
+}
+
+void UKzDialogueNotify_PlaySlotAnimation::Notify_Implementation(const FKzDialogueNotifyContext& Context)
+{
+	if (!Animation) { return; }
+	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
+	{
+		Anim->PlaySlotAnimationAsDynamicMontage(Animation, SlotName, BlendIn, BlendOut, PlayRate, NumLoops > 0 ? NumLoops : MAX_int32);
+	}
+}
+
+void UKzDialogueNotifyState_PlaySlotAnimation::NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context)
+{
+	if (!Animation) { return; }
+	UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor);
+	if (!Anim) { return; }
+
+	// Loop just enough to cover the event window; NotifyEnd stops the slot precisely at the end.
+	const float WindowLength = FMath::Max(0.f, Context.EventEnd - Context.EventStart);
+	const float Rate = FMath::Max(PlayRate, UE_KINDA_SMALL_NUMBER);
+	const float EffectiveLength = Animation->GetPlayLength() / Rate;
+	const int32 LoopCount = (EffectiveLength > UE_KINDA_SMALL_NUMBER && WindowLength > EffectiveLength) ? FMath::CeilToInt(WindowLength / EffectiveLength) : 1;
+	Anim->PlaySlotAnimationAsDynamicMontage(Animation, SlotName, BlendIn, BlendOut, PlayRate, LoopCount);
+}
+
+void UKzDialogueNotifyState_PlaySlotAnimation::NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context)
+{
+	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
+	{
+		Anim->StopSlotAnimation(BlendOut, SlotName);
 	}
 }
 
@@ -144,6 +176,16 @@ void UKzDialogueNotify_PlayMontage::ValidateNotify(TArray<FText>& OutErrors) con
 void UKzDialogueNotifyState_PlayMontage::ValidateNotify(TArray<FText>& OutErrors) const
 {
 	if (!Montage) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "MontageUnset", "Montage is not set.")); }
+}
+
+void UKzDialogueNotify_PlaySlotAnimation::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Animation) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "SlotAnimUnset", "Animation is not set.")); }
+}
+
+void UKzDialogueNotifyState_PlaySlotAnimation::ValidateNotify(TArray<FText>& OutErrors) const
+{
+	if (!Animation) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "SlotAnimUnset", "Animation is not set.")); }
 }
 
 void UKzDialogueNotify_PlaySound::ValidateNotify(TArray<FText>& OutErrors) const

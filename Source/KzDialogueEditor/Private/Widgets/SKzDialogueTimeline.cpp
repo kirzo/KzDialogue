@@ -160,7 +160,7 @@ static TSharedRef<FKzWaveformPreview> BuildWaveformPreview(USoundWave* Wave)
 			Peak = FMath::Max(Peak, FMath::Max(-Mn, Mx));
 		}
 		Preview->Duration = static_cast<float>(NumFrames) / static_cast<float>(SampleRate);
-		Preview->Gain = Peak > KINDA_SMALL_NUMBER ? FMath::Min(1.0f / Peak, 10.0f) : 1.0f;
+		Preview->Gain = Peak > UE_KINDA_SMALL_NUMBER ? FMath::Min(1.0f / Peak, 10.0f) : 1.0f;
 	}
 #endif
 
@@ -249,7 +249,7 @@ public:
 
 		// Grid, separator and bound/selection lines are drawn for every row -- including the
 		// decorative "Notifies" group row (TrackIndex == INDEX_NONE), which has no events.
-		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 
 		// Grid: vertical lines on the same ticks as the ruler, brighter every tenth, plus a
 		// horizontal separator at the bottom of the row.
@@ -269,7 +269,7 @@ public:
 			}
 		}
 		// Audio waveform on the group band (when the line has a drawable USoundWave).
-		if (Waveform.IsValid() && Waveform->Peaks.Num() > 0 && Waveform->Duration > KINDA_SMALL_NUMBER)
+		if (Waveform.IsValid() && Waveform->Peaks.Num() > 0 && Waveform->Duration > UE_KINDA_SMALL_NUMBER)
 		{
 			DrawWaveform(*Waveform, AllottedGeometry, OutDrawElements, LayerId, W, H);
 		}
@@ -364,7 +364,7 @@ public:
 		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return FReply::Unhandled(); }
 
 		const float W = MyGeometry.GetLocalSize().X;
-		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
 
 		// Middle button anywhere pans the view.
@@ -422,7 +422,7 @@ public:
 		UKzDialogueTimeline* T = Timeline.Get();
 		if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(DragIndex)) { return FReply::Unhandled(); }
 
-		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 
 		if (!bDragStarted)
 		{
@@ -514,7 +514,7 @@ public:
 		if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
 		{
 			const float W = MyGeometry.GetLocalSize().X;
-			const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+			const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 			const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
 			EDragMode Mode;
 			const int32 Hit = HitTest(LocalX, W, Dur, Mode);
@@ -545,7 +545,7 @@ public:
 		if (MouseEvent.GetEffectingButton() != EKeys::LeftMouseButton) { return FReply::Unhandled(); }
 
 		const float W = MyGeometry.GetLocalSize().X;
-		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
 		EDragMode Mode;
 		const int32 Hit = HitTest(LocalX, W, Dur, Mode);
@@ -569,7 +569,7 @@ public:
 	virtual FCursorReply OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const override
 	{
 		const float W = MyGeometry.GetLocalSize().X;
-		const float Dur = FMath::Max(Duration.Get(1.f), KINDA_SMALL_NUMBER);
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 		const float LocalX = MyGeometry.AbsoluteToLocal(CursorEvent.GetScreenSpacePosition()).X;
 		EDragMode Mode;
 		const int32 Hit = HitTest(LocalX, W, Dur, Mode);
@@ -939,7 +939,7 @@ SKzDialogueTimeline::~SKzDialogueTimeline()
 float SKzDialogueTimeline::Duration() const
 {
 	const float D = DisplayDuration.Get(0.f);
-	return D > KINDA_SMALL_NUMBER ? D : 1.f;
+	return D > UE_KINDA_SMALL_NUMBER ? D : 1.f;
 }
 
 float SKzDialogueTimeline::GetViewStart() const
@@ -991,7 +991,7 @@ void SKzDialogueTimeline::ZoomView(float CursorTimeSeconds, float WheelDelta, bo
 	{
 		const float Factor = (WheelDelta > 0.f) ? 0.8f : 1.25f;
 		const float NewSize = FMath::Clamp(Size * Factor, FMath::Min(0.05f, Dur), Dur);
-		const float Frac = Size > KINDA_SMALL_NUMBER ? (CursorTimeSeconds - Start) / Size : 0.5f;
+		const float Frac = Size > UE_KINDA_SMALL_NUMBER ? (CursorTimeSeconds - Start) / Size : 0.5f;
 		Start = CursorTimeSeconds - Frac * NewSize;
 		End = Start + NewSize;
 	}
@@ -1150,7 +1150,7 @@ void SKzDialogueTimeline::TogglePlayback()
 	}
 	else
 	{
-		if (PlayheadTime >= Duration() - KINDA_SMALL_NUMBER) { PlayheadTime = 0.f; }
+		if (PlayheadTime >= Duration() - UE_KINDA_SMALL_NUMBER) { PlayheadTime = 0.f; }
 		StartPlayback();
 	}
 	Invalidate(EInvalidateWidgetReason::Paint);
@@ -1925,8 +1925,8 @@ void SKzDialogueTimeline::RetimeEvent(int32 TrackIndex, int32 EventIndex, float 
 
 	if (Rel->bNormalized)
 	{
-		Rel->Time = Dur > KINDA_SMALL_NUMBER ? StartSeconds / Dur : 0.f;
-		Rel->Duration = Dur > KINDA_SMALL_NUMBER ? LenSeconds / Dur : 0.f;
+		Rel->Time = Dur > UE_KINDA_SMALL_NUMBER ? StartSeconds / Dur : 0.f;
+		Rel->Duration = Dur > UE_KINDA_SMALL_NUMBER ? LenSeconds / Dur : 0.f;
 	}
 	else
 	{

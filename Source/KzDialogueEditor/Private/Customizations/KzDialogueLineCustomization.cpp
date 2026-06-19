@@ -133,11 +133,11 @@ float FKzDialogueLineCustomization::GetDisplayDuration() const
 		if (StructHandle->GetValueData(RawData) == FPropertyAccess::Success && RawData)
 		{
 			const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
-			if (Line->Duration > KINDA_SMALL_NUMBER) { return Line->Duration; }
+			if (Line->Duration > UE_KINDA_SMALL_NUMBER) { return Line->Duration; }
 			if (USoundBase* Sound = Line->Audio.LoadSynchronous())
 			{
 				const float SoundDuration = Sound->GetDuration();
-				if (SoundDuration > KINDA_SMALL_NUMBER) { return SoundDuration; }
+				if (SoundDuration > UE_KINDA_SMALL_NUMBER) { return SoundDuration; }
 			}
 		}
 	}

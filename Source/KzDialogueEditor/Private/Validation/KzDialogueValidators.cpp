@@ -365,7 +365,7 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 					float Start = 0.f;
 					float End = 0.f;
 					Source->Resolve(ResolveCtx, Start, End);
-					if (Start > LineDuration + KINDA_SMALL_NUMBER)
+					if (Start > LineDuration + UE_KINDA_SMALL_NUMBER)
 					{
 						AddIssue(EKzValidationSeverity::Warning, FText::Format(LOCTEXT("PointPastLine", "Line {0}, track '{1}', {2}: fires at {3}s, past the line duration ({4}s); it will never play."), LineLabel, TrackLabel, NotifyName, FText::AsNumber(Start), FText::AsNumber(LineDuration)));
 					}

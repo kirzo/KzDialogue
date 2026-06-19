@@ -33,7 +33,7 @@ namespace
 		if (const FKzDialogueTimeSource_Relative* Rel = Event.TimeSource.GetPtr<FKzDialogueTimeSource_Relative>())
 		{
 			const TCHAR* Unit = Rel->bNormalized ? TEXT("n") : TEXT("s");
-			if (Rel->Duration > KINDA_SMALL_NUMBER)
+			if (Rel->Duration > UE_KINDA_SMALL_NUMBER)
 			{
 				TimeStr = FString::Printf(TEXT("[%.2f - %.2f]%s"), Rel->Time, Rel->Time + Rel->Duration, Unit);
 			}
