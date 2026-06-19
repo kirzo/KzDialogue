@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Templates/SubclassOf.h"
 #include "KzDialogueNotify.h"
 #include "KzDialogueBuiltinNotifies.generated.h"
 
