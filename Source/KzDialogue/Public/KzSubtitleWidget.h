@@ -178,6 +178,15 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, BlueprintPure, Category = "Dialogue|Subtitles")
 	FKzSubtitleChannelView GetViewForChannel(FGameplayTag Channel) const;
 
+	/**
+	 * Gate for rendering a line on a channel. Return false to skip showing it: the dialogue keeps playing
+	 * (timing, audio, events) and the view simply doesn't render that line, leaving the previous one in
+	 * place. Defaults to true. Override in Blueprint to filter by the line's tags (LineHasTag), speaker, etc.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Subtitles")
+	bool CanShowLine(FGameplayTag Channel, const FKzDialogueLine& Line) const;
+	virtual bool CanShowLine_Implementation(FGameplayTag Channel, const FKzDialogueLine& Line) const;
+
 	/** Optional Blueprint hooks. Override for custom per-line presentation. */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Setup Line"))
 	void ReceiveSetupLine(FGameplayTag Channel, const FKzDialogueLine& Line);

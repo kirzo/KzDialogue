@@ -219,9 +219,21 @@ void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 	ReceiveHide(InPlayer->Channel);
 }
 
+bool UKzSubtitleWidget::CanShowLine_Implementation(FGameplayTag Channel, const FKzDialogueLine& Line) const
+{
+	return true;
+}
+
 void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
 	if (IsPlayerMuted(InPlayer))
+	{
+		InPlayer->NotifyLineEnterFinished();
+		return;
+	}
+
+	// Per-line gate (BP-overridable, e.g. filter by tags): keep the dialogue moving but render nothing.
+	if (!CanShowLine(InPlayer->Channel, Line))
 	{
 		InPlayer->NotifyLineEnterFinished();
 		return;
@@ -236,6 +248,13 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
 	if (IsPlayerMuted(InPlayer))
+	{
+		InPlayer->NotifyLineExitFinished();
+		return;
+	}
+
+	// Mirror the enter gate: a line we didn't show has nothing to fade out, so don't disturb the view.
+	if (!CanShowLine(InPlayer->Channel, Line))
 	{
 		InPlayer->NotifyLineExitFinished();
 		return;
