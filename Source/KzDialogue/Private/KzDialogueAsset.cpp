@@ -25,6 +25,15 @@ UKzDialogueTimeline* UKzDialogueAsset::FindTimelineForLine(const FGuid& LineId) 
 	return nullptr;
 }
 
+void UKzDialogueAsset::FinalizeResolvedLine(FKzDialogueLine& OutLine) const
+{
+	// Single place every resolve path goes through, so consumers get a complete line: the transient
+	// per-line timeline, and the asset-wide tags merged into the line's own (AppendTags dedupes, so
+	// re-resolving the same line stays idempotent).
+	OutLine.Timeline = FindTimelineForLine(OutLine.LineId);
+	OutLine.Tags.AppendTags(Tags);
+}
+
 bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& OutLine) const
 {
 	for (const FKzDialogueLine& Line : Lines)
@@ -32,9 +41,9 @@ bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& Ou
 		if (Line.LineId == InLineId)
 		{
 			OutLine = Line;
-			// Resolve the transient per-line timeline here so every asset-line lookup carries it,
-			// not just the iterating provider (single-line and Sequencer play paths go through here).
-			OutLine.Timeline = FindTimelineForLine(InLineId);
+			// Inject the asset's runtime data (timeline + asset-wide tags) so every asset-line lookup
+			// carries it, not just the iterating provider (single-line and Sequencer paths go through here).
+			FinalizeResolvedLine(OutLine);
 			return true;
 		}
 	}

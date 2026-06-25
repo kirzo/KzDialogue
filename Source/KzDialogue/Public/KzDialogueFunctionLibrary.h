@@ -94,6 +94,26 @@ public:
 	static void GetDialogueLineRefsFromList(const FKzDialogueLineList& List, TArray<FKzDialogueLineRef>& OutRefs);
 
 	/**
+	 * Effective tags of a resolved line: its own Tags, which already include the asset-wide tags merged in
+	 * at resolve time. A view only ever gets the resolved line, so this (and the LineHas* helpers below)
+	 * are all it needs — no asset reference required.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
+	static FGameplayTagContainer GetLineTags(const FKzDialogueLine& Line);
+
+	/** True if the line has Tag. bExact uses HasTagExact (no parent matching). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
+	static bool LineHasTag(const FKzDialogueLine& Line, FGameplayTag Tag, bool bExact = false);
+
+	/** True if the line has ANY of Tags. bExact uses HasAnyExact. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line", meta = (AutoCreateRefTerm = "Tags"))
+	static bool LineHasAnyTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact = false);
+
+	/** True if the line has ALL of Tags. bExact uses HasAllExact. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line", meta = (AutoCreateRefTerm = "Tags"))
+	static bool LineHasAllTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact = false);
+
+	/**
 	 * Returns true when a dialogue player exists for the given channel and is currently
 	 * playing a line. Useful to gate input, branch logic ("don't trigger this barks if
 	 * something is talking on Main"), or trigger animations.

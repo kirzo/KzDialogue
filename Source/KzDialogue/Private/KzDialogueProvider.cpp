@@ -35,7 +35,7 @@ FKzDialogueLine UKzAssetDialogueProvider::Advance_Implementation()
 	CursorIndex = (CursorIndex == INDEX_NONE) ? ResolveStartIndex() : CursorIndex + 1;
 	if (!Asset->Lines.IsValidIndex(CursorIndex)) { return FKzDialogueLine{}; }
 	FKzDialogueLine Line = Asset->Lines[CursorIndex];
-	Line.Timeline = Asset->FindTimelineForLine(Line.LineId);
+	Asset->FinalizeResolvedLine(Line);
 	return Line;
 }
 
@@ -43,7 +43,7 @@ FKzDialogueLine UKzAssetDialogueProvider::Current_Implementation() const
 {
 	if (!IsValid(Asset) || !Asset->Lines.IsValidIndex(CursorIndex)) { return {}; }
 	FKzDialogueLine Line = Asset->Lines[CursorIndex];
-	Line.Timeline = Asset->FindTimelineForLine(Line.LineId);
+	Asset->FinalizeResolvedLine(Line);
 	return Line;
 }
 

@@ -139,3 +139,23 @@ void UKzDialogueFunctionLibrary::InterruptAllDialogues(const UObject* WorldConte
 		Sub->InterruptAll();
 	}
 }
+
+FGameplayTagContainer UKzDialogueFunctionLibrary::GetLineTags(const FKzDialogueLine& Line)
+{
+	return Line.Tags;
+}
+
+bool UKzDialogueFunctionLibrary::LineHasTag(const FKzDialogueLine& Line, FGameplayTag Tag, bool bExact)
+{
+	return bExact ? Line.Tags.HasTagExact(Tag) : Line.Tags.HasTag(Tag);
+}
+
+bool UKzDialogueFunctionLibrary::LineHasAnyTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact)
+{
+	return bExact ? Line.Tags.HasAnyExact(Tags) : Line.Tags.HasAny(Tags);
+}
+
+bool UKzDialogueFunctionLibrary::LineHasAllTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact)
+{
+	return bExact ? Line.Tags.HasAllExact(Tags) : Line.Tags.HasAll(Tags);
+}

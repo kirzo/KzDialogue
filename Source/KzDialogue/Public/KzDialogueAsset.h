@@ -30,6 +30,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	FGameplayTag DialogueTag;
 
+	/**
+	 * Free-form tags shared by every line in this dialogue (mood, speaker, context, ...). They are merged
+	 * into each line's own Tags when the line is resolved, so a view that only receives the resolved line
+	 * sees the union (asset + line). Query it with UKzDialogueFunctionLibrary::LineHasTag and friends.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+	FGameplayTagContainer Tags;
+
 	/** When true, a higher-priority dialogue may interrupt this one mid-line. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	bool bInterruptible = true;
@@ -64,6 +72,13 @@ public:
 
 	/** Find the notify timeline owned by the given line id, or null. */
 	UKzDialogueTimeline* FindTimelineForLine(const FGuid& LineId) const;
+
+	/**
+	 * Completes a resolved line copy with the asset's runtime data so a consumer (view) gets a full line
+	 * without needing the asset: its per-line timeline, and the asset-wide Tags merged into the line's own.
+	 * Call on every line handed out by a resolve path or the provider.
+	 */
+	void FinalizeResolvedLine(FKzDialogueLine& OutLine) const;
 
 	/** Get a line by its stable id. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
