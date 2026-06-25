@@ -221,3 +221,47 @@ protected:
 	/** Refs awaited by this action. */
 	TArray<FKzDialogueLineRef> LaunchRefs;
 };
+
+/**
+ * Plays a whole dialogue asset (advancing through all of its lines) and completes when the dialogue
+ * ends. Finished fires on natural completion; Cancelled fires when it is stopped, aborted or
+ * interrupted before reaching the end.
+ */
+UCLASS()
+class KZDIALOGUE_API UKzAsyncPlayDialogueAsset : public UKzAsyncDialogueAction
+{
+	GENERATED_BODY()
+
+public:
+	/** Plays a dialogue asset and waits until the whole dialogue finishes. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,bStartImmediately,AdvanceMode"))
+	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+
+	/** Fired right after the asset is requested. Carries the channel player; Line is not set yet. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Started;
+
+	/** Fired when the dialogue reaches its end (Completed). */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Finished;
+
+	/** Fired when the dialogue is stopped, aborted or interrupted before completing. */
+	UPROPERTY(BlueprintAssignable)
+	FKzAsyncDialogueLineEvent Cancelled;
+
+	virtual void Activate() override;
+
+protected:
+	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
+	virtual void NotifyCancelled() override;
+
+	UFUNCTION()
+	void HandleAssetFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
+
+	/** Asset awaited by this action. */
+	UPROPERTY(Transient)
+	TObjectPtr<UKzDialogueAsset> Asset;
+
+	/** Advance mode passed to PlayAsset (Inherit = the asset's own setting). */
+	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit;
+};

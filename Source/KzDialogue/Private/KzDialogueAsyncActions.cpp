@@ -340,3 +340,72 @@ UKzDialoguePlayer* UKzAsyncPlayDialogueLineRefs::LaunchPlayback()
 {
 	return UKzDialogueFunctionLibrary::PlayDialogueLineRefs(WorldContext, LaunchRefs, Channel, Priority, bStartImmediately);
 }
+
+// ------------------------------------------------------------------------------------------------
+// UKzAsyncPlayDialogueAsset
+// ------------------------------------------------------------------------------------------------
+
+UKzAsyncPlayDialogueAsset* UKzAsyncPlayDialogueAsset::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* InAsset, FGameplayTag InChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
+{
+	UKzAsyncPlayDialogueAsset* Action = NewObject<UKzAsyncPlayDialogueAsset>();
+	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
+	Action->Asset = InAsset;
+	Action->Channel = InChannel;
+	Action->bStartImmediately = bInStartImmediately;
+	Action->AdvanceMode = InAdvanceMode;
+	if (WorldContextObject)
+	{
+		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
+	}
+	return Action;
+}
+
+FGameplayTag UKzAsyncPlayDialogueAsset::ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const
+{
+	// Match PlayAsset's channel resolution (off the asset's first line) so the pre-acquired player
+	// is the one playback lands on.
+	const FGuid FirstLineId = (Asset && Asset->Lines.Num() > 0) ? Asset->Lines[0].LineId : FGuid();
+	return Subsystem.ResolveChannelForEntry(Channel, Asset, FirstLineId);
+}
+
+void UKzAsyncPlayDialogueAsset::Activate()
+{
+	Super::Activate();
+
+	if (!WorldContext || !Asset || !AcquirePlayer())
+	{
+		NotifyCancelled();
+		return;
+	}
+
+	UKzDialoguePlayer* Result = UKzDialogueFunctionLibrary::PlayDialogueAsset(WorldContext, Asset, Channel, bStartImmediately, AdvanceMode);
+	if (Result != DialoguePlayer)
+	{
+		NotifyCancelled();
+		return;
+	}
+
+	// Bind completion AFTER playing: launching may interrupt previous channel content, which
+	// broadcasts OnDialogueFinished during the play call above.
+	DialoguePlayer->OnDialogueFinished.AddDynamic(this, &UKzAsyncPlayDialogueAsset::HandleAssetFinished);
+	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
+}
+
+void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
+{
+	if (Reason == EKzDialogueFinishReason::Completed)
+	{
+		Finished.Broadcast(Player, FKzDialogueLine());
+	}
+	else
+	{
+		Cancelled.Broadcast(Player, FKzDialogueLine());
+	}
+	SetReadyToDestroy();
+}
+
+void UKzAsyncPlayDialogueAsset::NotifyCancelled()
+{
+	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
+	SetReadyToDestroy();
+}
