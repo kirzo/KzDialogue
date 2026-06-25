@@ -330,6 +330,11 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+
+	// Force the animated Opacity back to its hidden baseline deterministically. StopAnimation above only
+	// rewinds to frame 0 on a deferred tick (and LineFadeOut's frame 0 is Opacity 1), which does not
+	// reliably clear when a preempting dialogue immediately reuses this player and the same animations.
+	ReceiveResetChannelVisual(InPlayer->Channel);
 	ReceiveHide(InPlayer->Channel);
 }
 
@@ -414,6 +419,10 @@ void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+
+	// Deterministically zero the animated Opacity (see ReceiveResetChannelVisual): the StopAnimation above
+	// only rewinds on a deferred tick, so a fade stopped mid-mute can otherwise linger at a partial value.
+	ReceiveResetChannelVisual(InPlayer->Channel);
 	ReceiveHide(InPlayer->Channel);
 }
 
@@ -490,10 +499,29 @@ void UKzSubtitleWidget::PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePla
 {
 	if (!Anim || !InPlayer) { return; }
 
-	// If this animation was already in flight (e.g. hot-swap within the same channel),
-	// the old entry is overwritten — UMG StopAnimation isn't strictly needed since
-	// PlayAnimation restarts from the beginning, but the map must reflect the new owner.
+	// Only one fade may drive this player's view at a time. Stop any OTHER animation this player still
+	// owns (e.g. an in-flight LineFadeIn if a line is advanced early while LineFadeOut starts): they are
+	// DISTINCT UWidgetAnimations, so each gets its own concurrently-ticking UMG state and they would
+	// fight over the same Opacity. Remove the map entry BEFORE StopAnimation: the stop's (deferred)
+	// OnAnimationFinished then resolves to GetPlayerForAnim()==null and is a clean no-op instead of
+	// dispatching a stale Notify or evicting the new owner below.
+	TArray<UWidgetAnimation*, TInlineAllocator<2>> ToStop;
+	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
+	{
+		if (It->Value.Get() == InPlayer && It->Key.Get() != Anim)
+		{
+			if (UWidgetAnimation* Old = It->Key.Get()) { ToStop.Add(Old); }
+			It.RemoveCurrent();
+		}
+	}
+
 	ActiveAnimations.Add(Anim, InPlayer);
+
+	for (UWidgetAnimation* Old : ToStop)
+	{
+		StopAnimation(Old);
+	}
+
 	PlayAnimation(Anim);
 }
 
