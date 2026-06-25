@@ -89,6 +89,18 @@ enum class EKzLineAudioInterruptionPolicy : uint8
 	Continue
 };
 
+/** How a line's playback length is derived from its Duration field and its audio. */
+UENUM(BlueprintType)
+enum class EKzLineDurationMode : uint8
+{
+	/** Duration if > 0, else the audio's length, else the project default (legacy behavior). */
+	Auto,
+	/** Use Duration as the line's length, ignoring the audio. */
+	Override,
+	/** Line length = the audio's length + Duration, to extend a voiced line. */
+	ExtendAudio
+};
+
 /** A single dialogue line. The smallest authorable unit in the system. */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueLine
@@ -116,11 +128,15 @@ struct KZDIALOGUE_API FKzDialogueLine
 	TSoftObjectPtr<USoundBase> Audio;
 
 	/**
-	 * Explicit duration in seconds.
-	 * If <= 0, falls back to audio duration, then to the player's default duration.
+	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
+	 * an extension on top of the audio, or as the explicit length when > 0 (Auto).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ClampMin = 0))
 	float Duration = 0.0f;
+
+	/** How the line's playback length is derived from Duration and the audio. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	EKzLineDurationMode DurationMode = EKzLineDurationMode::Auto;
 
 	/** When true and Audio is set, the audio is spawned 2D regardless of speaker location. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
@@ -162,6 +178,23 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
 	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }
+
+	/**
+	 * Effective playback length in seconds (before TimeScale) from DurationMode, Duration, the
+	 * resolved audio length (0 if none) and the project default. Callers resolve the audio length.
+	 */
+	float ResolveDuration(float AudioLength, float DefaultDuration) const
+	{
+		switch (DurationMode)
+		{
+		case EKzLineDurationMode::Override:
+			return Duration;
+		case EKzLineDurationMode::ExtendAudio:
+			return AudioLength + Duration;
+		default:
+			return Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : DefaultDuration);
+		}
+	}
 
 	/**
 	 * Returns a "(Speaker) Text" formatted label for this line, suitable for editor

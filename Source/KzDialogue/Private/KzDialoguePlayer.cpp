@@ -395,20 +395,13 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
 	const float Fallback = Settings ? Settings->DefaultDuration : 2.5f;
 
-	float Duration;
-	if (Line.Duration > UE_KINDA_SMALL_NUMBER)
+	float AudioLength = 0.0f;
+	if (const USoundBase* Sound = Line.Audio.Get())
 	{
-		Duration = Line.Duration;
+		AudioLength = Sound->GetDuration();
 	}
-	else if (USoundBase* Sound = Line.Audio.Get())
-	{
-		const float SoundDuration = Sound->GetDuration();
-		Duration = (SoundDuration > UE_KINDA_SMALL_NUMBER) ? SoundDuration : Fallback;
-	}
-	else
-	{
-		Duration = Fallback;
-	}
+
+	const float Duration = Line.ResolveDuration(AudioLength, Fallback);
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
 	const float Scaled = Duration / FMath::Max(0.1f, TimeScale);
