@@ -11,6 +11,7 @@
 class UKzDialoguePlayer;
 class UKzDialogueProvider;
 class UKzDialogueAsset;
+class UKzDialogueAssetSession;
 struct FKzDialogueChannelDefinition;
 
 /**
@@ -80,9 +81,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
 	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
 
-	/** Convenience wrapper: build an asset provider and play it. AdvanceMode defaults to the asset's. */
+	/**
+	 * Play a whole dialogue asset, resolving EACH line's channel and chaining runs across channel changes.
+	 * Returns a UKzDialogueAssetSession that completes once for the whole asset (wait on it via
+	 * OnDialogueFinished / IsPlaying). A valid InChannel forces every line onto it (single-channel,
+	 * single run). AdvanceMode defaults to the asset's.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
-	UKzDialoguePlayer* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Convenience wrapper: build a manual single-line provider and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
@@ -100,8 +106,8 @@ public:
 	 * Aliases are resolved at launch (stateful: shuffle bags, cooldowns...); entries that fail
 	 * to resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
+	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
 
 	/**
 	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
@@ -133,6 +139,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const;
 
+	/** Removes a finished asset session from the subsystem's keep-alive list. Called by the session itself. */
+	void ReleaseAssetSession(UKzDialogueAssetSession* Session);
+
+	/** True while the subsystem is tearing down (Deinitialize); in-flight asset sessions use it to stop chaining. */
+	bool IsDeinitializing() const { return bDeinitializing; }
+
+	/** Resolves the advance mode: explicit override > asset's mode > Automatic. */
+	EKzDialogueAdvanceMode ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const;
+
 	/**
 	 * Reset the cached playback state of a single alias. Next time the alias is
 	 * resolved, it starts as if it had never been played.
@@ -151,6 +166,13 @@ public:
 private:
 	UPROPERTY(Transient)
 	TMap<FGameplayTag, TObjectPtr<UKzDialoguePlayer>> Players;
+
+	/** Asset sessions kept alive while they run; each removes itself on finish via ReleaseAssetSession. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UKzDialogueAssetSession>> AssetSessions;
+
+	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
+	bool bDeinitializing = false;
 
 	/**
 	 * Resolve the priority to use given:
@@ -173,9 +195,6 @@ private:
 
 	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
 	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);
-
-	/** Resolves the advance mode: explicit override > asset's mode > Automatic. */
-	EKzDialogueAdvanceMode ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const;
 
 	/**
 	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.

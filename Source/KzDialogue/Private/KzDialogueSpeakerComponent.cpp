@@ -67,7 +67,7 @@ TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& UKzDialogueSpea
 	return KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
 }
 
-UKzDialoguePlayer* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
+UKzDialogueAssetSession* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
 {
 	if (!IsValid(Asset) || !GetWorld()) { return nullptr; }
 

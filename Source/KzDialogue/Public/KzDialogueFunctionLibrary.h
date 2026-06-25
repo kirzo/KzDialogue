@@ -11,6 +11,7 @@
 
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
+class UKzDialogueAssetSession;
 
 UCLASS()
 class KZDIALOGUE_API UKzDialogueFunctionLibrary : public UBlueprintFunctionLibrary
@@ -29,9 +30,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static UKzDialoguePlayer* GetDialoguePlayer(const UObject* WorldContextObject, FGameplayTag InChannel, bool bCreateIfNotFound = true);
 
-	/** One-shot helper: play an asset on a channel. AdvanceMode defaults to the asset's (Automatic / Manual RPG-style). */
+	/**
+	 * One-shot helper: play a whole asset on a channel. Returns a session that completes once for the whole
+	 * asset (each line resolves its own channel; runs chain across channel changes). AdvanceMode defaults to
+	 * the asset's (Automatic / Manual RPG-style).
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately,AdvanceMode"))
-	static UKzDialoguePlayer* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	static UKzDialogueAssetSession* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Resolve a single line by GUID inside a dialogue asset and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))

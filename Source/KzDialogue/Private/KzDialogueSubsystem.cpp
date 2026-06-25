@@ -5,6 +5,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueAssetSession.h"
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
@@ -29,6 +30,20 @@ void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UKzDialogueSubsystem::Deinitialize()
 {
+	bDeinitializing = true;
+
+	// Tear down asset sessions BEFORE the players they drive. Iterate a copy: Interrupt() finishes the
+	// session, which calls ReleaseAssetSession and mutates AssetSessions mid-loop.
+	TArray<TObjectPtr<UKzDialogueAssetSession>> SessionsToTearDown = AssetSessions;
+	for (UKzDialogueAssetSession* Session : SessionsToTearDown)
+	{
+		if (Session)
+		{
+			Session->Interrupt();
+		}
+	}
+	AssetSessions.Reset();
+
 	StopAll();
 	Players.Reset();
 	Super::Deinitialize();
@@ -278,21 +293,27 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	return Player;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset))
 	{
 		return nullptr;
 	}
 
-	// First-entry rule: the session channel resolves from the asset's first line.
-	InChannel = ResolveChannel(InChannel, Asset->Lines.IsEmpty() ? FKzDialogueLine{} : Asset->Lines[0], Asset);
+	// The session splits the asset into maximal per-channel runs and plays each run on its own channel,
+	// chaining them. A valid InChannel forces every line onto it -> one run, identical to the old play.
+	UKzDialogueAssetSession* Session = NewObject<UKzDialogueAssetSession>(this);
+	AssetSessions.Add(Session);
+	Session->Start(this, Asset, InChannel, bStartImmediately, AdvanceMode);
+	return Session;
+}
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
-	const int32 ResolvedPriority = ResolvePriority(InheritPriority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
-
-	UKzAssetDialogueProvider* Provider = UKzAssetDialogueProvider::Create(this, Asset);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately, ResolveAdvanceMode(AdvanceMode, Asset));
+void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)
+{
+	if (Session)
+	{
+		AssetSessions.RemoveSingle(Session);
+	}
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
@@ -380,7 +401,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 	return PlayLine(Line, InChannel, Priority, bStartImmediately);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset) || LineIds.IsEmpty()) { return nullptr; }
 
@@ -411,7 +432,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
 
 	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately, AdvanceMode);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)

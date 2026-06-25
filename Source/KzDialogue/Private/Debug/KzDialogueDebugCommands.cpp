@@ -8,6 +8,7 @@
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueAssetSession.h"
 #include "KzDialogueSpeakerComponent.h"
 
 #include "Engine/Engine.h"
@@ -106,9 +107,9 @@ namespace KzDialogueCmd
 		}
 
 		const FGameplayTag Channel = ParseChannelArg(Args, 1);
-		const UKzDialoguePlayer* Player = Sub->PlayAsset(Asset, Channel);
-		LogToConsole(Player
-			? FString::Printf(TEXT("Playing '%s' on channel '%s'"), *Asset->GetName(), *Player->Channel.ToString())
+		const UKzDialogueAssetSession* Session = Sub->PlayAsset(Asset, Channel);
+		LogToConsole(Session && Session->IsPlaying()
+			? FString::Printf(TEXT("Playing '%s' on channel '%s'"), *Asset->GetName(), *Session->GetChannel().ToString())
 			: FString::Printf(TEXT("Failed to play '%s' (rejected by priority?)"), *Asset->GetName()));
 	}
 

@@ -11,6 +11,7 @@
 
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
+class UKzDialogueAssetSession;
 
 /**
  * Attach to any actor that can speak. Provides:
@@ -43,9 +44,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
 	static UKzDialogueSpeakerComponent* FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag);
 
-	/** Speak an asset on this speaker's default channel. */
+	/** Speak an asset on this speaker's default channel. Returns the session for the whole asset. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
-	UKzDialoguePlayer* Speak(UKzDialogueAsset* Asset);
+	UKzDialogueAssetSession* Speak(UKzDialogueAsset* Asset);
 
 	/** Speak a single ad-hoc line, as given. Notifies fire only if Line was resolved from an asset;
 	 *  a hand-built line has no Timeline (timelines live on the asset keyed by LineId). */

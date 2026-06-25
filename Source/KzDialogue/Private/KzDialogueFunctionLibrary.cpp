@@ -28,7 +28,7 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* 
 	return bCreateIfNotFound ? Sub->GetOrCreatePlayer(InChannel) : Sub->FindPlayer(InChannel);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
+UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
 	FGameplayTag Channel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);

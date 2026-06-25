@@ -11,6 +11,7 @@
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
 class UKzDialogueSubsystem;
+class UKzDialogueAssetSession;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzAsyncDialogueLineEvent, UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 
@@ -32,11 +33,11 @@ public:
 
 	/** Stops the dialogue gracefully (exit animation) and resolves the action as Cancelled. No-op once finished. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue")
-	void Stop();
+	virtual void Stop();
 
 	/** Interrupts the dialogue immediately and resolves the action as Cancelled. No-op once finished. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue")
-	void Interrupt();
+	virtual void Interrupt();
 
 protected:
 	/** Resolves (and creates) the channel player. False when no player is available. */
@@ -250,9 +251,11 @@ public:
 	FKzAsyncDialogueLineEvent Cancelled;
 
 	virtual void Activate() override;
+	virtual void Stop() override;
+	virtual void Interrupt() override;
+	virtual void SetReadyToDestroy() override;
 
 protected:
-	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
 	virtual void NotifyCancelled() override;
 
 	UFUNCTION()
@@ -261,6 +264,10 @@ protected:
 	/** Asset awaited by this action. */
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueAsset> Asset;
+
+	/** Session driving the asset across its (possibly several) channels; the whole-asset finish routes through it. */
+	UPROPERTY(Transient)
+	TObjectPtr<UKzDialogueAssetSession> Session;
 
 	/** Advance mode passed to PlayAsset (Inherit = the asset's own setting). */
 	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit;
