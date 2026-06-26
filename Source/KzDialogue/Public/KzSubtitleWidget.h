@@ -200,12 +200,8 @@ protected:
 
 	/**
 	 * Snap this channel's subtitle to its hidden baseline (e.g. SetRenderOpacity(0) on the subtitle root).
-	 * Fired after a fade is HARD-cancelled (preemption / Abort / Interrupt) or muted mid-fade, BEFORE
-	 * On Hide. The point is determinism: UMG's StopAnimation rewinds to the animation's first keyframe,
-	 * but on a DEFERRED tick — unreliable when a new dialogue immediately reuses this player and the same
-	 * animations, which can leave Opacity stranded at the interrupted value (and LineFadeOut's first
-	 * keyframe is Opacity 1, not 0). Implement this to zero the animated Opacity directly so no partial
-	 * fade can linger. Keep the subtitle root tickable here (set Opacity, don't Collapse it).
+	 * Fired on a hard cancel (preemption / Abort / Interrupt) or mute mid-fade, before On Hide — UMG's
+	 * StopAnimation only rewinds deferred (and a fade-out rewinds to Opacity 1), so zero it here directly.
 	 */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Reset Channel Visual"))
 	void ReceiveResetChannelVisual(FGameplayTag Channel);

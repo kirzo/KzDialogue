@@ -47,11 +47,9 @@ void UKzSubtitleWidget::BindPlayer(UKzDialoguePlayer* InPlayer)
 
 	BoundPlayers.Add(InPlayer);
 
-	// Tell the player whether to wait for our notifications, based on the view's
-	// animation setup. If the view has no animations, the player auto-completes phases.
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
-	InPlayer->SetWaitForViewNotifications(View.HasAnyAnimation());
-
+	// The player no longer needs to be told whether to wait: it discovers per phase whether any bound
+	// view is presenting (via ClaimViewResponse) and advances when all claiming views finish, or when
+	// none claim. Nothing to configure here.
 	BindPlayerEvents(InPlayer);
 
 	// A trigger channel may already be sounding: start muted when a rule says so.
@@ -191,31 +189,35 @@ void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 	// This player may be a mute-rule trigger: hide the views it silences before rendering.
 	RefreshMuteStates();
 
+	// Muted: render nothing and stay transparent to the player's timing (don't claim, don't notify).
 	if (IsPlayerMuted(InPlayer))
 	{
-		// Render nothing, but keep the player's state machine moving (no-animation path).
-		InPlayer->NotifyEnterFinished();
 		return;
 	}
 
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	ReceiveShow(InPlayer->Channel);
-	if (View.StartFadeIn) { PlayAnimForPlayer(View.StartFadeIn, InPlayer); }
-	else { InPlayer->NotifyEnterFinished(); }
+	if (View.StartFadeIn)
+	{
+		InPlayer->ClaimViewResponse();
+		PlayAnimForPlayer(View.StartFadeIn, InPlayer);
+	}
 }
 
 void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 {
+	// The view was already hidden when the mute kicked in; stay transparent.
 	if (IsPlayerMuted(InPlayer))
 	{
-		// The view was already hidden when the mute kicked in.
-		InPlayer->NotifyExitFinished();
 		return;
 	}
 
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
-	if (View.EndFadeOut) { PlayAnimForPlayer(View.EndFadeOut, InPlayer); }
-	else { InPlayer->NotifyExitFinished(); }
+	if (View.EndFadeOut)
+	{
+		InPlayer->ClaimViewResponse();
+		PlayAnimForPlayer(View.EndFadeOut, InPlayer);
+	}
 	ReceiveHide(InPlayer->Channel);
 }
 
@@ -226,43 +228,44 @@ bool UKzSubtitleWidget::CanShowLine_Implementation(FGameplayTag Channel, const F
 
 void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
+	// Muted or filtered out (CanShowLine): render nothing and stay transparent — don't claim, don't notify,
+	// so the view that DOES show the line drives the timing.
 	if (IsPlayerMuted(InPlayer))
 	{
-		InPlayer->NotifyLineEnterFinished();
 		return;
 	}
-
-	// Per-line gate (BP-overridable, e.g. filter by tags): keep the dialogue moving but render nothing.
 	if (!CanShowLine(InPlayer->Channel, Line))
 	{
-		InPlayer->NotifyLineEnterFinished();
 		return;
 	}
 
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	ApplyLineToView(View, Line, InPlayer->Channel);
-	if (View.LineFadeIn) { PlayAnimForPlayer(View.LineFadeIn, InPlayer); }
-	else { InPlayer->NotifyLineEnterFinished(); }
+	if (View.LineFadeIn)
+	{
+		InPlayer->ClaimViewResponse();
+		PlayAnimForPlayer(View.LineFadeIn, InPlayer);
+	}
 }
 
 void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
+	// Mirror the enter gate: a line this view didn't show has nothing to fade out — stay transparent.
 	if (IsPlayerMuted(InPlayer))
 	{
-		InPlayer->NotifyLineExitFinished();
 		return;
 	}
-
-	// Mirror the enter gate: a line we didn't show has nothing to fade out, so don't disturb the view.
 	if (!CanShowLine(InPlayer->Channel, Line))
 	{
-		InPlayer->NotifyLineExitFinished();
 		return;
 	}
 
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
-	if (View.LineFadeOut) { PlayAnimForPlayer(View.LineFadeOut, InPlayer); }
-	else { InPlayer->NotifyLineExitFinished(); }
+	if (View.LineFadeOut)
+	{
+		InPlayer->ClaimViewResponse();
+		PlayAnimForPlayer(View.LineFadeOut, InPlayer);
+	}
 }
 
 void UKzSubtitleWidget::HandlePaused(UKzDialoguePlayer* InPlayer)
@@ -313,7 +316,7 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 		return;
 	}
 
-	// Stop any in-flight animatios.
+	// Stop any in-flight animations and untrack them.
 	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
 	{
 		if (It->Value.Get() != InPlayer) { continue; }
@@ -330,10 +333,6 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
-
-	// Force the animated Opacity back to its hidden baseline deterministically. StopAnimation above only
-	// rewinds to frame 0 on a deferred tick (and LineFadeOut's frame 0 is Opacity 1), which does not
-	// reliably clear when a preempting dialogue immediately reuses this player and the same animations.
 	ReceiveResetChannelVisual(InPlayer->Channel);
 	ReceiveHide(InPlayer->Channel);
 }
@@ -499,29 +498,9 @@ void UKzSubtitleWidget::PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePla
 {
 	if (!Anim || !InPlayer) { return; }
 
-	// Only one fade may drive this player's view at a time. Stop any OTHER animation this player still
-	// owns (e.g. an in-flight LineFadeIn if a line is advanced early while LineFadeOut starts): they are
-	// DISTINCT UWidgetAnimations, so each gets its own concurrently-ticking UMG state and they would
-	// fight over the same Opacity. Remove the map entry BEFORE StopAnimation: the stop's (deferred)
-	// OnAnimationFinished then resolves to GetPlayerForAnim()==null and is a clean no-op instead of
-	// dispatching a stale Notify or evicting the new owner below.
-	TArray<UWidgetAnimation*, TInlineAllocator<2>> ToStop;
-	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
-	{
-		if (It->Value.Get() == InPlayer && It->Key.Get() != Anim)
-		{
-			if (UWidgetAnimation* Old = It->Key.Get()) { ToStop.Add(Old); }
-			It.RemoveCurrent();
-		}
-	}
-
+	// Track which player this animation belongs to so OnAnimationFinished can dispatch the right Notify.
+	// PlayAnimation on an already-playing animation restarts it from the beginning, so re-entry is safe.
 	ActiveAnimations.Add(Anim, InPlayer);
-
-	for (UWidgetAnimation* Old : ToStop)
-	{
-		StopAnimation(Old);
-	}
-
 	PlayAnimation(Anim);
 }
 
@@ -545,10 +524,13 @@ void UKzSubtitleWidget::OnAnimationFinished_Implementation(const UWidgetAnimatio
 
 	// Notify the right phase based on which slot the animation occupies in the player's view.
 	const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
+
+	// Untrack BEFORE dispatching: the notify re-enters and may start the next line's fade synchronously,
+	// so removing first keeps at most one tracked fade per player.
+	ActiveAnimations.Remove(Finished);
+
 	if (Finished == View.StartFadeIn) { Player->NotifyEnterFinished(); }
 	else if (Finished == View.EndFadeOut) { Player->NotifyExitFinished(); }
 	else if (Finished == View.LineFadeIn) { Player->NotifyLineEnterFinished(); }
 	else if (Finished == View.LineFadeOut) { Player->NotifyLineExitFinished(); }
-
-	ActiveAnimations.Remove(Finished);
 }

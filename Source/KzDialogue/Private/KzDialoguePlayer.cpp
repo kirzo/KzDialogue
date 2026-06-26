@@ -215,43 +215,41 @@ void UKzDialoguePlayer::AdvanceCurrentLine()
 
 void UKzDialoguePlayer::NotifyEnterFinished()
 {
-	if (State == EKzDialogueState::Entering)
-	{
-		Enter_LineEntering();
-	}
+	// Ignore a notification for a phase we already left (stale fade): also avoids decrementing the next phase.
+	if (State != EKzDialogueState::Entering) { return; }
+	if (--PendingViewAcks <= 0) { Enter_LineEntering(); }
 }
 
 void UKzDialoguePlayer::NotifyExitFinished()
 {
-	if (State == EKzDialogueState::Exiting)
-	{
-		FinishWithReason(EKzDialogueFinishReason::Completed);
-	}
+	if (State != EKzDialogueState::Exiting) { return; }
+	if (--PendingViewAcks <= 0) { FinishWithReason(EKzDialogueFinishReason::Completed); }
 }
 
 void UKzDialoguePlayer::NotifyLineEnterFinished()
 {
-	if (State == EKzDialogueState::LineEntering)
-	{
-		Enter_LinePlaying();
-	}
+	if (State != EKzDialogueState::LineEntering) { return; }
+	if (--PendingViewAcks <= 0) { Enter_LinePlaying(); }
 }
 
 void UKzDialoguePlayer::NotifyLineExitFinished()
 {
-	if (State == EKzDialogueState::LineExiting)
-	{
-		OnLineFinished.Broadcast(this, CurrentLine);
+	if (State != EKzDialogueState::LineExiting) { return; }
+	if (--PendingViewAcks <= 0) { AdvanceAfterLineExit(); }
+}
 
-		// Decide whether to play another line or wrap up.
-		if (IsValid(Provider) && Provider->HasNext())
-		{
-			Enter_LineEntering();
-		}
-		else
-		{
-			Enter_Exiting();
-		}
+void UKzDialoguePlayer::AdvanceAfterLineExit()
+{
+	OnLineFinished.Broadcast(this, CurrentLine);
+
+	// Decide whether to play another line or wrap up.
+	if (IsValid(Provider) && Provider->HasNext())
+	{
+		Enter_LineEntering();
+	}
+	else
+	{
+		Enter_Exiting();
 	}
 }
 
@@ -262,10 +260,11 @@ void UKzDialoguePlayer::NotifyLineExitFinished()
 void UKzDialoguePlayer::Enter_Entering()
 {
 	State = EKzDialogueState::Entering;
+	PendingViewAcks = 0;
 	OnRequestDialogueEnter.Broadcast(this);
 
-	// If no view is driving fade animations, skip to the first line immediately.
-	if (!bWaitForViewNotifications)
+	// No bound view claimed an enter animation: skip to the first line immediately.
+	if (State == EKzDialogueState::Entering && PendingViewAcks == 0)
 	{
 		Enter_LineEntering();
 	}
@@ -295,9 +294,10 @@ void UKzDialoguePlayer::Enter_LineEntering()
 		StartLineAudio();
 	}
 
+	PendingViewAcks = 0;
 	OnRequestLineEnter.Broadcast(this, CurrentLine);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::LineEntering && PendingViewAcks == 0)
 	{
 		Enter_LinePlaying();
 	}
@@ -338,12 +338,13 @@ void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
 	FlushTimeline();
+	PendingViewAcks = 0;
 	OnRequestLineExit.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::LineExiting && PendingViewAcks == 0)
 	{
-		NotifyLineExitFinished();
+		AdvanceAfterLineExit();
 	}
 }
 
@@ -351,9 +352,10 @@ void UKzDialoguePlayer::Enter_Exiting()
 {
 	State = EKzDialogueState::Exiting;
 	ResolveOutgoingAudio(CurrentLine, nullptr);
+	PendingViewAcks = 0;
 	OnRequestDialogueExit.Broadcast(this);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::Exiting && PendingViewAcks == 0)
 	{
 		FinishWithReason(EKzDialogueFinishReason::Completed);
 	}

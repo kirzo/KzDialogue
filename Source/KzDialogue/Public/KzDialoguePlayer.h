@@ -82,14 +82,6 @@ public:
 	float TimeScale = 1.0f;
 
 	/**
-	 * When true, the player waits for view-driven Notify*Finished calls to advance phases.
-	 * When false, those phases auto-complete (no view is driving presentation).
-	 * Set by views during binding.
-	 */
-	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Player")
-	bool bWaitForViewNotifications = false;
-
-	/**
 	 * When true, audio is requested at LineEntering (overlapping the fade in).
 	 * When false, audio starts only at LinePlaying.
 	 */
@@ -233,9 +225,13 @@ public:
 	// View binding helpers
 	// -------------------------------------------------------------------------------
 
-	/** Configure whether the player should wait for view animation notifications. */
+	/**
+	 * A view calls this while handling an OnRequest* event when it WILL present (animate) that phase and
+	 * then call the matching Notify*Finished. The player waits for every claiming view before advancing
+	 * (or advances immediately if none claim), so several views of different latency can share one player.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
-	void SetWaitForViewNotifications(bool bInWaitForViewNotifications) { bWaitForViewNotifications = bInWaitForViewNotifications; }
+	void ClaimViewResponse() { ++PendingViewAcks; }
 
 	// -------------------------------------------------------------------------------
 	// View notifications (called by views when their animations end)
@@ -292,6 +288,9 @@ private:
 	/** Shared by Skip() and Next(): cancel the line timer and move the showing line to LineExiting. */
 	void AdvanceCurrentLine();
 
+	/** OnLineFinished + advance to the next line or Exiting. Shared by the LineExiting auto-advance and NotifyLineExitFinished. */
+	void AdvanceAfterLineExit();
+
 	// Helpers.
 	void StartLineAudio();
 	void StopLineAudio(float FadeTime = 0.1f);
@@ -324,6 +323,12 @@ private:
 
 	UPROPERTY(Transient)
 	EKzDialogueState State = EKzDialogueState::Idle;
+
+	/**
+	 * Outstanding view presentations for the current wait-phase: reset before each OnRequest* broadcast,
+	 * bumped by ClaimViewResponse(), decremented by each Notify*Finished. The phase advances when it hits 0.
+	 */
+	int32 PendingViewAcks = 0;
 
 	/** Used to restore state after Resume(). */
 	EKzDialogueState StateBeforePause = EKzDialogueState::Idle;

@@ -62,8 +62,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::GetOrCreatePlayer(FGameplayTag InChanne
 	NewPlayer->Channel = InChannel;
 	Players.Add(InChannel, NewPlayer);
 
-	// Broadcast BEFORE anything plays on it, so views can bind and configure the player
-	// (e.g. SetWaitForViewNotifications) ahead of the first StartDialogue.
+	// Broadcast BEFORE anything plays on it, so views can bind and subscribe to its request events
+	// ahead of the first StartDialogue.
 	OnPlayerCreated.Broadcast(InChannel, NewPlayer);
 
 	return NewPlayer;
