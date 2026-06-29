@@ -30,6 +30,12 @@ void UKzDialoguePlayer::BeginDestroy()
 	FlushTimeline();
 	StopLineAudio(0.0f);
 	StopReleasedAudios(0.0f);
+	// Hard teardown skips the decay ticks, so close the current speaker's mouth explicitly.
+	if (UKzDialogueSpeakerComponent* Speaker = SpeakingSpeaker.Get())
+	{
+		Speaker->SetSpeakingLevel(0.0f);
+	}
+	SpeakingSpeaker = nullptr;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(LineTimerHandle);
@@ -424,10 +430,9 @@ void UKzDialoguePlayer::StartLineAudio()
 		return;
 	}
 
-	// Spawn 2D regardless of speaker if explicitly requested or if no speaker actor is
-	// present in the world. Otherwise we'd need attachment, which is a per-speaker concern;
-	// a SpeakerComponent attaches when needed (see UKzDialogueSpeakerComponent::Speak()).
-	ActiveAudio = UGameplayStatics::SpawnSound2D(World, Sound);
+	// CreateSound2D (not SpawnSound2D) so it isn't auto-played before we bind the envelope follower; we Play() below.
+	// 2D regardless of speaker: attachment is a per-speaker concern (see UKzDialogueSpeakerComponent::Speak()).
+	ActiveAudio = UGameplayStatics::CreateSound2D(World, Sound);
 	if (!IsValid(ActiveAudio))
 	{
 		return;
@@ -500,17 +505,101 @@ void UKzDialoguePlayer::StartLineAudio()
 		}
 	}
 
+	// Bind BEFORE Play: the engine captures whether to run the envelope follower (bUpdateSingleEnvelopeValue)
+	// from OnAudioSingleEnvelopeValue.IsBound() at sound-start time, so binding after Play never fires it.
+	BindAudioEnvelope();
+	ResolveSpeakingSpeaker(); // resolve speaker + tuning before the first envelope callback can land
 	ActiveAudio->Play();
 }
 
 void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 {
+	UnbindAudioEnvelope();
 	if (IsValid(ActiveAudio))
 	{
 		if (FadeTime > 0.0f) { ActiveAudio->FadeOut(FadeTime, 0.0f); }
 		else { ActiveAudio->Stop(); }
 	}
 	ActiveAudio = nullptr;
+}
+
+void UKzDialoguePlayer::BindAudioEnvelope()
+{
+	if (EnvelopeBoundAudio.Get() == ActiveAudio)
+	{
+		return;
+	}
+	UnbindAudioEnvelope();
+	if (IsValid(ActiveAudio))
+	{
+		// Note: OnAudioSingleEnvelopeValue only fires if the wave has amplitude envelope analysis enabled.
+		ActiveAudio->OnAudioSingleEnvelopeValue.AddDynamic(this, &UKzDialoguePlayer::HandleAudioEnvelope);
+		EnvelopeBoundAudio = ActiveAudio;
+	}
+}
+
+void UKzDialoguePlayer::UnbindAudioEnvelope()
+{
+	if (UAudioComponent* Audio = EnvelopeBoundAudio.Get())
+	{
+		Audio->OnAudioSingleEnvelopeValue.RemoveDynamic(this, &UKzDialoguePlayer::HandleAudioEnvelope);
+	}
+	EnvelopeBoundAudio = nullptr;
+	EnvelopeTarget = 0.0f;
+}
+
+void UKzDialoguePlayer::HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue)
+{
+	// Gate the silence floor, then gain into 0..1. Smoothing happens in UpdateSpeakingLevel.
+	EnvelopeTarget = (EnvelopeValue <= ActiveSpeakingSettings.Threshold) ? 0.0f : FMath::Min(EnvelopeValue * ActiveSpeakingSettings.Gain, 1.0f);
+}
+
+void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)
+{
+	// No live audio -> let the jaw fall shut.
+	if (!EnvelopeBoundAudio.IsValid() || !EnvelopeBoundAudio->IsPlaying())
+	{
+		EnvelopeTarget = 0.0f;
+	}
+
+	// Rising uses a CONSTANT rate so the first open from 0 ramps instead of snapping: FInterpTo is exponential
+	// and takes a huge proportional bite when the gap is big (0 -> high). Falling keeps the eased close.
+	const float NewLevel = (EnvelopeTarget > SpeakingLevel)
+		? FMath::FInterpConstantTo(SpeakingLevel, EnvelopeTarget, DeltaTime, ActiveSpeakingSettings.AttackSpeed)
+		: FMath::FInterpTo(SpeakingLevel, EnvelopeTarget, DeltaTime, ActiveSpeakingSettings.ReleaseSpeed);
+	if (!FMath::IsNearlyEqual(NewLevel, SpeakingLevel))
+	{
+		SpeakingLevel = NewLevel;
+		OnSpeakingLevelChanged.Broadcast(SpeakingLevel);
+
+		// Route to the current speaker so it's gated per speaker (several speakers can share this channel/player).
+		if (UKzDialogueSpeakerComponent* Speaker = SpeakingSpeaker.Get())
+		{
+			Speaker->SetSpeakingLevel(SpeakingLevel);
+		}
+	}
+}
+
+void UKzDialoguePlayer::ResolveSpeakingSpeaker()
+{
+	UKzDialogueSpeakerComponent* NewSpeaker = CurrentLine.Speaker.SpeakerTag.IsValid()
+		? UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag)
+		: nullptr;
+
+	if (NewSpeaker != SpeakingSpeaker.Get())
+	{
+		// A different speaker takes over: close the previous one's mouth.
+		if (UKzDialogueSpeakerComponent* Old = SpeakingSpeaker.Get())
+		{
+			Old->SetSpeakingLevel(0.0f);
+		}
+		SpeakingSpeaker = NewSpeaker;
+	}
+
+	// Effective speaking tuning for this line: the speaker's override if any, else the project defaults.
+	ActiveSpeakingSettings = NewSpeaker
+		? NewSpeaker->ResolveSpeakingSettings()
+		: (UKzDialogueSettings::Get() ? UKzDialogueSettings::Get()->SpeakingDefaults : FKzSpeakingLevelSettings());
 }
 
 EKzLineAudioInterruptionPolicy UKzDialoguePlayer::ResolveAudioPolicy(const FKzDialogueLine& Line) const
@@ -713,7 +802,11 @@ ETickableTickType UKzDialoguePlayer::GetTickableTickType() const
 
 bool UKzDialoguePlayer::IsTickable() const
 {
-	return State == EKzDialogueState::LinePlaying && ActiveNotifies.Num() > 0;
+	if (SpeakingLevel > UE_KINDA_SMALL_NUMBER)
+	{
+		return true; // keep ticking to release the jaw toward 0
+	}
+	return State == EKzDialogueState::LinePlaying && (ActiveNotifies.Num() > 0 || IsValid(ActiveAudio));
 }
 
 TStatId UKzDialoguePlayer::GetStatId() const
@@ -723,6 +816,8 @@ TStatId UKzDialoguePlayer::GetStatId() const
 
 void UKzDialoguePlayer::Tick(float DeltaTime)
 {
+	UpdateSpeakingLevel(DeltaTime);
+
 	if (State != EKzDialogueState::LinePlaying)
 	{
 		return;

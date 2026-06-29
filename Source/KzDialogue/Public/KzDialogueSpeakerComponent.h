@@ -29,7 +29,7 @@ public:
 	UKzDialogueSpeakerComponent();
 
 	/** Logical identity of this speaker. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker", meta = (Categories = "Dialogue.Speaker"))
 	FGameplayTag SpeakerTag;
 
 	/** Display name shown in subtitles (unless overridden by the line). */
@@ -39,6 +39,28 @@ public:
 	/** Default channel for this speaker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
 	FGameplayTag DefaultChannel;
+
+	/** Override the project's default speaking-level tuning (gain/threshold/attack/release) for this speaker. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker|Speaking")
+	bool bOverrideSpeakingSettings = false;
+
+	/** Per-speaker speaking-level tuning, used when bOverrideSpeakingSettings is true. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker|Speaking", meta = (EditCondition = "bOverrideSpeakingSettings"))
+	FKzSpeakingLevelSettings SpeakingSettings;
+
+	/** Effective speaking tuning: this speaker's override if enabled, else the project default. */
+	FKzSpeakingLevelSettings ResolveSpeakingSettings() const;
+
+	/** Fired as this speaker's talking amplitude changes (0..1). Non-zero only while this speaker is the one talking. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Speaker")
+	FKzOnSpeakingLevelChanged OnSpeakingLevelChanged;
+
+	/** Smoothed 0..1 talking amplitude (jaw / lip-flap) for THIS speaker; the player gates it to the active speaker. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
+	float GetSpeakingLevel() const { return SpeakingLevel; }
+
+	/** Set by the dialogue player; routes the active line's speaking amplitude to its speaker. */
+	void SetSpeakingLevel(float NewLevel);
 
 	/** Get the speaker component matching a tag in the given world. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
@@ -75,6 +97,9 @@ protected:
 	virtual void OnUnregister() override;
 
 private:
+	/** Talking amplitude for this speaker; written by the active dialogue player, read by the face / anim. */
+	float SpeakingLevel = 0.0f;
+
 	static TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& GetRegistry(const UWorld* World);
 
 	/** Ref-count per tag applied by active dialogue notifies. Runtime state, not serialized. */

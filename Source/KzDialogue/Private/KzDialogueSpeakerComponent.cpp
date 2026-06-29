@@ -6,6 +6,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueSubsystem.h"
+#include "Settings/KzDialogueSettings.h"
 
 #include "Engine/World.h"
 
@@ -20,6 +21,16 @@ UKzDialogueSpeakerComponent::UKzDialogueSpeakerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	bAutoActivate = true;
+}
+
+FKzSpeakingLevelSettings UKzDialogueSpeakerComponent::ResolveSpeakingSettings() const
+{
+	if (bOverrideSpeakingSettings)
+	{
+		return SpeakingSettings;
+	}
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	return Settings ? Settings->SpeakingDefaults : FKzSpeakingLevelSettings();
 }
 
 void UKzDialogueSpeakerComponent::OnRegister()
@@ -43,6 +54,15 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 		}
 	}
 	Super::OnUnregister();
+}
+
+void UKzDialogueSpeakerComponent::SetSpeakingLevel(float NewLevel)
+{
+	if (!FMath::IsNearlyEqual(NewLevel, SpeakingLevel))
+	{
+		SpeakingLevel = NewLevel;
+		OnSpeakingLevelChanged.Broadcast(SpeakingLevel);
+	}
 }
 
 UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag)

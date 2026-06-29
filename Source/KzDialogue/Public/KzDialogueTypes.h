@@ -583,9 +583,38 @@ enum class EKzDialogueAdvanceMode : uint8
 	Manual
 };
 
+/**
+ * Tuning for the "speaking level" (0..1 mouth/jaw amplitude derived from a line's audio envelope).
+ * Lives in project settings as a default; a speaker can override it per character.
+ */
+USTRUCT(BlueprintType)
+struct FKzSpeakingLevelSettings
+{
+	GENERATED_BODY()
+
+	/** Multiplies the raw audio envelope before clamping to 0..1. Tune to your VO loudness. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float Gain = 2.0f;
+
+	/** Envelope at or below this counts as silence (the level falls to 0). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0, ClampMax = 1.0))
+	float Threshold = 0.02f;
+
+	/** Opening rate per second (CONSTANT, units of level/sec) — caps how fast the mouth opens, so the first jump from 0 ramps instead of snapping. Higher = faster. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float AttackSpeed = 12.0f;
+
+	/** Closing interp speed (eased / exponential). 0 = instant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float ReleaseSpeed = 12.0f;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueStarted, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueFinished, class UKzDialoguePlayer*, Player, EKzDialogueFinishReason, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FKzOnDialogueLineSingleEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialoguePlayerEvent, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialoguePlayerCreated, FGameplayTag, Channel, class UKzDialoguePlayer*, Player);
+
+/** Smoothed 0..1 speaking amplitude (jaw / lip-flap). Used by the player (channel-level) and the speaker (gated per speaker). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingLevelChanged, float, Level);

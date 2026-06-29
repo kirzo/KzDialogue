@@ -11,6 +11,7 @@
 #include "KzDialoguePlayer.generated.h"
 
 class UAudioComponent;
+class USoundWave;
 class UKzDialogueProvider;
 class UKzDialogueSpeakerComponent;
 
@@ -130,6 +131,10 @@ public:
 	/** Player has resumed from pause. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|Events")
 	FKzOnDialoguePlayerEvent OnResumed;
+
+	/** Current line's speaking amplitude (channel-level, NOT gated per speaker). For per-character mouth use the SpeakerComponent. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|Events")
+	FKzOnSpeakingLevelChanged OnSpeakingLevelChanged;
 
 	// Request events: views render in response and confirm with Notify*Finished.
 
@@ -265,6 +270,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	FKzDialogueLine GetCurrentLine() const { return CurrentLine; }
 
+	/** Current line's speaking amplitude (channel-level / whoever's talking). For per-character mouth, read the SpeakerComponent's gated GetSpeakingLevel. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	float GetSpeakingLevel() const { return SpeakingLevel; }
+
 	//~ UObject
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
@@ -294,6 +303,15 @@ private:
 	// Helpers.
 	void StartLineAudio();
 	void StopLineAudio(float FadeTime = 0.1f);
+
+	// Speaking level: drive a smoothed 0..1 amplitude from the current line's audio envelope.
+	void BindAudioEnvelope();
+	void UnbindAudioEnvelope();
+	void UpdateSpeakingLevel(float DeltaTime);
+	void ResolveSpeakingSpeaker();
+
+	UFUNCTION()
+	void HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue);
 	float ResolveLineDuration(const FKzDialogueLine& Line) const;
 	EKzLineAudioInterruptionPolicy ResolveAudioPolicy(const FKzDialogueLine& Line) const;
 	void ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine, const FKzDialogueLine* IncomingLine);
@@ -311,6 +329,21 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> ActiveAudio = nullptr;
+
+	/** Component whose audio envelope currently drives SpeakingLevel. */
+	TWeakObjectPtr<UAudioComponent> EnvelopeBoundAudio;
+
+	/** Gated + gained envelope target from the latest audio callback (0..1). */
+	float EnvelopeTarget = 0.0f;
+
+	/** Smoothed speaking amplitude (0..1), interpolated toward EnvelopeTarget each tick. */
+	float SpeakingLevel = 0.0f;
+
+	/** Speaker component of the current line; the player routes SpeakingLevel to it so it's gated per speaker (shared channels). */
+	TWeakObjectPtr<UKzDialogueSpeakerComponent> SpeakingSpeaker;
+
+	/** Effective speaking tuning for the current line: speaker override else project defaults. Resolved per line. */
+	FKzSpeakingLevelSettings ActiveSpeakingSettings;
 
 	/**
 	 * Audio components from previous lines that were released to play past their line transition.

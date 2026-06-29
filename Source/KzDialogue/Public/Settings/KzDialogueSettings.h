@@ -47,6 +47,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "General")
 	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker;
 
+	/** Default mouth/jaw "speaking level" tuning derived from a line's audio. Speakers can override per character. */
+	UPROPERTY(Config, EditAnywhere, Category = "Speaking")
+	FKzSpeakingLevelSettings SpeakingDefaults;
+
 	/**
 	 * Per-channel configuration. Channels not listed here are still accepted at runtime
 	 * with default values, but a warning is logged so the project author can decide
