@@ -14,6 +14,20 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
+namespace
+{
+	/** Sigmoid contrast around 0.5: Contrast 1 = linear, >1 pushes toward 0/1 (crisper open/close), <1 softens toward 0.5. */
+	float ApplySpeakingContrast(float X, float Contrast)
+	{
+		if (FMath::IsNearlyEqual(Contrast, 1.0f) || X <= 0.0f || X >= 1.0f)
+		{
+			return X;
+		}
+		const float Xc = FMath::Pow(X, Contrast);
+		return Xc / (Xc + FMath::Pow(1.0f - X, Contrast));
+	}
+}
+
 UKzDialoguePlayer::UKzDialoguePlayer()
 {
 }
@@ -550,8 +564,10 @@ void UKzDialoguePlayer::UnbindAudioEnvelope()
 
 void UKzDialoguePlayer::HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue)
 {
-	// Gate the silence floor, then gain into 0..1. Smoothing happens in UpdateSpeakingLevel.
-	EnvelopeTarget = (EnvelopeValue <= ActiveSpeakingSettings.Threshold) ? 0.0f : FMath::Min(EnvelopeValue * ActiveSpeakingSettings.Gain, 1.0f);
+	// Gate the silence floor and gain into 0..1, then push toward 0/1 by Contrast so the mouth opens/closes
+	// crisply instead of hovering mid-open on long phrases. Smoothing happens in UpdateSpeakingLevel.
+	const float Gained = (EnvelopeValue <= ActiveSpeakingSettings.Threshold) ? 0.0f : FMath::Min(EnvelopeValue * ActiveSpeakingSettings.Gain, 1.0f);
+	EnvelopeTarget = ApplySpeakingContrast(Gained, ActiveSpeakingSettings.Contrast);
 }
 
 void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)

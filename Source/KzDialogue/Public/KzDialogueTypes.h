@@ -607,6 +607,10 @@ struct FKzSpeakingLevelSettings
 	/** Closing interp speed (eased / exponential). 0 = instant. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
 	float ReleaseSpeed = 12.0f;
+
+	/** Contrast around 0.5 (sigmoid): pushes the level toward 0/1 so the mouth opens/closes crisply instead of hovering mid-open. 1 = linear, higher = more on/off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.1))
+	float Contrast = 1.0f;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueStarted, class UKzDialoguePlayer*, Player);
