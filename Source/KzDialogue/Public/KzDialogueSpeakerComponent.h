@@ -13,6 +13,9 @@ class UKzDialogueAsset;
 class UKzDialoguePlayer;
 class UKzDialogueAssetSession;
 
+/** Fired when a speaker's lip-sync suppression flips on (true = became suppressed) or off (false). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingSuppressedChanged, bool, bSuppressed);
+
 /**
  * Attach to any actor that can speak. Provides:
  *   - A SpeakerTag the dialogue system uses to identify "this actor is the speaker"
@@ -62,8 +65,24 @@ public:
 	/** Set by the dialogue player; routes the active line's speaking amplitude to its speaker. */
 	void SetSpeakingLevel(float NewLevel);
 
+	/** Suppress the dialogue-driven speaking level (lip-sync) while something else drives the face (e.g. a Sequencer animation). Ref-counted: balance each Push with a Pop. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker|Speaking")
+	void PushSpeakingSuppression();
+
+	/** Release one suppression added by PushSpeakingSuppression. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker|Speaking")
+	void PopSpeakingSuppression();
+
+	/** True while the speaking level is suppressed — the face ABP should gate its mouth curve OFF so the other animation wins. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker|Speaking")
+	bool IsSpeakingSuppressed() const { return SpeakingSuppressionCount > 0; }
+
+	/** Fired when suppression flips on (true) or off (false). Only the 0<->1 transitions fire, not intermediate Push/Pop. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Speaker|Speaking")
+	FKzOnSpeakingSuppressedChanged OnSpeakingSuppressedChanged;
+
 	/** Get the speaker component matching a tag in the given world. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Speaker"))
 	static UKzDialogueSpeakerComponent* FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag);
 
 	/** Speak an asset on this speaker's default channel. Returns the session for the whole asset. */
@@ -99,6 +118,9 @@ protected:
 private:
 	/** Talking amplitude for this speaker; written by the active dialogue player, read by the face / anim. */
 	float SpeakingLevel = 0.0f;
+
+	/** Ref-count of active speaking-level suppressions (Sequencer / animation overrides). */
+	int32 SpeakingSuppressionCount = 0;
 
 	static TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& GetRegistry(const UWorld* World);
 

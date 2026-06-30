@@ -33,6 +33,29 @@ FKzSpeakingLevelSettings UKzDialogueSpeakerComponent::ResolveSpeakingSettings() 
 	return Settings ? Settings->SpeakingDefaults : FKzSpeakingLevelSettings();
 }
 
+void UKzDialogueSpeakerComponent::PushSpeakingSuppression()
+{
+	const bool bWasSuppressed = SpeakingSuppressionCount > 0;
+	++SpeakingSuppressionCount;
+	if (!bWasSuppressed)
+	{
+		OnSpeakingSuppressedChanged.Broadcast(true); // 0 -> 1
+	}
+}
+
+void UKzDialogueSpeakerComponent::PopSpeakingSuppression()
+{
+	if (SpeakingSuppressionCount <= 0)
+	{
+		return; // unbalanced Pop — nothing to release
+	}
+	--SpeakingSuppressionCount;
+	if (SpeakingSuppressionCount == 0)
+	{
+		OnSpeakingSuppressedChanged.Broadcast(false); // 1 -> 0
+	}
+}
+
 void UKzDialogueSpeakerComponent::OnRegister()
 {
 	Super::OnRegister();
