@@ -228,7 +228,7 @@ protected:
  * ends. Finished fires on natural completion; Cancelled fires when it is stopped, aborted or
  * interrupted before reaching the end.
  */
-UCLASS()
+UCLASS(meta = (HasDedicatedAsyncNode))
 class KZDIALOGUE_API UKzAsyncPlayDialogueAsset : public UKzAsyncDialogueAction
 {
 	GENERATED_BODY()
