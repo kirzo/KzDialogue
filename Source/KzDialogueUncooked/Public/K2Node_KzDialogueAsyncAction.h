@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "K2Node_BaseAsyncTask.h"
+#include "K2Node_KzCancellableAsyncTask.h"
 #include "K2Node_KzDialogueAsyncAction.generated.h"
 
 /**
@@ -13,7 +13,7 @@
  * the proxy factory is assigned per spawner in GetMenuActions.
  */
 UCLASS()
-class KZDIALOGUEUNCOOKED_API UK2Node_KzDialogueAsyncAction : public UK2Node_BaseAsyncTask
+class KZDIALOGUEUNCOOKED_API UK2Node_KzDialogueAsyncAction : public UK2Node_KzCancellableAsyncTask
 {
 	GENERATED_BODY()
 

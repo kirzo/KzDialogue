@@ -11,6 +11,7 @@
 
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
+class UKzDialogueAssetSession;
 
 UCLASS()
 class KZDIALOGUE_API UKzDialogueFunctionLibrary : public UBlueprintFunctionLibrary
@@ -29,12 +30,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static UKzDialoguePlayer* GetDialoguePlayer(const UObject* WorldContextObject, FGameplayTag InChannel, bool bCreateIfNotFound = true);
 
-	/** One-shot helper: play an asset on a channel. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	static UKzDialoguePlayer* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, bool bStartImmediately = true);
+	/**
+	 * One-shot helper: play a whole asset on a channel. Returns a session that completes once for the whole
+	 * asset (each line resolves its own channel; runs chain across channel changes). AdvanceMode defaults to
+	 * the asset's (Automatic / Manual RPG-style).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately,AdvanceMode"))
+	static UKzDialogueAssetSession* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Resolve a single line by GUID inside a dialogue asset and play it. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/**
@@ -42,11 +47,16 @@ public:
 	 * the reference (loading the asset if needed) and dispatches to the dialogue
 	 * subsystem on the given channel.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
-	/** One-shot helper: play a single line on a channel. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	/**
+	 * One-shot helper: play a single line on a channel, exactly as given. The line's notify Timeline
+	 * is only present if Line was resolved from an asset (via PlayDialogueLineFromAsset, a
+	 * FKzDialogueLineRef, or TryResolveDialogueLineRef before this call); a line built by hand carries
+	 * no timeline, since timelines live on the asset keyed by LineId.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/**
@@ -61,7 +71,7 @@ public:
 	 * channel. Aliases are resolved at launch; entries that fail to resolve are skipped.
 	 * Line events fire per entry and OnDialogueFinished once at the end.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/**
@@ -69,7 +79,7 @@ public:
 	 * dialogue on the given channel. Aliases are resolved at launch; entries that fail to
 	 * resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
 	static UKzDialoguePlayer* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/**
@@ -87,6 +97,26 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
 	static void GetDialogueLineRefsFromList(const FKzDialogueLineList& List, TArray<FKzDialogueLineRef>& OutRefs);
+
+	/**
+	 * Effective tags of a resolved line: its own Tags, which already include the asset-wide tags merged in
+	 * at resolve time. A view only ever gets the resolved line, so this (and the LineHas* helpers below)
+	 * are all it needs — no asset reference required.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
+	static FGameplayTagContainer GetLineTags(const FKzDialogueLine& Line);
+
+	/** True if the line has Tag. bExact uses HasTagExact (no parent matching). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
+	static bool LineHasTag(const FKzDialogueLine& Line, FGameplayTag Tag, bool bExact = false);
+
+	/** True if the line has ANY of Tags. bExact uses HasAnyExact. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line", meta = (AutoCreateRefTerm = "Tags"))
+	static bool LineHasAnyTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact = false);
+
+	/** True if the line has ALL of Tags. bExact uses HasAllExact. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line", meta = (AutoCreateRefTerm = "Tags"))
+	static bool LineHasAllTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact = false);
 
 	/**
 	 * Returns true when a dialogue player exists for the given channel and is currently

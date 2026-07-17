@@ -141,6 +141,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	virtual void ClearTextWidgets();
 
+	/**
+	 * Master switch for the whole view (e.g. a "subtitles off" user setting). While disabled the
+	 * widget renders nothing and stays transparent to every bound player's timing (no claims, no
+	 * notifies), so dialogue audio and events keep flowing. Safe to toggle mid-dialogue: disabling
+	 * stops in-flight fades (dispatching their pending notifies), re-enabling re-shows the current line.
+	 * Use this instead of SetVisibility(Collapsed): a collapsed widget never ticks its animations,
+	 * leaving claimed view responses unanswered and deadlocking the player before its audio starts.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void SetViewEnabled(bool bEnabled);
+
+	/** True unless the view was disabled via SetViewEnabled. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
+	bool IsViewEnabled() const { return bViewEnabled; }
+
 	/** True when Channel is currently muted on this widget by any rule in MuteRules. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsChannelMuted(FGameplayTag Channel) const;
@@ -178,6 +193,15 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, BlueprintPure, Category = "Dialogue|Subtitles")
 	FKzSubtitleChannelView GetViewForChannel(FGameplayTag Channel) const;
 
+	/**
+	 * Gate for rendering a line on a channel. Return false to skip showing it: the dialogue keeps playing
+	 * (timing, audio, events) and the view simply doesn't render that line, leaving the previous one in
+	 * place. Defaults to true. Override in Blueprint to filter by the line's tags (LineHasTag), speaker, etc.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Subtitles")
+	bool CanShowLine(FGameplayTag Channel, const FKzDialogueLine& Line) const;
+	virtual bool CanShowLine_Implementation(FGameplayTag Channel, const FKzDialogueLine& Line) const;
+
 	/** Optional Blueprint hooks. Override for custom per-line presentation. */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Setup Line"))
 	void ReceiveSetupLine(FGameplayTag Channel, const FKzDialogueLine& Line);
@@ -188,6 +212,14 @@ protected:
 	/** Called when the dialogue hides on a channel. May fire without a preceding EndFadeOut on hard cancellations (Abort / Interrupt). */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Hide"))
 	void ReceiveHide(FGameplayTag Channel);
+
+	/**
+	 * Snap this channel's subtitle to its hidden baseline (e.g. SetRenderOpacity(0) on the subtitle root).
+	 * Fired on a hard cancel (preemption / Abort / Interrupt) or mute mid-fade, before On Hide — UMG's
+	 * StopAnimation only rewinds deferred (and a fade-out rewinds to Opacity 1), so zero it here directly.
+	 */
+	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Reset Channel Visual"))
+	void ReceiveResetChannelVisual(FGameplayTag Channel);
 
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
@@ -215,7 +247,7 @@ private:
 	/** True when Channel matches any listened scope. */
 	bool MatchesListenedChannels(FGameplayTag Channel) const;
 
-	/** True when this player's channel is in the cached muted set. */
+	/** True when this player's channel is in the cached muted set, or the whole view is disabled. */
 	bool IsPlayerMuted(const UKzDialoguePlayer* InPlayer) const;
 
 	/** Re-evaluates the muted set; hides views that become muted and re-shows ones that no longer are. */
@@ -244,4 +276,7 @@ private:
 
 	/** Players whose channel is currently muted on this widget. Kept in sync by RefreshMuteStates. */
 	TSet<TWeakObjectPtr<UKzDialoguePlayer>> MutedPlayers;
+
+	/** Master switch set by SetViewEnabled. Disabled = every player behaves as muted. */
+	bool bViewEnabled = true;
 };

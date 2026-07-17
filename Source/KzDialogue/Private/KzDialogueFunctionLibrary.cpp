@@ -28,11 +28,11 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* 
 	return bCreateIfNotFound ? Sub->GetOrCreatePlayer(InChannel) : Sub->FindPlayer(InChannel);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
-	FGameplayTag Channel, bool bStartImmediately)
+UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset,
+	FGameplayTag Channel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, bStartImmediately) : nullptr;
+	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, bStartImmediately, AdvanceMode) : nullptr;
 }
 
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
@@ -138,4 +138,24 @@ void UKzDialogueFunctionLibrary::InterruptAllDialogues(const UObject* WorldConte
 	{
 		Sub->InterruptAll();
 	}
+}
+
+FGameplayTagContainer UKzDialogueFunctionLibrary::GetLineTags(const FKzDialogueLine& Line)
+{
+	return Line.Tags;
+}
+
+bool UKzDialogueFunctionLibrary::LineHasTag(const FKzDialogueLine& Line, FGameplayTag Tag, bool bExact)
+{
+	return bExact ? Line.Tags.HasTagExact(Tag) : Line.Tags.HasTag(Tag);
+}
+
+bool UKzDialogueFunctionLibrary::LineHasAnyTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact)
+{
+	return bExact ? Line.Tags.HasAnyExact(Tags) : Line.Tags.HasAny(Tags);
+}
+
+bool UKzDialogueFunctionLibrary::LineHasAllTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact)
+{
+	return bExact ? Line.Tags.HasAllExact(Tags) : Line.Tags.HasAll(Tags);
 }

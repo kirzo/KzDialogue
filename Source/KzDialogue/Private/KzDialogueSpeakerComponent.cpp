@@ -6,6 +6,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueSubsystem.h"
+#include "Settings/KzDialogueSettings.h"
 
 #include "Engine/World.h"
 
@@ -20,6 +21,39 @@ UKzDialogueSpeakerComponent::UKzDialogueSpeakerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	bAutoActivate = true;
+}
+
+FKzSpeakingLevelSettings UKzDialogueSpeakerComponent::ResolveSpeakingSettings() const
+{
+	if (bOverrideSpeakingSettings)
+	{
+		return SpeakingSettings;
+	}
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	return Settings ? Settings->SpeakingDefaults : FKzSpeakingLevelSettings();
+}
+
+void UKzDialogueSpeakerComponent::PushSpeakingSuppression()
+{
+	const bool bWasSuppressed = SpeakingSuppressionCount > 0;
+	++SpeakingSuppressionCount;
+	if (!bWasSuppressed)
+	{
+		OnSpeakingSuppressedChanged.Broadcast(true); // 0 -> 1
+	}
+}
+
+void UKzDialogueSpeakerComponent::PopSpeakingSuppression()
+{
+	if (SpeakingSuppressionCount <= 0)
+	{
+		return; // unbalanced Pop — nothing to release
+	}
+	--SpeakingSuppressionCount;
+	if (SpeakingSuppressionCount == 0)
+	{
+		OnSpeakingSuppressedChanged.Broadcast(false); // 1 -> 0
+	}
 }
 
 void UKzDialogueSpeakerComponent::OnRegister()
@@ -45,6 +79,15 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 	Super::OnUnregister();
 }
 
+void UKzDialogueSpeakerComponent::SetSpeakingLevel(float NewLevel)
+{
+	if (!FMath::IsNearlyEqual(NewLevel, SpeakingLevel))
+	{
+		SpeakingLevel = NewLevel;
+		OnSpeakingLevelChanged.Broadcast(SpeakingLevel);
+	}
+}
+
 UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag)
 {
 	if (!IsValid(WorldContextObject) || !InSpeakerTag.IsValid()) { return nullptr; }
@@ -67,7 +110,7 @@ TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& UKzDialogueSpea
 	return KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
 }
 
-UKzDialoguePlayer* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
+UKzDialogueAssetSession* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
 {
 	if (!IsValid(Asset) || !GetWorld()) { return nullptr; }
 
@@ -92,4 +135,50 @@ UKzDialoguePlayer* UKzDialogueSpeakerComponent::SpeakLine(const FKzDialogueLine&
 		LineCopy.Speaker.DisplayNameOverride = DisplayName;
 	}
 	return Sub->PlayLine(LineCopy, DefaultChannel);
+}
+
+void UKzDialogueSpeakerComponent::AddDialogueTags(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		int32& Count = ActiveDialogueTagCounts.FindOrAdd(Tag);
+		if (Count++ == 0)
+		{
+			ActiveDialogueTags.AddTag(Tag);
+		}
+	}
+}
+
+void UKzDialogueSpeakerComponent::RemoveDialogueTags(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		int32* Count = ActiveDialogueTagCounts.Find(Tag);
+		if (Count && --(*Count) <= 0)
+		{
+			ActiveDialogueTagCounts.Remove(Tag);
+			ActiveDialogueTags.RemoveTag(Tag);
+		}
+	}
+}
+
+void UKzDialogueSpeakerComponent::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer.Reset();
+	TagContainer.AppendTags(ActiveDialogueTags);
+}
+
+bool UKzDialogueSpeakerComponent::HasMatchingGameplayTag(FGameplayTag TagToCheck) const
+{
+	return ActiveDialogueTags.HasTag(TagToCheck);
+}
+
+bool UKzDialogueSpeakerComponent::HasAllMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
+{
+	return ActiveDialogueTags.HasAll(TagContainer);
+}
+
+bool UKzDialogueSpeakerComponent::HasAnyMatchingGameplayTags(const FGameplayTagContainer& TagContainer) const
+{
+	return ActiveDialogueTags.HasAny(TagContainer);
 }

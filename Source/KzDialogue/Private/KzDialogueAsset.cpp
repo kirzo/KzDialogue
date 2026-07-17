@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
 #include "Misc/Crc.h"
 #include "Internationalization/Text.h"
 
@@ -30,6 +31,28 @@ int32 UKzDialogueAsset::IndexOfLine(const FGuid& LineId) const
 	return Lines.IndexOfByPredicate([&LineId](const FKzDialogueLine& L) { return L.LineId == LineId; });
 }
 
+UKzDialogueTimeline* UKzDialogueAsset::FindTimelineForLine(const FGuid& LineId) const
+{
+	if (!LineId.IsValid()) { return nullptr; }
+	for (const TObjectPtr<UKzDialogueTimeline>& Timeline : Timelines)
+	{
+		if (Timeline && Timeline->OwningLineId == LineId)
+		{
+			return Timeline;
+		}
+	}
+	return nullptr;
+}
+
+void UKzDialogueAsset::FinalizeResolvedLine(FKzDialogueLine& OutLine) const
+{
+	// Single place every resolve path goes through, so consumers get a complete line: the transient
+	// per-line timeline, and the asset-wide tags merged into the line's own (AppendTags dedupes, so
+	// re-resolving the same line stays idempotent).
+	OutLine.Timeline = FindTimelineForLine(OutLine.LineId);
+	OutLine.Tags.AppendTags(Tags);
+}
+
 bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& OutLine) const
 {
 	for (const FKzDialogueLine& Line : Lines)
@@ -37,6 +60,9 @@ bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& Ou
 		if (Line.LineId == InLineId)
 		{
 			OutLine = Line;
+			// Inject the asset's runtime data (timeline + asset-wide tags) so every asset-line lookup
+			// carries it, not just the iterating provider (single-line and Sequencer paths go through here).
+			FinalizeResolvedLine(OutLine);
 			return true;
 		}
 	}
@@ -237,6 +263,15 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		}
 	}
 
+	// Prune timelines whose owning line no longer exists.
+	{
+		const int32 Removed = Timelines.RemoveAll([this](const TObjectPtr<UKzDialogueTimeline>& Timeline)
+		{
+			return !Timeline || IndexOfLine(Timeline->OwningLineId) == INDEX_NONE;
+		});
+		if (Removed > 0) { bDirty = true; }
+	}
+	
 	// Re-anchor every FText to its stable (Namespace, Key).
 	RebindFTextKeys();
 

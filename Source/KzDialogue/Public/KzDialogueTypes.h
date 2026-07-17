@@ -12,6 +12,7 @@
 
 class USoundBase;
 class UKzDialogueAsset;
+class UKzDialogueTimeline;
 
 namespace Kz::Tags::Dialogue
 {
@@ -88,6 +89,18 @@ enum class EKzLineAudioInterruptionPolicy : uint8
 	Continue
 };
 
+/** How a line's playback length is derived from its Duration field and its audio. */
+UENUM(BlueprintType)
+enum class EKzLineDurationMode : uint8
+{
+	/** Duration if > 0, else the audio's length, else the project default (legacy behavior). */
+	Auto,
+	/** Use Duration as the line's length, ignoring the audio. */
+	Override,
+	/** Line length = the audio's length + Duration, to extend a voiced line. */
+	ExtendAudio
+};
+
 /** A single dialogue line. The smallest authorable unit in the system. */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueLine
@@ -115,11 +128,15 @@ struct KZDIALOGUE_API FKzDialogueLine
 	TSoftObjectPtr<USoundBase> Audio;
 
 	/**
-	 * Explicit duration in seconds.
-	 * If <= 0, falls back to audio duration, then to the player's default duration.
+	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
+	 * an extension on top of the audio, or as the explicit length when > 0 (Auto).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ClampMin = 0))
 	float Duration = 0.0f;
+
+	/** How the line's playback length is derived from Duration and the audio. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	EKzLineDurationMode DurationMode = EKzLineDurationMode::Auto;
 
 	/** When true and Audio is set, the audio is spawned 2D regardless of speaker location. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
@@ -131,8 +148,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	/**
 	 * Channel this line plays on when the callsite doesn't pass one explicitly.
-	 * Resolution chain: callsite > line > asset > project settings. For alias entries the
-	 * line level only applies when every line of the alias agrees on the same channel.
+	 * Resolution chain: callsite > line > audio SoundClass mapping > asset > project settings.
+	 * For alias entries the line level only applies when every line of the alias agrees on the
+	 * same DefaultChannel.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
@@ -149,6 +167,14 @@ struct KZDIALOGUE_API FKzDialogueLine
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	FInstancedPropertyBag AudioParams;
 
+	/**
+	 * Per-line timeline, owned by the asset (UKzDialogueAsset::Timelines, keyed by LineId) and
+	 * filled in whenever the line is resolved from its asset (TryGetLineById and the asset
+	 * provider). Transient and not authored on the line, so a line built by hand has none.
+	 */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Line")
+	TObjectPtr<UKzDialogueTimeline> Timeline = nullptr;
+	
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */
 	UPROPERTY()
 	uint32 SourceTextHash = 0;
@@ -160,6 +186,23 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
 	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }
+
+	/**
+	 * Effective playback length in seconds (before TimeScale) from DurationMode, Duration, the
+	 * resolved audio length (0 if none) and the project default. Callers resolve the audio length.
+	 */
+	float ResolveDuration(float AudioLength, float DefaultDuration) const
+	{
+		switch (DurationMode)
+		{
+		case EKzLineDurationMode::Override:
+			return Duration;
+		case EKzLineDurationMode::ExtendAudio:
+			return AudioLength + Duration;
+		default:
+			return Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : DefaultDuration);
+		}
+	}
 
 	/**
 	 * Returns a "(Speaker) Text" formatted label for this line, suitable for editor
@@ -536,9 +579,54 @@ enum class EKzDialogueFinishReason : uint8
 	Interrupted
 };
 
+/** How a dialogue advances from one line to the next. */
+UENUM(BlueprintType)
+enum class EKzDialogueAdvanceMode : uint8
+{
+	/** Resolve from the next link in the chain (callsite override > asset > Automatic). */
+	Inherit,
+	/** Auto-advance once the line's resolved duration elapses. */
+	Automatic,
+	/** Hold each line until Next() is called. */
+	Manual
+};
+
+/**
+ * Tuning for the "speaking level" (0..1 mouth/jaw amplitude derived from a line's audio envelope).
+ * Lives in project settings as a default; a speaker can override it per character.
+ */
+USTRUCT(BlueprintType)
+struct FKzSpeakingLevelSettings
+{
+	GENERATED_BODY()
+
+	/** Multiplies the raw audio envelope before clamping to 0..1. Tune to your VO loudness. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float Gain = 2.0f;
+
+	/** Envelope at or below this counts as silence (the level falls to 0). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0, ClampMax = 1.0))
+	float Threshold = 0.02f;
+
+	/** Opening rate per second (CONSTANT, units of level/sec) — caps how fast the mouth opens, so the first jump from 0 ramps instead of snapping. Higher = faster. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float AttackSpeed = 12.0f;
+
+	/** Closing interp speed (eased / exponential). 0 = instant. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
+	float ReleaseSpeed = 12.0f;
+
+	/** Contrast around 0.5 (sigmoid): pushes the level toward 0/1 so the mouth opens/closes crisply instead of hovering mid-open. 1 = linear, higher = more on/off. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.1))
+	float Contrast = 1.0f;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueStarted, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueFinished, class UKzDialoguePlayer*, Player, EKzDialogueFinishReason, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FKzOnDialogueLineSingleEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialoguePlayerEvent, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialoguePlayerCreated, FGameplayTag, Channel, class UKzDialoguePlayer*, Player);
+
+/** Smoothed 0..1 speaking amplitude (jaw / lip-flap). Used by the player (channel-level) and the speaker (gated per speaker). */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingLevelChanged, float, Level);

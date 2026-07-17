@@ -4,6 +4,8 @@
 #include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueTimeline.h"
+#include "KzDialogueSpeakerComponent.h"
 
 #include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
@@ -11,6 +13,20 @@
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+
+namespace
+{
+	/** Sigmoid contrast around 0.5: Contrast 1 = linear, >1 pushes toward 0/1 (crisper open/close), <1 softens toward 0.5. */
+	float ApplySpeakingContrast(float X, float Contrast)
+	{
+		if (FMath::IsNearlyEqual(Contrast, 1.0f) || X <= 0.0f || X >= 1.0f)
+		{
+			return X;
+		}
+		const float Xc = FMath::Pow(X, Contrast);
+		return Xc / (Xc + FMath::Pow(1.0f - X, Contrast));
+	}
+}
 
 UKzDialoguePlayer::UKzDialoguePlayer()
 {
@@ -25,8 +41,15 @@ UWorld* UKzDialoguePlayer::GetWorld() const
 
 void UKzDialoguePlayer::BeginDestroy()
 {
+	FlushTimeline();
 	StopLineAudio(0.0f);
 	StopReleasedAudios(0.0f);
+	// Hard teardown skips the decay ticks, so close the current speaker's mouth explicitly.
+	if (UKzDialogueSpeakerComponent* Speaker = SpeakingSpeaker.Get())
+	{
+		Speaker->SetSpeakingLevel(0.0f);
+	}
+	SpeakingSpeaker = nullptr;
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(LineTimerHandle);
@@ -186,6 +209,16 @@ void UKzDialoguePlayer::Interrupt()
 
 void UKzDialoguePlayer::Skip()
 {
+	AdvanceCurrentLine();
+}
+
+void UKzDialoguePlayer::Next()
+{
+	AdvanceCurrentLine();
+}
+
+void UKzDialoguePlayer::AdvanceCurrentLine()
+{
 	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{
 		if (UWorld* World = GetWorld())
@@ -202,43 +235,41 @@ void UKzDialoguePlayer::Skip()
 
 void UKzDialoguePlayer::NotifyEnterFinished()
 {
-	if (State == EKzDialogueState::Entering)
-	{
-		Enter_LineEntering();
-	}
+	// Ignore a notification for a phase we already left (stale fade): also avoids decrementing the next phase.
+	if (State != EKzDialogueState::Entering) { return; }
+	if (--PendingViewAcks <= 0) { Enter_LineEntering(); }
 }
 
 void UKzDialoguePlayer::NotifyExitFinished()
 {
-	if (State == EKzDialogueState::Exiting)
-	{
-		FinishWithReason(EKzDialogueFinishReason::Completed);
-	}
+	if (State != EKzDialogueState::Exiting) { return; }
+	if (--PendingViewAcks <= 0) { FinishWithReason(EKzDialogueFinishReason::Completed); }
 }
 
 void UKzDialoguePlayer::NotifyLineEnterFinished()
 {
-	if (State == EKzDialogueState::LineEntering)
-	{
-		Enter_LinePlaying();
-	}
+	if (State != EKzDialogueState::LineEntering) { return; }
+	if (--PendingViewAcks <= 0) { Enter_LinePlaying(); }
 }
 
 void UKzDialoguePlayer::NotifyLineExitFinished()
 {
-	if (State == EKzDialogueState::LineExiting)
-	{
-		OnLineFinished.Broadcast(this, CurrentLine);
+	if (State != EKzDialogueState::LineExiting) { return; }
+	if (--PendingViewAcks <= 0) { AdvanceAfterLineExit(); }
+}
 
-		// Decide whether to play another line or wrap up.
-		if (IsValid(Provider) && Provider->HasNext())
-		{
-			Enter_LineEntering();
-		}
-		else
-		{
-			Enter_Exiting();
-		}
+void UKzDialoguePlayer::AdvanceAfterLineExit()
+{
+	OnLineFinished.Broadcast(this, CurrentLine);
+
+	// Decide whether to play another line or wrap up.
+	if (IsValid(Provider) && Provider->HasNext())
+	{
+		Enter_LineEntering();
+	}
+	else
+	{
+		Enter_Exiting();
 	}
 }
 
@@ -249,10 +280,11 @@ void UKzDialoguePlayer::NotifyLineExitFinished()
 void UKzDialoguePlayer::Enter_Entering()
 {
 	State = EKzDialogueState::Entering;
+	PendingViewAcks = 0;
 	OnRequestDialogueEnter.Broadcast(this);
 
-	// If no view is driving fade animations, skip to the first line immediately.
-	if (!bWaitForViewNotifications)
+	// No bound view claimed an enter animation: skip to the first line immediately.
+	if (State == EKzDialogueState::Entering && PendingViewAcks == 0)
 	{
 		Enter_LineEntering();
 	}
@@ -282,9 +314,10 @@ void UKzDialoguePlayer::Enter_LineEntering()
 		StartLineAudio();
 	}
 
+	PendingViewAcks = 0;
 	OnRequestLineEnter.Broadcast(this, CurrentLine);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::LineEntering && PendingViewAcks == 0)
 	{
 		Enter_LinePlaying();
 	}
@@ -299,13 +332,20 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		StartLineAudio();
 	}
 
+	BakeTimeline();
+
+	// Manual mode holds the line on screen until Next(); no auto-advance timer.
+	if (AdvanceMode == EKzDialogueAdvanceMode::Manual)
+	{
+		return;
+	}
+
 	const float Duration = (PausedTimeRemaining > 0.0f) ? PausedTimeRemaining : ResolveLineDuration(CurrentLine);
 	PausedTimeRemaining = 0.0f;
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().SetTimer(LineTimerHandle, this,
-			&UKzDialoguePlayer::HandleLineTimerElapsed, Duration, /*loop=*/false);
+		World->GetTimerManager().SetTimer(LineTimerHandle, this, &UKzDialoguePlayer::HandleLineTimerElapsed, Duration, /*loop=*/false);
 	}
 	else
 	{
@@ -317,12 +357,14 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
+	FlushTimeline();
+	PendingViewAcks = 0;
 	OnRequestLineExit.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::LineExiting && PendingViewAcks == 0)
 	{
-		NotifyLineExitFinished();
+		AdvanceAfterLineExit();
 	}
 }
 
@@ -330,9 +372,10 @@ void UKzDialoguePlayer::Enter_Exiting()
 {
 	State = EKzDialogueState::Exiting;
 	ResolveOutgoingAudio(CurrentLine, nullptr);
+	PendingViewAcks = 0;
 	OnRequestDialogueExit.Broadcast(this);
 
-	if (!bWaitForViewNotifications)
+	if (State == EKzDialogueState::Exiting && PendingViewAcks == 0)
 	{
 		FinishWithReason(EKzDialogueFinishReason::Completed);
 	}
@@ -352,6 +395,8 @@ void UKzDialoguePlayer::HandleLineTimerElapsed()
 
 void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 {
+	FlushTimeline();
+
 	UKzDialogueProvider* PreviousProvider = Provider;
 
 	State = EKzDialogueState::Idle;
@@ -372,20 +417,13 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
 	const float Fallback = Settings ? Settings->DefaultDuration : 2.5f;
 
-	float Duration;
-	if (Line.Duration > UE_KINDA_SMALL_NUMBER)
+	float AudioLength = 0.0f;
+	if (const USoundBase* Sound = Line.Audio.Get())
 	{
-		Duration = Line.Duration;
+		AudioLength = Sound->GetDuration();
 	}
-	else if (USoundBase* Sound = Line.Audio.Get())
-	{
-		const float SoundDuration = Sound->GetDuration();
-		Duration = (SoundDuration > UE_KINDA_SMALL_NUMBER) ? SoundDuration : Fallback;
-	}
-	else
-	{
-		Duration = Fallback;
-	}
+
+	const float Duration = Line.ResolveDuration(AudioLength, Fallback);
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
 	const float Scaled = Duration / FMath::Max(0.1f, TimeScale);
@@ -406,10 +444,9 @@ void UKzDialoguePlayer::StartLineAudio()
 		return;
 	}
 
-	// Spawn 2D regardless of speaker if explicitly requested or if no speaker actor is
-	// present in the world. Otherwise we'd need attachment, which is a per-speaker concern;
-	// a SpeakerComponent attaches when needed (see UKzDialogueSpeakerComponent::Speak()).
-	ActiveAudio = UGameplayStatics::SpawnSound2D(World, Sound);
+	// CreateSound2D (not SpawnSound2D) so it isn't auto-played before we bind the envelope follower; we Play() below.
+	// 2D regardless of speaker: attachment is a per-speaker concern (see UKzDialogueSpeakerComponent::Speak()).
+	ActiveAudio = UGameplayStatics::CreateSound2D(World, Sound);
 	if (!IsValid(ActiveAudio))
 	{
 		return;
@@ -482,17 +519,103 @@ void UKzDialoguePlayer::StartLineAudio()
 		}
 	}
 
+	// Bind BEFORE Play: the engine captures whether to run the envelope follower (bUpdateSingleEnvelopeValue)
+	// from OnAudioSingleEnvelopeValue.IsBound() at sound-start time, so binding after Play never fires it.
+	BindAudioEnvelope();
+	ResolveSpeakingSpeaker(); // resolve speaker + tuning before the first envelope callback can land
 	ActiveAudio->Play();
 }
 
 void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 {
+	UnbindAudioEnvelope();
 	if (IsValid(ActiveAudio))
 	{
 		if (FadeTime > 0.0f) { ActiveAudio->FadeOut(FadeTime, 0.0f); }
 		else { ActiveAudio->Stop(); }
 	}
 	ActiveAudio = nullptr;
+}
+
+void UKzDialoguePlayer::BindAudioEnvelope()
+{
+	if (EnvelopeBoundAudio.Get() == ActiveAudio)
+	{
+		return;
+	}
+	UnbindAudioEnvelope();
+	if (IsValid(ActiveAudio))
+	{
+		// Note: OnAudioSingleEnvelopeValue only fires if the wave has amplitude envelope analysis enabled.
+		ActiveAudio->OnAudioSingleEnvelopeValue.AddDynamic(this, &UKzDialoguePlayer::HandleAudioEnvelope);
+		EnvelopeBoundAudio = ActiveAudio;
+	}
+}
+
+void UKzDialoguePlayer::UnbindAudioEnvelope()
+{
+	if (UAudioComponent* Audio = EnvelopeBoundAudio.Get())
+	{
+		Audio->OnAudioSingleEnvelopeValue.RemoveDynamic(this, &UKzDialoguePlayer::HandleAudioEnvelope);
+	}
+	EnvelopeBoundAudio = nullptr;
+	EnvelopeTarget = 0.0f;
+}
+
+void UKzDialoguePlayer::HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue)
+{
+	// Gate the silence floor and gain into 0..1, then push toward 0/1 by Contrast so the mouth opens/closes
+	// crisply instead of hovering mid-open on long phrases. Smoothing happens in UpdateSpeakingLevel.
+	const float Gained = (EnvelopeValue <= ActiveSpeakingSettings.Threshold) ? 0.0f : FMath::Min(EnvelopeValue * ActiveSpeakingSettings.Gain, 1.0f);
+	EnvelopeTarget = ApplySpeakingContrast(Gained, ActiveSpeakingSettings.Contrast);
+}
+
+void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)
+{
+	// No live audio -> let the jaw fall shut.
+	if (!EnvelopeBoundAudio.IsValid() || !EnvelopeBoundAudio->IsPlaying())
+	{
+		EnvelopeTarget = 0.0f;
+	}
+
+	// Rising uses a CONSTANT rate so the first open from 0 ramps instead of snapping: FInterpTo is exponential
+	// and takes a huge proportional bite when the gap is big (0 -> high). Falling keeps the eased close.
+	const float NewLevel = (EnvelopeTarget > SpeakingLevel)
+		? FMath::FInterpConstantTo(SpeakingLevel, EnvelopeTarget, DeltaTime, ActiveSpeakingSettings.AttackSpeed)
+		: FMath::FInterpTo(SpeakingLevel, EnvelopeTarget, DeltaTime, ActiveSpeakingSettings.ReleaseSpeed);
+	if (!FMath::IsNearlyEqual(NewLevel, SpeakingLevel))
+	{
+		SpeakingLevel = NewLevel;
+		OnSpeakingLevelChanged.Broadcast(SpeakingLevel);
+
+		// Route to the current speaker so it's gated per speaker (several speakers can share this channel/player).
+		if (UKzDialogueSpeakerComponent* Speaker = SpeakingSpeaker.Get())
+		{
+			Speaker->SetSpeakingLevel(SpeakingLevel);
+		}
+	}
+}
+
+void UKzDialoguePlayer::ResolveSpeakingSpeaker()
+{
+	UKzDialogueSpeakerComponent* NewSpeaker = CurrentLine.Speaker.SpeakerTag.IsValid()
+		? UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag)
+		: nullptr;
+
+	if (NewSpeaker != SpeakingSpeaker.Get())
+	{
+		// A different speaker takes over: close the previous one's mouth.
+		if (UKzDialogueSpeakerComponent* Old = SpeakingSpeaker.Get())
+		{
+			Old->SetSpeakingLevel(0.0f);
+		}
+		SpeakingSpeaker = NewSpeaker;
+	}
+
+	// Effective speaking tuning for this line: the speaker's override if any, else the project defaults.
+	ActiveSpeakingSettings = NewSpeaker
+		? NewSpeaker->ResolveSpeakingSettings()
+		: (UKzDialogueSettings::Get() ? UKzDialogueSettings::Get()->SpeakingDefaults : FKzSpeakingLevelSettings());
 }
 
 EKzLineAudioInterruptionPolicy UKzDialoguePlayer::ResolveAudioPolicy(const FKzDialogueLine& Line) const
@@ -682,4 +805,197 @@ void UKzDialoguePlayer::DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& 
 			Bindings.RemoveAll([Handle](const FSpecificLineBinding& Binding) { return Binding.Handle == Handle; });
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------------------
+// Timeline evaluation
+// ---------------------------------------------------------------------------------------
+
+ETickableTickType UKzDialoguePlayer::GetTickableTickType() const
+{
+	return HasAnyFlags(RF_ClassDefaultObject) ? ETickableTickType::Never : ETickableTickType::Conditional;
+}
+
+bool UKzDialoguePlayer::IsTickable() const
+{
+	if (SpeakingLevel > UE_KINDA_SMALL_NUMBER)
+	{
+		return true; // keep ticking to release the jaw toward 0
+	}
+	return State == EKzDialogueState::LinePlaying && (ActiveNotifies.Num() > 0 || IsValid(ActiveAudio));
+}
+
+TStatId UKzDialoguePlayer::GetStatId() const
+{
+	RETURN_QUICK_DECLARE_CYCLE_STAT(UKzDialoguePlayer, STATGROUP_Tickables);
+}
+
+void UKzDialoguePlayer::Tick(float DeltaTime)
+{
+	UpdateSpeakingLevel(DeltaTime);
+
+	if (State != EKzDialogueState::LinePlaying)
+	{
+		return;
+	}
+
+	TimelineClock += DeltaTime;
+
+	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	{
+		if (Entry.bDone || !IsValid(Entry.Notify))
+		{
+			continue;
+		}
+
+		if (Entry.bIsState)
+		{
+			UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify);
+			if (!StateNotify)
+			{
+				Entry.bDone = true;
+				continue;
+			}
+
+			if (!Entry.bActive && TimelineClock >= Entry.Start)
+			{
+				StateNotify->NotifyBegin(BuildNotifyContext(Entry));
+				Entry.bActive = true;
+			}
+
+			if (Entry.bActive)
+			{
+				if (!Entry.bFlushBound && TimelineClock >= Entry.End)
+				{
+					StateNotify->NotifyEnd(BuildNotifyContext(Entry));
+					Entry.bActive = false;
+					Entry.bDone = true;
+				}
+				else
+				{
+					StateNotify->NotifyTick(BuildNotifyContext(Entry), DeltaTime);
+				}
+			}
+		}
+		else if (TimelineClock >= Entry.Start)
+		{
+			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
+			{
+				PointNotify->Notify(BuildNotifyContext(Entry));
+			}
+			Entry.bDone = true;
+		}
+	}
+}
+
+void UKzDialoguePlayer::BakeTimeline()
+{
+	ActiveNotifies.Reset();
+	TimelineClock = 0.0f;
+	CachedLineSpeaker = nullptr;
+	CachedLineDuration = 0.0f;
+
+	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
+	if (!Timeline || Timeline->IsEmpty())
+	{
+		return;
+	}
+
+	CachedLineDuration = ResolveLineDuration(CurrentLine);
+	if (CurrentLine.Speaker.SpeakerTag.IsValid())
+	{
+		CachedLineSpeaker = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag);
+	}
+
+	FKzDialogueTimeResolveContext ResolveContext;
+	ResolveContext.LineDuration = CachedLineDuration;
+	ResolveContext.Audio = CurrentLine.Audio.Get();
+
+	for (const FKzDialogueNotifyTrack& Track : Timeline->Tracks)
+	{
+		for (const FKzDialogueNotifyEvent& Event : Track.Events)
+		{
+			if (!Event.bEnabled || !IsValid(Event.Notify))
+			{
+				continue;
+			}
+
+			const FKzDialogueTimeSource* Source = Event.TimeSource.GetPtr<FKzDialogueTimeSource>();
+			if (!Source)
+			{
+				continue;
+			}
+
+			float Start = 0.0f;
+			float End = 0.0f;
+			Source->Resolve(ResolveContext, Start, End);
+
+			FKzDialogueActiveNotify& Entry = ActiveNotifies.AddDefaulted_GetRef();
+			Entry.Notify = Event.Notify;
+			Event.Notify->SetOwningPlayer(this);
+			Entry.bIsState = Event.Notify->IsA<UKzDialogueNotifyState>();
+			Entry.Start = Start;
+			Entry.End = FMath::Max(Start, End);
+			Entry.bFlushBound = Entry.bIsState && (Entry.End >= CachedLineDuration - UE_KINDA_SMALL_NUMBER);
+			Entry.bFireIfSkipped = Event.bFireIfSkipped;
+		}
+	}
+}
+
+void UKzDialoguePlayer::FlushTimeline()
+{
+	if (ActiveNotifies.Num() == 0)
+	{
+		return;
+	}
+
+	// End active states in reverse (LIFO).
+	for (int32 Index = ActiveNotifies.Num() - 1; Index >= 0; --Index)
+	{
+		FKzDialogueActiveNotify& Entry = ActiveNotifies[Index];
+		if (Entry.bIsState && Entry.bActive && IsValid(Entry.Notify))
+		{
+			if (UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify))
+			{
+				StateNotify->NotifyEnd(BuildNotifyContext(Entry));
+			}
+			Entry.bActive = false;
+		}
+	}
+
+	// Fire skipped points that opted in.
+	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	{
+		if (!Entry.bIsState && !Entry.bDone && Entry.bFireIfSkipped && IsValid(Entry.Notify))
+		{
+			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
+			{
+				PointNotify->Notify(BuildNotifyContext(Entry));
+			}
+		}
+	}
+
+	ActiveNotifies.Reset();
+	CachedLineSpeaker = nullptr;
+}
+
+FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry)
+{
+	FKzDialogueNotifyContext Context;
+	Context.Player = this;
+	Context.LineSpeaker = CachedLineSpeaker;
+
+	UKzDialogueSpeakerComponent* Target = CachedLineSpeaker;
+	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride.IsValid())
+	{
+		Target = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, Entry.Notify->TargetSpeakerOverride);
+	}
+
+	Context.TargetSpeaker = Target;
+	Context.TargetActor = Target ? Target->GetOwner() : nullptr;
+	Context.LineDuration = CachedLineDuration;
+	Context.CurrentTime = TimelineClock;
+	Context.EventStart = Entry.Start;
+	Context.EventEnd = Entry.End;
+	return Context;
 }

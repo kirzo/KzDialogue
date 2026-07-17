@@ -8,6 +8,8 @@
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.generated.h"
 
+class UKzDialogueTimeline;
+
 /**
  * Authorable asset describing a linear dialogue: an ordered list of lines plus
  * metadata. Pluggable inside Sequencer tracks, dialogue subsystem, speaker components,
@@ -32,6 +34,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	FGameplayTag DialogueTag;
 
+	/**
+	 * Free-form tags shared by every line in this dialogue (mood, speaker, context, ...). They are merged
+	 * into each line's own Tags when the line is resolved, so a view that only receives the resolved line
+	 * sees the union (asset + line). Query it with UKzDialogueFunctionLibrary::LineHasTag and friends.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+	FGameplayTagContainer Tags;
+
 	/** When true, a higher-priority dialogue may interrupt this one mid-line. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	bool bInterruptible = true;
@@ -44,6 +54,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
+	/** How this dialogue advances by default: auto-timed, or holding each line until Next() (RPG-style). The callsite may override. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
+	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic;
+
 	/** The lines, in playback order. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueLine> Lines;
@@ -52,9 +66,23 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	TArray<FKzDialogueAlias> Aliases;
 
+	/** Per-line notify timelines, owned by the asset and keyed by line id. Managed by the line editor. */
+	UPROPERTY(Instanced)
+	TArray<TObjectPtr<UKzDialogueTimeline>> Timelines;
+
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
 	int32 IndexOfLine(const FGuid& LineId) const;
+
+	/** Find the notify timeline owned by the given line id, or null. */
+	UKzDialogueTimeline* FindTimelineForLine(const FGuid& LineId) const;
+
+	/**
+	 * Completes a resolved line copy with the asset's runtime data so a consumer (view) gets a full line
+	 * without needing the asset: its per-line timeline, and the asset-wide Tags merged into the line's own.
+	 * Call on every line handed out by a resolve path or the provider.
+	 */
+	void FinalizeResolvedLine(FKzDialogueLine& OutLine) const;
 
 	/** Get a line by its stable id. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")

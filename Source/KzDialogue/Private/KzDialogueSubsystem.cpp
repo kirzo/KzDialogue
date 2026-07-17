@@ -5,9 +5,11 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueAssetSession.h"
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
+#include "Sound/SoundBase.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
 
@@ -28,6 +30,20 @@ void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UKzDialogueSubsystem::Deinitialize()
 {
+	bDeinitializing = true;
+
+	// Tear down asset sessions BEFORE the players they drive. Iterate a copy: Interrupt() finishes the
+	// session, which calls ReleaseAssetSession and mutates AssetSessions mid-loop.
+	TArray<TObjectPtr<UKzDialogueAssetSession>> SessionsToTearDown = AssetSessions;
+	for (UKzDialogueAssetSession* Session : SessionsToTearDown)
+	{
+		if (Session)
+		{
+			Session->Interrupt();
+		}
+	}
+	AssetSessions.Reset();
+
 	StopAll();
 	Players.Reset();
 	Super::Deinitialize();
@@ -46,8 +62,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::GetOrCreatePlayer(FGameplayTag InChanne
 	NewPlayer->Channel = InChannel;
 	Players.Add(InChannel, NewPlayer);
 
-	// Broadcast BEFORE anything plays on it, so views can bind and configure the player
-	// (e.g. SetWaitForViewNotifications) ahead of the first StartDialogue.
+	// Broadcast BEFORE anything plays on it, so views can bind and subscribe to its request events
+	// ahead of the first StartDialogue.
 	OnPlayerCreated.Broadcast(InChannel, NewPlayer);
 
 	return NewPlayer;
@@ -67,10 +83,35 @@ void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialo
 	}
 }
 
+// Line-level resolution: the line's own channel, else the channel mapped to its audio's
+// SoundClass in project settings. Empty when neither applies — the chain moves to the asset.
+// The SoundClass step is skipped when the line has no audio, the audio fails to load or has
+// no SoundClass, or settings don't map it (invalid mappings also count as unmapped).
+static FGameplayTag ResolveLineLevelChannel(const FKzDialogueLine& Line)
+{
+	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
+
+	if (!Line.Audio.IsNull())
+	{
+		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
+		{
+			if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
+			{
+				return Settings->FindChannelForSoundClass(Sound->GetSoundClass());
+			}
+		}
+	}
+
+	return FGameplayTag();
+}
+
 FGameplayTag UKzDialogueSubsystem::ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const
 {
 	if (ExplicitChannel.IsValid()) { return ExplicitChannel; }
-	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
+
+	const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
+	if (LineLevel.IsValid()) { return LineLevel; }
+
 	if (IsValid(Asset) && Asset->DefaultChannel.IsValid()) { return Asset->DefaultChannel; }
 	return DefaultChannel;
 }
@@ -106,11 +147,15 @@ FGameplayTag UKzDialogueSubsystem::ResolveChannelForEntry(FGameplayTag ExplicitC
 
 	if (IsValid(Asset) && EntryId.IsValid())
 	{
-		// Line entry: the line's own channel.
+		// Line entry: the line's own channel, else its audio's SoundClass mapping.
 		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(EntryId, Line) && Line.DefaultChannel.IsValid())
+		if (Asset->TryGetLineById(EntryId, Line))
 		{
-			return Line.DefaultChannel;
+			const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
+			if (LineLevel.IsValid())
+			{
+				return LineLevel;
+			}
 		}
 
 		// Alias entry: the alias's own channel, else its lines' unanimous one.
@@ -188,7 +233,14 @@ int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 Asset
 	return Resolved;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+EKzDialogueAdvanceMode UKzDialogueSubsystem::ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const
+{
+	if (Override != EKzDialogueAdvanceMode::Inherit) { return Override; }
+	if (IsValid(Asset) && Asset->AdvanceMode != EKzDialogueAdvanceMode::Inherit) { return Asset->AdvanceMode; }
+	return EKzDialogueAdvanceMode::Automatic;
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Provider))
 	{
@@ -229,6 +281,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	}
 
 	Player->CurrentPriority = ResolvedPriority;
+	// Inherit at this level means "no asset to resolve against" (manual providers): fall to Automatic.
+	Player->AdvanceMode = (AdvanceMode == EKzDialogueAdvanceMode::Inherit) ? EKzDialogueAdvanceMode::Automatic : AdvanceMode;
 	Player->SetProvider(Provider);
 
 	if (bStartImmediately)
@@ -239,25 +293,33 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	return Player;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately)
+UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset))
 	{
 		return nullptr;
 	}
 
-	// First-entry rule: the session channel resolves from the asset's first line.
-	InChannel = ResolveChannel(InChannel, Asset->Lines.IsEmpty() ? FKzDialogueLine{} : Asset->Lines[0], Asset);
+	// The session splits the asset into maximal per-channel runs and plays each run on its own channel,
+	// chaining them. A valid InChannel forces every line onto it -> one run, identical to the old play.
+	UKzDialogueAssetSession* Session = NewObject<UKzDialogueAssetSession>(this);
+	AssetSessions.Add(Session);
+	Session->Start(this, Asset, InChannel, bStartImmediately, AdvanceMode);
+	return Session;
+}
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
-	const int32 ResolvedPriority = ResolvePriority(InheritPriority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
-
-	UKzAssetDialogueProvider* Provider = UKzAssetDialogueProvider::Create(this, Asset);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)
+{
+	if (Session)
+	{
+		AssetSessions.RemoveSingle(Session);
+	}
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
+	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
+	// paths (PlayAssetLine/-List, PlayLineRefs) do this via ResolveAssetEntry; an ad-hoc line has none.
 	InChannel = ResolveChannel(InChannel, Line, /*Asset*/ nullptr);
 
 	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
@@ -339,7 +401,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 	return PlayLine(Line, InChannel, Priority, bStartImmediately);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset) || LineIds.IsEmpty()) { return nullptr; }
 
@@ -370,7 +432,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
 
 	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately, AdvanceMode);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
@@ -421,9 +483,14 @@ void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 
 void UKzDialogueSubsystem::StopAll()
 {
-	for (auto& Pair : Players)
+	// Snapshot: with no view claiming acks, Stop() finishes synchronously and a finished
+	// handler may start a new dialogue, growing Players mid-loop. Players created by those
+	// handlers are deliberately not stopped.
+	TArray<UKzDialoguePlayer*> Snapshot;
+	GetAllPlayers(Snapshot);
+	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		if (IsValid(Pair.Value)) { Pair.Value->Stop(); }
+		Player->Stop();
 	}
 }
 
@@ -439,9 +506,12 @@ void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
 
 void UKzDialogueSubsystem::InterruptAll()
 {
-	for (auto& Pair : Players)
+	// Same snapshot as StopAll: Interrupt() always finishes synchronously.
+	TArray<UKzDialoguePlayer*> Snapshot;
+	GetAllPlayers(Snapshot);
+	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		if (IsValid(Pair.Value)) { Pair.Value->Interrupt(); }
+		Player->Interrupt();
 	}
 }
 

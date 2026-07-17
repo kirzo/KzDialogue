@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "K2Node_BaseAsyncTask.h"
+#include "K2Node_KzCancellableAsyncTask.h"
 #include "K2Node_PlayDialogueLineAsync.generated.h"
 
 class UKzDialogueAsset;
@@ -14,7 +14,7 @@ class UKzDialogueAsset;
  * Started / Finished / Cancelled pins and completes when the picked line ends.
  */
 UCLASS()
-class KZDIALOGUEUNCOOKED_API UK2Node_PlayDialogueLineAsync : public UK2Node_BaseAsyncTask
+class KZDIALOGUEUNCOOKED_API UK2Node_PlayDialogueLineAsync : public UK2Node_KzCancellableAsyncTask
 {
 	GENERATED_BODY()
 

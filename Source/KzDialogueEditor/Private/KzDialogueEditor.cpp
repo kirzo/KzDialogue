@@ -13,6 +13,9 @@
 #include "Customizations/KzDialogueLineRefCustomization.h"
 #include "Customizations/KzDialogueLineListCustomization.h"
 #include "Customizations/KzDialogueAliasCustomization.h"
+#include "Customizations/KzDialogueTimelineCustomizations.h"
+#include "Customizations/KzDialogueLineCustomization.h"
+#include "KzDialogueTimeline.h"
 
 #include "Editors/KzArrayAssetEditor.h"
 
@@ -47,6 +50,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 	RegisterPropertyLayout<FKzDialogueAlias, FKzDialogueAliasCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineRef, FKzDialogueLineRefCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineList, FKzDialogueLineListCustomization>();
+	RegisterPropertyLayout<FKzDialogueNotifyTrack, FKzDialogueNotifyTrackCustomization>();
+	RegisterPropertyLayout<FKzDialogueNotifyEvent, FKzDialogueNotifyEventCustomization>();
+	RegisterPropertyLayout<FKzDialogueLine, FKzDialogueLineCustomization>();
 
 	ISequencerModule& SequencerModule = FModuleManager::LoadModuleChecked<ISequencerModule>("Sequencer");
 	DialogueTrackEditorHandle = SequencerModule.RegisterTrackEditor(FOnCreateTrackEditor::CreateStatic(&FKzDialogueTrackEditor::CreateTrackEditor));
