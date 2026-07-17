@@ -483,9 +483,14 @@ void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 
 void UKzDialogueSubsystem::StopAll()
 {
-	for (auto& Pair : Players)
+	// Snapshot: with no view claiming acks, Stop() finishes synchronously and a finished
+	// handler may start a new dialogue, growing Players mid-loop. Players created by those
+	// handlers are deliberately not stopped.
+	TArray<UKzDialoguePlayer*> Snapshot;
+	GetAllPlayers(Snapshot);
+	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		if (IsValid(Pair.Value)) { Pair.Value->Stop(); }
+		Player->Stop();
 	}
 }
 
@@ -501,9 +506,12 @@ void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
 
 void UKzDialogueSubsystem::InterruptAll()
 {
-	for (auto& Pair : Players)
+	// Same snapshot as StopAll: Interrupt() always finishes synchronously.
+	TArray<UKzDialoguePlayer*> Snapshot;
+	GetAllPlayers(Snapshot);
+	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		if (IsValid(Pair.Value)) { Pair.Value->Interrupt(); }
+		Player->Interrupt();
 	}
 }
 
