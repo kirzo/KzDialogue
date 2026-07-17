@@ -60,7 +60,7 @@ public:
 
 	/** Smoothed 0..1 talking amplitude (jaw / lip-flap) for THIS speaker; the player gates it to the active speaker. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
-	float GetSpeakingLevel() const { return SpeakingLevel; }
+	float GetSpeakingLevel() const { return IsSpeakingSuppressed() ? 0.0f : SpeakingLevel; }
 
 	/** Set by the dialogue player; routes the active line's speaking amplitude to its speaker. */
 	void SetSpeakingLevel(float NewLevel);

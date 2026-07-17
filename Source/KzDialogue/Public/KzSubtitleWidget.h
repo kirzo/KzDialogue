@@ -141,6 +141,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	virtual void ClearTextWidgets();
 
+	/**
+	 * Master switch for the whole view (e.g. a "subtitles off" user setting). While disabled the
+	 * widget renders nothing and stays transparent to every bound player's timing (no claims, no
+	 * notifies), so dialogue audio and events keep flowing. Safe to toggle mid-dialogue: disabling
+	 * stops in-flight fades (dispatching their pending notifies), re-enabling re-shows the current line.
+	 * Use this instead of SetVisibility(Collapsed): a collapsed widget never ticks its animations,
+	 * leaving claimed view responses unanswered and deadlocking the player before its audio starts.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void SetViewEnabled(bool bEnabled);
+
+	/** True unless the view was disabled via SetViewEnabled. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
+	bool IsViewEnabled() const { return bViewEnabled; }
+
 	/** True when Channel is currently muted on this widget by any rule in MuteRules. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsChannelMuted(FGameplayTag Channel) const;
@@ -232,7 +247,7 @@ private:
 	/** True when Channel matches any listened scope. */
 	bool MatchesListenedChannels(FGameplayTag Channel) const;
 
-	/** True when this player's channel is in the cached muted set. */
+	/** True when this player's channel is in the cached muted set, or the whole view is disabled. */
 	bool IsPlayerMuted(const UKzDialoguePlayer* InPlayer) const;
 
 	/** Re-evaluates the muted set; hides views that become muted and re-shows ones that no longer are. */
@@ -261,4 +276,7 @@ private:
 
 	/** Players whose channel is currently muted on this widget. Kept in sync by RefreshMuteStates. */
 	TSet<TWeakObjectPtr<UKzDialoguePlayer>> MutedPlayers;
+
+	/** Master switch set by SetViewEnabled. Disabled = every player behaves as muted. */
+	bool bViewEnabled = true;
 };

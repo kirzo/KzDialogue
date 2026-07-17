@@ -341,6 +341,34 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 // View-level mute
 // ---------------------------------------------------------------------------------------
 
+void UKzSubtitleWidget::SetViewEnabled(bool bEnabled)
+{
+	if (bViewEnabled == bEnabled) { return; }
+
+	// Flip the flag first: ApplyMute's StopAnimation dispatches the pending Notify, which can
+	// re-enter synchronously with the player's next OnRequest* — the handlers must already see
+	// the view as disabled so they don't claim again.
+	bViewEnabled = bEnabled;
+
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		UKzDialoguePlayer* Player = Weak.Get();
+		if (!Player) { continue; }
+
+		if (!bEnabled)
+		{
+			// Hide the view and stop in-flight fades; their finish resolves any claimed acks,
+			// so no player is left waiting on this widget.
+			ApplyMute(Player);
+		}
+		else if (!MutedPlayers.Contains(Weak))
+		{
+			// Re-show mid-line whatever is playing, unless a channel mute rule still hides it.
+			SyncViewToPlayer(Player);
+		}
+	}
+}
+
 bool UKzSubtitleWidget::IsChannelMuted(FGameplayTag Channel) const
 {
 	for (const FKzSubtitleMuteRule& Rule : MuteRules)
@@ -366,7 +394,8 @@ bool UKzSubtitleWidget::IsChannelMuted(FGameplayTag Channel) const
 
 bool UKzSubtitleWidget::IsPlayerMuted(const UKzDialoguePlayer* InPlayer) const
 {
-	return MutedPlayers.Contains(const_cast<UKzDialoguePlayer*>(InPlayer));
+	// A disabled view behaves as if every player were muted: the single gate all handlers share.
+	return !bViewEnabled || MutedPlayers.Contains(const_cast<UKzDialoguePlayer*>(InPlayer));
 }
 
 void UKzSubtitleWidget::RefreshMuteStates()
@@ -427,6 +456,9 @@ void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 {
+	// Disabled view: render nothing, even when a mute lifts or a player binds mid-line.
+	if (!bViewEnabled) { return; }
+
 	const EKzDialogueState CurrentState = InPlayer->GetState();
 	if (CurrentState == EKzDialogueState::Entering)
 	{
