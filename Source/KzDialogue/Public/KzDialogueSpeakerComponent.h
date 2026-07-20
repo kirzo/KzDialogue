@@ -122,8 +122,6 @@ private:
 	/** Ref-count of active speaking-level suppressions (Sequencer / animation overrides). */
 	int32 SpeakingSuppressionCount = 0;
 
-	static TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& GetRegistry(const UWorld* World);
-
 	/** Ref-count per tag applied by active dialogue notifies. Runtime state, not serialized. */
 	TMap<FGameplayTag, int32> ActiveDialogueTagCounts;
 

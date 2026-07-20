@@ -7,6 +7,7 @@
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
 #include "Animation/AnimSequenceBase.h"
+#include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/ForceFeedbackEffect.h"
@@ -106,7 +107,12 @@ void UKzDialogueNotify_PlaySound::Notify_Implementation(const FKzDialogueNotifyC
 
 	if (bPlay2D)
 	{
-		UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier);
+		// SpawnSound2D marks the component as a UI sound; clear it so the SFX pauses with the game
+		// (the flag is consulted on pause, not at start, so post-Play is fine).
+		if (UAudioComponent* Audio = UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier))
+		{
+			Audio->bIsUISound = false;
+		}
 		return;
 	}
 
@@ -122,7 +128,11 @@ void UKzDialogueNotify_PlaySound::Notify_Implementation(const FKzDialogueNotifyC
 	}
 	else
 	{
-		UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier);
+		// Same as the bPlay2D path: don't let the fallback 2D sound survive SetGamePaused.
+		if (UAudioComponent* Audio = UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier))
+		{
+			Audio->bIsUISound = false;
+		}
 	}
 }
 
