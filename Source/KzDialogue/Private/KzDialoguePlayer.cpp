@@ -453,6 +453,10 @@ void UKzDialoguePlayer::StartLineAudio()
 	}
 	ActiveAudio->bAutoDestroy = true;
 
+	// CreateSound2D marks the component as a UI sound, which the audio device deliberately keeps
+	// playing through SetGamePaused; dialogue must pause with the game.
+	ActiveAudio->bIsUISound = false;
+
 	// Apply audio params from the property bag. Each value is forwarded to the audio
 	// component using the type-appropriate setter.
 	const FInstancedPropertyBag& Bag = CurrentLine.AudioParams;
