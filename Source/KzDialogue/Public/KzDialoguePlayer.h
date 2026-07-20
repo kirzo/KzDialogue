@@ -301,7 +301,11 @@ private:
 	void AdvanceAfterLineExit();
 
 	// Helpers.
+	/** Starts the line audio, honoring the line's AudioStartDelay (defers via timer when > 0). */
 	void StartLineAudio();
+	/** The actual audio start: create the component, bind the envelope, play. */
+	void StartLineAudioNow();
+	void HandleAudioDelayElapsed();
 	void StopLineAudio(float FadeTime = 0.1f);
 
 	// Speaking level: drive a smoothed 0..1 amplitude from the current line's audio envelope.
@@ -370,6 +374,9 @@ private:
 	float PausedTimeRemaining = 0.0f;
 
 	FTimerHandle LineTimerHandle;
+
+	/** Pending deferred audio start for the current line (AudioStartDelay > 0). */
+	FTimerHandle AudioDelayTimerHandle;
 
 	// Timeline runtime state (valid only while a timelined line is in LinePlaying).
 

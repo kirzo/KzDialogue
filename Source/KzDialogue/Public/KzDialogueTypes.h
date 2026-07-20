@@ -128,6 +128,14 @@ struct KZDIALOGUE_API FKzDialogueLine
 	TSoftObjectPtr<USoundBase> Audio;
 
 	/**
+	 * Seconds between the line's start and its audio starting, so subtitles can lead the voice.
+	 * Added on top of the line's resolved duration, and scaled by the player's TimeScale like
+	 * every other line timing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ClampMin = 0))
+	float AudioStartDelay = 0.0f;
+
+	/**
 	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
 	 * an extension on top of the audio, or as the explicit length when > 0 (Auto).
 	 */

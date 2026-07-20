@@ -112,6 +112,10 @@ void UKzDialoguePlayer::Pause()
 			PausedTimeRemaining = TM.GetTimerRemaining(LineTimerHandle);
 			TM.PauseTimer(LineTimerHandle);
 		}
+		if (TM.IsTimerActive(AudioDelayTimerHandle))
+		{
+			TM.PauseTimer(AudioDelayTimerHandle);
+		}
 	}
 
 	if (IsValid(ActiveAudio))
@@ -138,6 +142,10 @@ void UKzDialoguePlayer::Resume()
 		if (LineTimerHandle.IsValid())
 		{
 			TM.UnPauseTimer(LineTimerHandle);
+		}
+		if (AudioDelayTimerHandle.IsValid())
+		{
+			TM.UnPauseTimer(AudioDelayTimerHandle);
 		}
 	}
 
@@ -357,6 +365,13 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
+
+	// The line is ending: audio still waiting on its AudioStartDelay must never start now.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
+	}
+
 	FlushTimeline();
 	PendingViewAcks = 0;
 	OnRequestLineExit.Broadcast(this, CurrentLine);
@@ -423,7 +438,8 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 		AudioLength = Sound->GetDuration();
 	}
 
-	const float Duration = Line.ResolveDuration(AudioLength, Fallback);
+	// The audio lead extends the line: the text lives its resolved time plus the delay.
+	const float Duration = Line.ResolveDuration(AudioLength, Fallback) + FMath::Max(0.0f, Line.AudioStartDelay);
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
 	const float Scaled = Duration / FMath::Max(0.1f, TimeScale);
@@ -431,6 +447,33 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 }
 
 void UKzDialoguePlayer::StartLineAudio()
+{
+	// Subtitles-lead-the-voice: defer the whole audio start (creation + envelope bind + play) by
+	// the line's AudioStartDelay. TimeScale compresses the lead like every other line timing.
+	const float Delay = FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale);
+	if (Delay > UE_KINDA_SMALL_NUMBER && !CurrentLine.Audio.IsNull())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(AudioDelayTimerHandle, this, &UKzDialoguePlayer::HandleAudioDelayElapsed, Delay, /*loop=*/false);
+			return;
+		}
+	}
+
+	StartLineAudioNow();
+}
+
+void UKzDialoguePlayer::HandleAudioDelayElapsed()
+{
+	// Every path that ends the line clears the timer, but stay defensive: a late fire must not
+	// start audio for a line that is no longer presenting.
+	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
+	{
+		StartLineAudioNow();
+	}
+}
+
+void UKzDialoguePlayer::StartLineAudioNow()
 {
 	USoundBase* Sound = CurrentLine.Audio.IsNull() ? nullptr : CurrentLine.Audio.LoadSynchronous();
 	if (!Sound)
@@ -532,6 +575,12 @@ void UKzDialoguePlayer::StartLineAudio()
 
 void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 {
+	// Covers hard teardowns (Abort / Interrupt / destroy): cancel a pending deferred start too.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
+	}
+
 	UnbindAudioEnvelope();
 	if (IsValid(ActiveAudio))
 	{
