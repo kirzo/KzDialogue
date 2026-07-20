@@ -12,9 +12,12 @@
 
 namespace KzDialogueSpeakerInternal
 {
-	// Per-world map. We key on UWorld* and use weak pointers to the components so that
-	// worlds tearing down without explicit unregistration don't keep stale pointers.
-	static TMap<TWeakObjectPtr<const UWorld>, TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>> Registry;
+	// Per-world, per-tag registration stack. We key on UWorld* and use weak pointers to the
+	// components so that worlds tearing down without explicit unregistration don't keep stale
+	// pointers. Several components may share a tag (e.g. a Sequencer spawnable duplicating a
+	// level character): the last registered valid one wins lookups, and unregistering removes
+	// only that component's own entry, so the previous registrant takes over again.
+	static TMap<TWeakObjectPtr<const UWorld>, TMap<FGameplayTag, TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>>> Registry;
 }
 
 UKzDialogueSpeakerComponent::UKzDialogueSpeakerComponent()
@@ -62,8 +65,9 @@ void UKzDialogueSpeakerComponent::OnRegister()
 
 	if (UWorld* World = GetWorld(); World && SpeakerTag.IsValid())
 	{
-		auto& WorldMap = KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
-		WorldMap.Add(SpeakerTag, this);
+		TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>& Stack = KzDialogueSpeakerInternal::Registry.FindOrAdd(World).FindOrAdd(SpeakerTag);
+		Stack.Remove(this); // re-registration moves us to the top
+		Stack.Add(this);
 	}
 }
 
@@ -73,7 +77,12 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 	{
 		if (auto* WorldMap = KzDialogueSpeakerInternal::Registry.Find(World))
 		{
-			WorldMap->Remove(SpeakerTag);
+			if (TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(SpeakerTag))
+			{
+				// Remove only our own entry — never evict another registrant sharing the tag.
+				Stack->Remove(this);
+				if (Stack->IsEmpty()) { WorldMap->Remove(SpeakerTag); }
+			}
 		}
 	}
 	Super::OnUnregister();
@@ -97,17 +106,19 @@ UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeakerByTag(const
 
 	if (auto* WorldMap = KzDialogueSpeakerInternal::Registry.Find(World))
 	{
-		if (auto* Weak = WorldMap->Find(InSpeakerTag))
+		if (const TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(InSpeakerTag))
 		{
-			return Weak->Get();
+			// Latest valid registrant wins; stale weak entries are skipped.
+			for (int32 Index = Stack->Num() - 1; Index >= 0; --Index)
+			{
+				if (UKzDialogueSpeakerComponent* Speaker = (*Stack)[Index].Get())
+				{
+					return Speaker;
+				}
+			}
 		}
 	}
 	return nullptr;
-}
-
-TMap<FGameplayTag, TWeakObjectPtr<UKzDialogueSpeakerComponent>>& UKzDialogueSpeakerComponent::GetRegistry(const UWorld* World)
-{
-	return KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
 }
 
 UKzDialogueAssetSession* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
