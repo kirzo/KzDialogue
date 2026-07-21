@@ -9,6 +9,7 @@
 #include "Animation/AnimSequenceBase.h"
 #include "Components/AudioComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/ForceFeedbackEffect.h"
 #include "GameFramework/PlayerController.h"
@@ -101,18 +102,26 @@ void UKzDialogueNotifyState_PlaySlotAnimation::NotifyEnd_Implementation(const FK
 	}
 }
 
+namespace KzDialogueNotifyInternal
+{
+	// SpawnSound2D marks the component as a UI sound. Clear it in game worlds so the SFX pauses
+	// with SetGamePaused, but keep it in the editor world (Sequencer preview), where non-UI sounds
+	// don't play at all (game not ticking). The flag is re-consulted after start, so post-Play is fine.
+	static void MakePausableWithGame(UAudioComponent* Audio)
+	{
+		if (!Audio) { return; }
+		const UWorld* World = Audio->GetWorld();
+		Audio->bIsUISound = !(World && World->IsGameWorld());
+	}
+}
+
 void UKzDialogueNotify_PlaySound::Notify_Implementation(const FKzDialogueNotifyContext& Context)
 {
 	if (!Sound) { return; }
 
 	if (bPlay2D)
 	{
-		// SpawnSound2D marks the component as a UI sound; clear it so the SFX pauses with the game
-		// (the flag is consulted on pause, not at start, so post-Play is fine).
-		if (UAudioComponent* Audio = UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier))
-		{
-			Audio->bIsUISound = false;
-		}
+		KzDialogueNotifyInternal::MakePausableWithGame(UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier));
 		return;
 	}
 
@@ -128,11 +137,7 @@ void UKzDialogueNotify_PlaySound::Notify_Implementation(const FKzDialogueNotifyC
 	}
 	else
 	{
-		// Same as the bPlay2D path: don't let the fallback 2D sound survive SetGamePaused.
-		if (UAudioComponent* Audio = UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier))
-		{
-			Audio->bIsUISound = false;
-		}
+		KzDialogueNotifyInternal::MakePausableWithGame(UGameplayStatics::SpawnSound2D(this, Sound, VolumeMultiplier, PitchMultiplier));
 	}
 }
 
