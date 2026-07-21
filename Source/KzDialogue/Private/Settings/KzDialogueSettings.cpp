@@ -3,6 +3,8 @@
 #include "Settings/KzDialogueSettings.h"
 #include "Sound/SoundClass.h"
 
+UE_DISABLE_OPTIMIZATION
+
 namespace Kz::Tags::Dialogue
 {
 	UE_DEFINE_GAMEPLAY_TAG(MainChannel, "Dialogue.Channel.Main");
@@ -60,11 +62,20 @@ const FKzDialogueChannelDefinition* UKzDialogueSettings::FindChannel(const FGame
 
 FGameplayTag UKzDialogueSettings::FindChannelForSoundClass(const USoundClass* SoundClass) const
 {
-	if (!SoundClass) { return FGameplayTag(); }
-
+	// Walk up the SoundClass hierarchy: an exact entry is a deliberate override and wins, else the
+	// nearest mapped ancestor applies, so sub-classes route without hand-adding each one.
 	// TSoftObjectPtr keys hash by path, so a pointer-built key matches the configured entry.
-	const FGameplayTag* Found = SoundClassChannels.Find(TSoftObjectPtr<USoundClass>(const_cast<USoundClass*>(SoundClass)));
-
-	// An entry mapped to an invalid channel counts as unmapped: the resolution chain moves on.
-	return (Found && Found->IsValid()) ? *Found : FGameplayTag();
+	// An entry mapped to an invalid channel counts as unmapped: the walk (and chain) move on.
+	int32 Guard = 32; // authored hierarchies are shallow; bail out on a pathological cycle
+	for (const USoundClass* Current = SoundClass; Current && Guard-- > 0; Current = Current->ParentClass)
+	{
+		const FGameplayTag* Found = SoundClassChannels.Find(TSoftObjectPtr<USoundClass>(const_cast<USoundClass*>(Current)));
+		if (Found && Found->IsValid())
+		{
+			return *Found;
+		}
+	}
+	return FGameplayTag();
 }
+
+UE_ENABLE_OPTIMIZATION
