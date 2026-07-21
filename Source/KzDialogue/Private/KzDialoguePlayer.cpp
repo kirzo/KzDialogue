@@ -215,6 +215,12 @@ void UKzDialoguePlayer::Interrupt()
 	FinishWithReason(EKzDialogueFinishReason::Interrupted);
 }
 
+void UKzDialoguePlayer::StopAllAudio(float FadeTime)
+{
+	StopLineAudio(FadeTime);
+	StopReleasedAudios(FadeTime);
+}
+
 void UKzDialoguePlayer::Skip()
 {
 	AdvanceCurrentLine();

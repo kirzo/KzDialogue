@@ -190,6 +190,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Interrupt();
 
+	/**
+	 * Hard-stop every audio this player spawned — the current line's (even if still waiting on its
+	 * AudioStartDelay) and any released Continue-policy tails — without touching dialogue state.
+	 * Useful when the player is already Idle but tails are still ringing (e.g. a sequence stopped).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
+	void StopAllAudio(float FadeTime = 0.1f);
+
 	/** Skip the current line (cancel its timer and immediately enter LineExiting). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Skip();

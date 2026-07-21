@@ -316,15 +316,33 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 		return;
 	}
 
-	// Stop any in-flight animations and untrack them.
+	// Stop any in-flight animations and untrack them. StopAnimation re-enters OnAnimationFinished
+	// synchronously, which removes from ActiveAnimations and may add the next phase's fade — so
+	// never stop while iterating the map: collect first (same pattern as ApplyMute).
+	TArray<UWidgetAnimation*> ToStop;
+	for (const auto& Pair : ActiveAnimations)
+	{
+		if (Pair.Value.Get() == InPlayer)
+		{
+			if (UWidgetAnimation* Anim = Pair.Key.Get())
+			{
+				ToStop.Add(Anim);
+			}
+		}
+	}
+	for (UWidgetAnimation* Anim : ToStop)
+	{
+		StopAnimation(Anim);
+	}
+
+	// OnAnimationFinished untracked what it saw; sweep whatever remains for this player (stale
+	// weak anims, or animations that were no longer playing so their stop never notified).
 	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
 	{
-		if (It->Value.Get() != InPlayer) { continue; }
-		if (UWidgetAnimation* Anim = It->Key.Get())
+		if (It->Value.Get() == InPlayer || !It->Value.IsValid())
 		{
-			StopAnimation(Anim);
+			It.RemoveCurrent();
 		}
-		It.RemoveCurrent();
 	}
 
 	// Snap the channel to a clean visual state without playing exit animations: a hard

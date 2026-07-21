@@ -26,6 +26,9 @@ struct FMovieSceneKzDialogueSectionState : IPersistentEvaluationData
 
 	/** Last status we saw on Evaluate. Used to detect Playing -> Paused transitions. */
 	EMovieScenePlayerStatus::Type LastStatus = EMovieScenePlayerStatus::Stopped;
+
+	/** Last evaluated time (tick resolution). TearDown compares it against the section end to tell natural flow-past from a cut. */
+	FFrameTime LastEvalTime;
 };
 
 /**
@@ -47,6 +50,15 @@ struct FMovieSceneKzDialogueSectionTemplate : public FMovieSceneEvalTemplate
 	UPROPERTY() bool bSuppressAudio = false;
 	UPROPERTY() FFrameNumber SectionStartFrame;
 	UPROPERTY() float SectionDurationSeconds = 0.0f;
+
+	/** Exclusive section end (tick resolution), for TearDown's natural-flow-past test. */
+	UPROPERTY() FFrameNumber SectionEndFrame;
+
+	/** How close (in tick-resolution frames) the last evaluation must be to the section end to count as natural flow-past. */
+	UPROPERTY() FFrameNumber NaturalEndThresholdFrames;
+
+	/** Opt in to Setup/TearDown: without these flags the evaluation system never calls them. */
+	virtual void SetupOverrides() override { EnableOverrides(RequiresSetupFlag | RequiresTearDownFlag); }
 
 	virtual UScriptStruct& GetScriptStructImpl() const override;
 	virtual void Setup(FPersistentEvaluationData& PersistentData, IMovieScenePlayer& Player) const override;
