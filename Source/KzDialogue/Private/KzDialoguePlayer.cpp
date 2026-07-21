@@ -215,6 +215,12 @@ void UKzDialoguePlayer::Interrupt()
 	FinishWithReason(EKzDialogueFinishReason::Interrupted);
 }
 
+void UKzDialoguePlayer::StopAllAudio(float FadeTime)
+{
+	StopLineAudio(FadeTime);
+	StopReleasedAudios(FadeTime);
+}
+
 void UKzDialoguePlayer::Skip()
 {
 	AdvanceCurrentLine();
@@ -496,9 +502,10 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	}
 	ActiveAudio->bAutoDestroy = true;
 
-	// CreateSound2D marks the component as a UI sound, which the audio device deliberately keeps
-	// playing through SetGamePaused; dialogue must pause with the game.
-	ActiveAudio->bIsUISound = false;
+	// The UI-sound flag doubles as "keep playing while the game isn't ticking". In game worlds we
+	// clear it so dialogue pauses with SetGamePaused; in the editor world (Sequencer preview) the
+	// game never ticks, so clearing it would mute preview playback entirely.
+	ActiveAudio->bIsUISound = !World->IsGameWorld();
 
 	// Apply audio params from the property bag. Each value is forwarded to the audio
 	// component using the type-appropriate setter.

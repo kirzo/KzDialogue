@@ -63,7 +63,8 @@ public:
 	 * Routes lines to a channel through their audio's SoundClass. Consulted by the channel
 	 * resolution chain between the line's own DefaultChannel and the asset's: a line whose
 	 * audio uses a mapped SoundClass plays on the mapped channel unless something more
-	 * specific says otherwise.
+	 * specific says otherwise. Matches hierarchically: an unmapped SoundClass inherits the
+	 * nearest mapped ancestor's channel, and an exact entry overrides the hierarchy.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Channels", meta = (Categories = "Dialogue.Channel"))
 	TMap<TSoftObjectPtr<USoundClass>, FGameplayTag> SoundClassChannels;
@@ -71,6 +72,6 @@ public:
 	/** Lookup helper. Returns nullptr if the channel is not defined. */
 	const FKzDialogueChannelDefinition* FindChannel(const FGameplayTag& Tag) const;
 
-	/** Channel mapped to a SoundClass, or an empty tag when unmapped (or mapped to an invalid channel). */
+	/** Channel mapped to a SoundClass or its nearest mapped ancestor; empty when the whole parent chain is unmapped (or maps to invalid channels). */
 	FGameplayTag FindChannelForSoundClass(const USoundClass* SoundClass) const;
 };
