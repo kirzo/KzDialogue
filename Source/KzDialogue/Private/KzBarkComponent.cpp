@@ -78,13 +78,21 @@ void UKzBarkComponent::StopBarking()
 
 	UnbindChannelPlayer();
 
-	// Cut a bark that's currently playing. Only when we were actually running, and only if the subsystem
-	// is still around (it may be gone during teardown).
+	// Cut a bark that's currently playing — ours only. bBarkInFlight can be stale after a hot-swap
+	// (story content replacing our bark on a shared channel), and StopChannel would kill that
+	// content; only stop the player when its current line actually is one of our bark's lines.
+	// Subsystem may be gone during teardown.
 	if (bWasActive)
 	{
 		if (UKzDialogueSubsystem* Subsystem = GetSubsystem())
 		{
-			Subsystem->StopChannel(Channel);
+			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(Channel))
+			{
+				if (Player->IsPlaying() && Player->ResolveLineRefToMatchSet(Bark).Contains(Player->GetCurrentLine().LineId))
+				{
+					Player->Stop();
+				}
+			}
 		}
 	}
 }

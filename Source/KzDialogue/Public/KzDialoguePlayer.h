@@ -282,6 +282,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	float GetSpeakingLevel() const { return SpeakingLevel; }
 
+	/**
+	 * Resolve a FKzDialogueLineRef into the set of LineIds it represents.
+	 * - Line GUID: one entry (the GUID itself).
+	 * - Alias GUID: every LineId the alias resolves to.
+	 * Returns an empty set if the ref is invalid or the asset can't load. Public so callers that
+	 * launched a ref (async actions, barks) can test whether the current line is theirs.
+	 */
+	TSet<FGuid> ResolveLineRefToMatchSet(const FKzDialogueLineRef& LineRef) const;
+
 	//~ UObject
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
@@ -410,14 +419,6 @@ private:
 
 	TArray<FSpecificLineBinding> SpecificLineStartedBindings;
 	TArray<FSpecificLineBinding> SpecificLineFinishedBindings;
-
-	/**
-	 * Resolve a FKzDialogueLineRef into the set of LineIds it represents.
-	 * - Line GUID: one entry (the GUID itself).
-	 * - Alias GUID: every LineId the alias resolves to.
-	 * Returns an empty set if the ref is invalid or the asset can't load.
-	 */
-	TSet<FGuid> ResolveLineRefToMatchSet(const FKzDialogueLineRef& LineRef) const;
 
 	/** Iterate Bindings, invoke matching callbacks, prune auto-unbind ones. */
 	void DispatchSpecificLineEvent(TArray<FSpecificLineBinding>& Bindings, const FKzDialogueLine& Line);

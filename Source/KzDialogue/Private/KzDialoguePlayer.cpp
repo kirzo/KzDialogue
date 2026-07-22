@@ -14,6 +14,8 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
+UE_DISABLE_OPTIMIZATION
+
 namespace
 {
 	/** Sigmoid contrast around 0.5: Contrast 1 = linear, >1 pushes toward 0/1 (crisper open/close), <1 softens toward 0.5. */
@@ -185,6 +187,9 @@ void UKzDialoguePlayer::Abort()
 {
 	if (State == EKzDialogueState::Idle)
 	{
+		// Nothing to abort, but Continue-policy tails may outlive the dialogue: a hard stop on an
+		// idle player means "silence the channel".
+		StopReleasedAudios(0.0f);
 		return;
 	}
 
@@ -202,6 +207,8 @@ void UKzDialoguePlayer::Interrupt()
 {
 	if (State == EKzDialogueState::Idle)
 	{
+		// Same as Abort: an interrupt on an idle player still silences ringing released tails.
+		StopReleasedAudios(0.1f);
 		return;
 	}
 
@@ -1059,3 +1066,5 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogue
 	Context.EventEnd = Entry.End;
 	return Context;
 }
+
+UE_ENABLE_OPTIMIZATION

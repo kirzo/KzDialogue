@@ -35,7 +35,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue")
 	virtual void Stop();
 
-	/** Interrupts the dialogue immediately and resolves the action as Cancelled. No-op once finished. */
+	/**
+	 * Interrupts the dialogue immediately and resolves the action as Cancelled. After the action
+	 * resolved it still works as "silence what I launched": it interrupts this action's own line
+	 * while it winds down (exit fades / audio outliving the line) and stops Continue-policy tails
+	 * ringing on the idle channel — but never touches content that took the channel afterwards.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue")
 	virtual void Interrupt();
 
@@ -68,11 +73,21 @@ protected:
 	/** The dialogue ended before the awaited line(s) completed. Leaf actions broadcast Cancelled and tear down. */
 	virtual void NotifyCancelled() {}
 
+	/**
+	 * True when Line is content this action launched (the awaited ref / entries). Drives the
+	 * post-resolve Interrupt's ours-only check: the specific-line Finished fires when the line's
+	 * EXIT starts, so the action can be resolved while its own dialogue (fades, audio) still runs.
+	 */
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const { return false; }
+
 	UPROPERTY(Transient)
 	TObjectPtr<UObject> WorldContext;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialoguePlayer> DialoguePlayer;
+
+	/** Weak shadow of DialoguePlayer surviving SetReadyToDestroy, so a late Interrupt can still silence tails. */
+	TWeakObjectPtr<UKzDialoguePlayer> WeakDialoguePlayer;
 
 	FGameplayTag Channel;
 	int32 Priority = -1;
@@ -113,6 +128,7 @@ protected:
 	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
 	virtual void NotifyCancelled() override;
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const override;
 
 	/** Line awaited by this action. */
 	FKzDialogueLineRef LaunchRef;
@@ -174,6 +190,7 @@ protected:
 
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
 	virtual void NotifyCancelled() override;
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const override;
 
 	/** Binds the next awaitable entry starting at CurrentIndex, skipping unresolvable ones. False when none is left. */
 	bool BindNextEntry();
