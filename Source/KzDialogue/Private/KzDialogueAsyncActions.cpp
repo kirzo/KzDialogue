@@ -8,8 +8,6 @@
 #include "KzDialogueSubsystem.h"
 #include "Engine/World.h"
 
-UE_DISABLE_OPTIMIZATION
-
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueAsync, Log, All);
 
 // ------------------------------------------------------------------------------------------------
@@ -476,5 +474,3 @@ void UKzAsyncPlayDialogueAsset::NotifyCancelled()
 	Cancelled.Broadcast(Session ? Session->GetCurrentPlayer() : nullptr, FKzDialogueLine());
 	SetReadyToDestroy();
 }
-
-UE_ENABLE_OPTIMIZATION

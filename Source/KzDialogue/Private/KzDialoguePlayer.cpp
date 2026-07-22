@@ -14,8 +14,6 @@
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
-UE_DISABLE_OPTIMIZATION
-
 namespace
 {
 	/** Sigmoid contrast around 0.5: Contrast 1 = linear, >1 pushes toward 0/1 (crisper open/close), <1 softens toward 0.5. */
@@ -1066,5 +1064,3 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogue
 	Context.EventEnd = Entry.End;
 	return Context;
 }
-
-UE_ENABLE_OPTIMIZATION

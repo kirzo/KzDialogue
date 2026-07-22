@@ -11,8 +11,6 @@
 #include "Algo/RandomShuffle.h"
 #include "Sound/SoundBase.h"
 
-UE_DISABLE_OPTIMIZATION
-
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
 
 void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -677,5 +675,3 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 
 	return FGuid();
 }
-
-UE_ENABLE_OPTIMIZATION
