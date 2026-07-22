@@ -65,7 +65,12 @@ void FMovieSceneKzDialogueSectionTemplate::TearDown(FPersistentEvaluationData& P
 	UWorld* World = PlaybackContextObj ? PlaybackContextObj->GetWorld() : nullptr;
 	if (UKzDialogueSubsystem* Sub = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr)
 	{
-		if (UKzDialoguePlayer* DialoguePlayer = Sub->FindPlayer(Channel))
+		// The line may not play on the track's raw Channel: an empty channel resolves through the
+		// line's DefaultChannel / audio SoundClass mapping. Resolve with the same chain the play
+		// path uses so we target the player the line actually landed on.
+		const FGameplayTag EffectiveChannel = Sub->ResolveChannelForEntry(Channel, Asset, LineId);
+
+		if (UKzDialoguePlayer* DialoguePlayer = Sub->FindPlayer(EffectiveChannel))
 		{
 			// Ours-only guard: never kill a dialogue triggered by something else sharing the channel.
 			const bool bOwnLineActive = DialoguePlayer->IsPlaying() && DialoguePlayer->GetCurrentLine().LineId == LineId;
@@ -82,7 +87,7 @@ void FMovieSceneKzDialogueSectionTemplate::TearDown(FPersistentEvaluationData& P
 				// Graceful: subtitle fades, audio tail policies and back-to-back hot-swaps as authored.
 				if (bOwnLineActive)
 				{
-					Sub->StopChannel(Channel);
+					Sub->StopChannel(EffectiveChannel);
 				}
 			}
 			else if (bOwnLineActive)
@@ -130,6 +135,11 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 			UKzDialogueSubsystem* Sub = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
 			if (!IsValid(Sub)) { return; }
 
+			// Same resolution the play path applies (see TearDown). Resolved from the AUTHORED line
+			// (audio intact), so bSuppressAudio can't skew the channel, and passed explicitly to
+			// PlayLine below so fire/pause/resume/teardown all agree on one player.
+			const FGameplayTag EffectiveChannel = Sub->ResolveChannelForEntry(Channel, WeakAsset.Get(), LineId);
+
 			switch (Action)
 			{
 			case EAction::FireIfNew:
@@ -152,13 +162,13 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 				// PlayLine respects channel and asset interruption rules; if rejected,
 				// we still mark as fired so we don't keep retrying every frame the
 				// section is active. The caller can re-trigger with Stop+Play.
-				Sub->PlayLine(LineCopy, Channel);
+				Sub->PlayLine(LineCopy, EffectiveChannel);
 				State.bFired = true;
 				break;
 			}
 
 			case EAction::Pause:
-				if (UKzDialoguePlayer* P = Sub->FindPlayer(Channel))
+				if (UKzDialoguePlayer* P = Sub->FindPlayer(EffectiveChannel))
 				{
 					if (P->IsPlaying() && P->GetCurrentLine().LineId == LineId)
 					{
@@ -168,7 +178,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 				break;
 
 			case EAction::Resume:
-				if (UKzDialoguePlayer* P = Sub->FindPlayer(Channel))
+				if (UKzDialoguePlayer* P = Sub->FindPlayer(EffectiveChannel))
 				{
 					if (P->GetState() == EKzDialogueState::Paused && P->GetCurrentLine().LineId == LineId)
 					{
