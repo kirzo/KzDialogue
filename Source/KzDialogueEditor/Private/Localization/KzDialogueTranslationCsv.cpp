@@ -65,6 +65,104 @@ bool FKzDialogueTranslationCsv::ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& 
 	return true;
 }
 
+bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError)
+{
+	FKzLocTargetInfo Target;
+	if (!ReadLocTargetInfo(Target, OutError)) { return false; }
+
+	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError))
+	{
+		OutError = FText::Format(LOCTEXT("CoverageNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), OutError);
+		return false;
+	}
+
+	// A culture whose archive is missing simply counts as fully untranslated.
+	TSet<FString> LoadedCultures;
+	for (const FString& Culture : Target.ForeignCultures)
+	{
+		if (LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr))
+		{
+			LoadedCultures.Add(Culture);
+		}
+	}
+
+	// Same per-text unit as the CSV export: line text plus optional speaker override.
+	struct FKzCoverageText
+	{
+		UKzDialogueAsset* Asset = nullptr;
+		int32 LineIndex = 0;
+		FString Namespace;
+		FString Key;
+		FString Source;
+	};
+	TArray<FKzCoverageText> Texts;
+	TArray<FString> VoicedPackages;
+	for (UKzDialogueAsset* Asset : Assets)
+	{
+		if (!Asset) { continue; }
+		for (int32 i = 0; i < Asset->Lines.Num(); ++i)
+		{
+			const FKzDialogueLine& Line = Asset->Lines[i];
+			auto AddText = [&](const FText& Source)
+			{
+				const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+				const TOptional<FString> Key = FTextInspector::GetKey(Source);
+				const FString* SourceString = FTextInspector::GetSourceString(Source);
+				if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+				Texts.Add({ Asset, i, Namespace.GetValue(), Key.GetValue(), *SourceString });
+			};
+			AddText(Line.Text);
+			AddText(Line.Speaker.DisplayNameOverride);
+
+			// Audio localization is plain data, no project policy: subtitles-only projects read 0/N and move on.
+			if (!Line.Audio.IsNull())
+			{
+				VoicedPackages.Add(Line.Audio.ToSoftObjectPath().GetLongPackageName());
+			}
+		}
+	}
+
+	for (const FString& Culture : Target.ForeignCultures)
+	{
+		FKzCultureCoverage& Coverage = OutCultures.AddDefaulted_GetRef();
+		Coverage.Culture = Culture;
+		Coverage.Total = Texts.Num();
+		Coverage.VoicedLines = VoicedPackages.Num();
+
+		if (LoadedCultures.Contains(Culture))
+		{
+			for (const FKzCoverageText& Text : Texts)
+			{
+				const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
+				if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
+
+				if (Entry->Source.Text == Text.Source)
+				{
+					++Coverage.Translated;
+				}
+				else
+				{
+					++Coverage.Stale;
+					OutStale.Add({ Text.Asset, Text.LineIndex, Text.Key, Culture });
+				}
+			}
+		}
+		Coverage.Missing = Coverage.Total - Coverage.Translated - Coverage.Stale;
+
+		for (const FString& SourcePackage : VoicedPackages)
+		{
+			FString LocalizedPackage;
+			if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackage, Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
+			{
+				++Coverage.LocalizedAudio;
+			}
+		}
+	}
+
+	return true;
+}
+
 namespace
 {
 	FString CsvEscape(const FString& Value)
@@ -194,119 +292,39 @@ namespace
 		}
 		if (Assets.IsEmpty()) { return; }
 
-		FKzLocTargetInfo Target;
+		TArray<FKzCultureCoverage> Cultures;
+		TArray<FKzStaleTranslation> Stale;
 		FText Error;
-		if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error))
+		if (!FKzDialogueTranslationCsv::BuildCoverage(Assets, Cultures, Stale, Error))
 		{
 			ShowNotification(Error, false);
 			return;
 		}
 
-		FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-		if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &Error))
-		{
-			ShowNotification(FText::Format(LOCTEXT("CoverageNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), Error), false);
-			return;
-		}
-
-		// A culture whose archive is missing simply counts as fully untranslated.
-		TSet<FString> LoadedCultures;
-		for (const FString& Culture : Target.ForeignCultures)
-		{
-			if (LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr))
-			{
-				LoadedCultures.Add(Culture);
-			}
-		}
-
-		// Same per-text unit as the CSV export: line text plus optional speaker override.
-		struct FKzCoverageText
-		{
-			UKzDialogueAsset* Asset = nullptr;
-			int32 LineIndex = 0;
-			FString Namespace;
-			FString Key;
-			FString Source;
-		};
-		TArray<FKzCoverageText> Texts;
-		for (UKzDialogueAsset* Asset : Assets)
-		{
-			for (int32 i = 0; i < Asset->Lines.Num(); ++i)
-			{
-				const FKzDialogueLine& Line = Asset->Lines[i];
-				auto AddText = [&](const FText& Source)
-				{
-					const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-					const TOptional<FString> Key = FTextInspector::GetKey(Source);
-					const FString* SourceString = FTextInspector::GetSourceString(Source);
-					if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
-					Texts.Add({ Asset, i, Namespace.GetValue(), Key.GetValue(), *SourceString });
-				};
-				AddText(Line.Text);
-				AddText(Line.Speaker.DisplayNameOverride);
-			}
-		}
-
-		// Audio localization is reported as plain fact, no project policy involved: a
-		// subtitles-only project reads "audio 0/N localized" and moves on.
-		TArray<FString> VoicedPackages;
-		for (const UKzDialogueAsset* Asset : Assets)
-		{
-			for (const FKzDialogueLine& Line : Asset->Lines)
-			{
-				if (!Line.Audio.IsNull())
-				{
-					VoicedPackages.Add(Line.Audio.ToSoftObjectPath().GetLongPackageName());
-				}
-			}
-		}
-
 		FMessageLog Log(TEXT("KzDialogueL10N"));
-		Log.NewPage(FText::Format(LOCTEXT("CoveragePageTitle", "Coverage - target '{0}'"), FText::FromString(Target.TargetName)));
-		Log.Info(FText::Format(LOCTEXT("CoverageHeader", "{0} asset(s), {1} localizable text(s)."), Assets.Num(), Texts.Num()));
+		Log.NewPage(LOCTEXT("CoveragePageTitle", "Translation coverage"));
+		Log.Info(FText::Format(LOCTEXT("CoverageHeader", "{0} asset(s), {1} localizable text(s)."), Assets.Num(), Cultures.Num() > 0 ? Cultures[0].Total : 0));
 
-		for (const FString& Culture : Target.ForeignCultures)
+		for (const FKzCultureCoverage& Coverage : Cultures)
 		{
-			int32 Translated = 0;
-			TArray<const FKzCoverageText*> StaleTexts;
-			if (LoadedCultures.Contains(Culture))
-			{
-				for (const FKzCoverageText& Text : Texts)
-				{
-					const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
-					if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
-					if (Entry->Source.Text == Text.Source) { ++Translated; } else { StaleTexts.Add(&Text); }
-				}
-			}
-
-			const int32 Missing = Texts.Num() - Translated - StaleTexts.Num();
 			FText CultureLine = FText::Format(LOCTEXT("CoverageCulture", "{0}: {1}/{2} translated, {3} missing, {4} stale."),
-				FText::FromString(Culture), Translated, Texts.Num(), Missing, StaleTexts.Num());
+				FText::FromString(Coverage.Culture), Coverage.Translated, Coverage.Total, Coverage.Missing, Coverage.Stale);
 
-			if (VoicedPackages.Num() > 0)
+			if (Coverage.VoicedLines > 0)
 			{
-				int32 LocalizedAudio = 0;
-				for (const FString& SourcePackage : VoicedPackages)
-				{
-					FString LocalizedPackage;
-					if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackage, Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
-					{
-						++LocalizedAudio;
-					}
-				}
-				CultureLine = FText::Format(LOCTEXT("CoverageCultureAudio", "{0} Audio: {1}/{2} localized."), CultureLine, LocalizedAudio, VoicedPackages.Num());
+				CultureLine = FText::Format(LOCTEXT("CoverageCultureAudio", "{0} Audio: {1}/{2} localized."), CultureLine, Coverage.LocalizedAudio, Coverage.VoicedLines);
 			}
 
 			Log.Info(CultureLine);
+		}
 
-			// Stale entries are the actionable ones: translated against an older source, need review.
-			for (const FKzCoverageText* Text : StaleTexts)
-			{
-				Log.Warning()
-					->AddToken(FUObjectToken::Create(Text->Asset))
-					->AddToken(FTextToken::Create(FText::Format(LOCTEXT("CoverageStale", "line {0} ({1}): '{2}' translation predates the current source text; needs review."),
-						Text->LineIndex + 1, FText::FromString(Text->Key), FText::FromString(Culture))));
-			}
+		// Stale entries are the actionable ones: translated against an older source, need review.
+		for (const FKzStaleTranslation& Entry : Stale)
+		{
+			Log.Warning()
+				->AddToken(FUObjectToken::Create(Entry.Asset))
+				->AddToken(FTextToken::Create(FText::Format(LOCTEXT("CoverageStale", "line {0} ({1}): '{2}' translation predates the current source text; needs review."),
+					Entry.LineIndex + 1, FText::FromString(Entry.Key), FText::FromString(Entry.Culture))));
 		}
 
 		Log.Open(EMessageSeverity::Info, true);

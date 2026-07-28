@@ -17,6 +17,39 @@ struct FKzLocTargetInfo
 	TArray<FString> ForeignCultures;
 };
 
+/** Per-culture translation coverage counters. */
+struct FKzCultureCoverage
+{
+	FString Culture;
+
+	/** Localizable texts in the queried assets (line texts + speaker overrides). */
+	int32 Total = 0;
+
+	/** Texts with a translation matching the current source. */
+	int32 Translated = 0;
+
+	/** Texts with a translation that predates the current source; needs review. */
+	int32 Stale = 0;
+
+	/** Texts with no translation at all. */
+	int32 Missing = 0;
+
+	/** Lines with source audio. */
+	int32 VoicedLines = 0;
+
+	/** Voiced lines whose audio has a localized variant for this culture. */
+	int32 LocalizedAudio = 0;
+};
+
+/** One stale translation: it predates the current source text and needs review. */
+struct FKzStaleTranslation
+{
+	UKzDialogueAsset* Asset = nullptr;
+	int32 LineIndex = 0;
+	FString Key;
+	FString Culture;
+};
+
 /** Result counters for a translation CSV import. */
 struct FKzTranslationImportStats
 {
@@ -58,4 +91,7 @@ public:
 
 	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
 	static bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
+
+	/** Computes per-culture coverage counters plus the stale-translation list for the given assets. Fails when the localization target or its manifest cannot be read. */
+	static bool BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError);
 };

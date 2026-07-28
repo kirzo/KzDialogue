@@ -19,6 +19,7 @@
 
 #include "Editors/KzArrayAssetEditor.h"
 #include "Localization/KzDialogueTranslationCsv.h"
+#include "Localization/SKzDialogueCoveragePanel.h"
 
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
@@ -43,12 +44,26 @@ void FKzDialogueEditorModule::OnStartupModule()
 		INVTEXT("Alias"),
 		MakeShared<FKzDialogueAliasRowCustomizer>()));
 
+	// Extra non-array tab: per-culture localization coverage.
+	TArray<FKzCustomEditorTabConfig> DialogueCustomTabs;
+	{
+		FKzCustomEditorTabConfig& CoverageTab = DialogueCustomTabs.AddDefaulted_GetRef();
+		CoverageTab.TabId = TEXT("KzDialogue_L10NCoverage");
+		CoverageTab.Label = INVTEXT("Localization");
+		CoverageTab.IconStyleName = TEXT("LevelEditor.Tabs.StatsViewer");
+		CoverageTab.MakeWidget = [](UObject* Asset) -> TSharedRef<SWidget>
+		{
+			return SNew(SKzDialogueCoveragePanel, Cast<UKzDialogueAsset>(Asset));
+		};
+	}
+
 	RegisterAssetTypeAction<UKzDialogueAsset, FKzArrayAssetEditor>(
 		KzAssetCategoryBit,
 		INVTEXT("Dialogue"),
 		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
 		{ INVTEXT("Dialogues") },
-		DialogueTabs);
+		DialogueTabs,
+		DialogueCustomTabs);
 
 	RegisterPropertyLayout<FKzDialogueAlias, FKzDialogueAliasCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineRef, FKzDialogueLineRefCustomization>();
