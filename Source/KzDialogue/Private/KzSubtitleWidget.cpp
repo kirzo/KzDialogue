@@ -4,6 +4,7 @@
 
 #include "Components/TextBlock.h"
 #include "Animation/WidgetAnimation.h"
+#include "Internationalization/Culture.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
 #include "Engine/World.h"
@@ -516,7 +517,7 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	{
 		FString FinalSpeakerName = Line.Speaker.GetDisplayLabel().ToString();
 
-		for (const FKzSpeakerAffixRule& Rule : SpeakerFormattingRules)
+		for (const FKzSpeakerAffixRule& Rule : GetActiveSpeakerFormattingRules())
 		{
 			const FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
 			if (Rule.Position == EKzSpeakerAffixPosition::Prefix)
@@ -538,6 +539,24 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	}
 
 	ReceiveSetupLine(Channel, Line);
+}
+
+const TArray<FKzSpeakerAffixRule>& UKzSubtitleWidget::GetActiveSpeakerFormattingRules() const
+{
+	if (SpeakerFormattingRulesPerCulture.Num() > 0)
+	{
+		FInternationalization& I18N = FInternationalization::Get();
+		const FString CurrentCulture = I18N.GetCurrentCulture()->GetName();
+		for (const FString& CultureName : I18N.GetPrioritizedCultureNames(CurrentCulture))
+		{
+			if (const FKzSpeakerFormattingRuleSet* Override = SpeakerFormattingRulesPerCulture.Find(CultureName))
+			{
+				return Override->Rules;
+			}
+		}
+	}
+
+	return SpeakerFormattingRules;
 }
 
 // ---------------------------------------------------------------------------------------

@@ -39,6 +39,16 @@ struct FKzSpeakerAffixRule
 	bool bAddSpace = false;
 };
 
+/** Set of speaker affix rules, used as a per-culture override of SpeakerFormattingRules. */
+USTRUCT(BlueprintType)
+struct FKzSpeakerFormattingRuleSet
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TArray<FKzSpeakerAffixRule> Rules;
+};
+
 /**
  * View-level mute rule: while any bound player whose channel matches Channel is playing,
  * lines from channels matching MutedChannels are not rendered by this widget. Both sides
@@ -179,9 +189,18 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
 	TArray<FKzSubtitleMuteRule> MuteRules;
 
-	/** Rules applied sequentially to format the speaker's name. */
+	/** Rules applied sequentially to format the speaker's name. Default for every culture without an override in SpeakerFormattingRulesPerCulture. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
 	TArray<FKzSpeakerAffixRule> SpeakerFormattingRules;
+
+	/**
+	 * Per-culture overrides of SpeakerFormattingRules, keyed by culture code ("ja", "es-MX").
+	 * Resolution follows the culture priority chain (es-MX falls back to es before the default),
+	 * so typographic conventions can change per language. An entry with an empty rule list is a
+	 * valid override meaning "no affixes for this culture".
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
+	TMap<FString, FKzSpeakerFormattingRuleSet> SpeakerFormattingRulesPerCulture;
 
 	/**
 	 * Resolve the view bundle for a channel. Subclass must override this and return
@@ -261,6 +280,9 @@ private:
 
 	/** Apply line text to the given view's widgets (handling affix rules etc.). */
 	void ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel);
+
+	/** Speaker formatting rules for the active culture: the per-culture override when one matches the culture priority chain, SpeakerFormattingRules otherwise. */
+	const TArray<FKzSpeakerAffixRule>& GetActiveSpeakerFormattingRules() const;
 
 	/** Start an animation and remember which player it belongs to. */
 	void PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePlayer* InPlayer);
