@@ -3,8 +3,6 @@
 #include "Settings/KzDialogueSettings.h"
 #include "Sound/SoundClass.h"
 
-UE_DISABLE_OPTIMIZATION
-
 namespace Kz::Tags::Dialogue
 {
 	UE_DEFINE_GAMEPLAY_TAG(MainChannel, "Dialogue.Channel.Main");
@@ -77,5 +75,3 @@ FGameplayTag UKzDialogueSettings::FindChannelForSoundClass(const USoundClass* So
 	}
 	return FGameplayTag();
 }
-
-UE_ENABLE_OPTIMIZATION

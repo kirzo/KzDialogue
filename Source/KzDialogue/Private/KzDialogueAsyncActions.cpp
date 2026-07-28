@@ -36,6 +36,7 @@ bool UKzAsyncDialogueAction::AcquirePlayer()
 	}
 
 	DialoguePlayer = Player;
+	WeakDialoguePlayer = Player;
 	return true;
 }
 
@@ -98,7 +99,21 @@ void UKzAsyncDialogueAction::Stop()
 
 void UKzAsyncDialogueAction::Interrupt()
 {
-	if (!DialoguePlayer) return;
+	if (!DialoguePlayer)
+	{
+		// Already resolved. Two legitimate late-interrupt targets remain: an idle channel ringing
+		// our Continue-policy tails, and OUR OWN line still winding down — the specific-line
+		// Finished fires when the line's exit STARTS, so this action can be resolved while its
+		// line's fades and audio are still live. Foreign content on the channel is never touched.
+		if (UKzDialoguePlayer* Late = WeakDialoguePlayer.Get())
+		{
+			if (!Late->IsPlaying() || IsOwnContent(*Late, Late->GetCurrentLine()))
+			{
+				Late->Interrupt();
+			}
+		}
+		return;
+	}
 
 	UKzDialoguePlayer* Player = DialoguePlayer;
 	CleanupBindings();
@@ -174,6 +189,11 @@ void UKzAsyncPlayDialogueLine::NotifyCancelled()
 {
 	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
 	SetReadyToDestroy();
+}
+
+bool UKzAsyncPlayDialogueLine::IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const
+{
+	return Player.ResolveLineRefToMatchSet(LaunchRef).Contains(Line.LineId);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -282,6 +302,18 @@ void UKzAsyncDialogueSequenceAction::NotifyCancelled()
 {
 	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
 	SetReadyToDestroy();
+}
+
+bool UKzAsyncDialogueSequenceAction::IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const
+{
+	for (const FKzDialogueLineRef& Ref : EntryRefs)
+	{
+		if (Player.ResolveLineRefToMatchSet(Ref).Contains(Line.LineId))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 // ------------------------------------------------------------------------------------------------
