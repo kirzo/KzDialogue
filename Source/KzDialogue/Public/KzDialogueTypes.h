@@ -123,7 +123,12 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (MultiLine = true))
 	FText Text;
 
-	/** Optional line audio. */
+	/**
+	 * Optional line audio. Localized VO uses UE's built-in asset localization: place the
+	 * per-culture variant under Content/L10N/<culture>/ mirroring this asset's path, and the
+	 * soft pointer resolves to the active culture's package automatically. No per-culture
+	 * mapping is stored on the line.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	TSoftObjectPtr<USoundBase> Audio;
 
