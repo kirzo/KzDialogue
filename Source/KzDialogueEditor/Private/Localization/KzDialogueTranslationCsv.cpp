@@ -7,9 +7,14 @@
 
 #include "ContentBrowserMenuContexts.h"
 #include "DesktopPlatformModule.h"
+#include "Internationalization/PackageLocalizationUtil.h"
+#include "Misc/PackageName.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
+#include "Logging/MessageLog.h"
+#include "Logging/TokenizedMessage.h"
 #include "LocTextHelper.h"
+#include "Misc/UObjectToken.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/MessageDialog.h"
@@ -22,57 +27,46 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueL10N, Log, All);
 
-namespace
+bool FKzDialogueTranslationCsv::ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError)
 {
-	/** Localization target layout resolved from the target's generated step ini. */
-	struct FKzLocTargetInfo
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	Out.TargetName = Settings ? Settings->LocalizationTargetName : TEXT("Game");
+
+	// The dashboard writes the target's cultures into every step ini; _Gather is always present.
+	const FString GatherIniPath = FPaths::Combine(FPaths::ProjectConfigDir(), TEXT("Localization"), Out.TargetName + TEXT("_Gather.ini"));
+	if (!FPaths::FileExists(GatherIniPath))
 	{
-		FString TargetName;
-		FString TargetPath;
-		FString ManifestName;
-		FString ArchiveName;
-		FString NativeCulture;
-		TArray<FString> ForeignCultures;
-	};
-
-	bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError)
-	{
-		const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
-		Out.TargetName = Settings ? Settings->LocalizationTargetName : TEXT("Game");
-
-		// The dashboard writes the target's cultures into every step ini; _Gather is always present.
-		const FString GatherIniPath = FPaths::Combine(FPaths::ProjectConfigDir(), TEXT("Localization"), Out.TargetName + TEXT("_Gather.ini"));
-		if (!FPaths::FileExists(GatherIniPath))
-		{
-			OutError = FText::Format(LOCTEXT("NoLocTarget", "Localization target '{0}' not found ({1} is missing). Create the target in the Localization Dashboard and run Gather Text once."),
-				FText::FromString(Out.TargetName), FText::FromString(GatherIniPath));
-			return false;
-		}
-
-		FConfigFile Config;
-		Config.Read(GatherIniPath);
-
-		Config.GetString(TEXT("CommonSettings"), TEXT("NativeCulture"), Out.NativeCulture);
-
-		TArray<FString> Cultures;
-		Config.GetArray(TEXT("CommonSettings"), TEXT("CulturesToGenerate"), Cultures);
-		for (const FString& Culture : Cultures)
-		{
-			if (Culture != Out.NativeCulture)
-			{
-				Out.ForeignCultures.Add(Culture);
-			}
-		}
-
-		Config.GetString(TEXT("CommonSettings"), TEXT("ManifestName"), Out.ManifestName);
-		Config.GetString(TEXT("CommonSettings"), TEXT("ArchiveName"), Out.ArchiveName);
-		if (Out.ManifestName.IsEmpty()) { Out.ManifestName = Out.TargetName + TEXT(".manifest"); }
-		if (Out.ArchiveName.IsEmpty()) { Out.ArchiveName = Out.TargetName + TEXT(".archive"); }
-
-		Out.TargetPath = FPaths::Combine(FPaths::ProjectContentDir(), TEXT("Localization"), Out.TargetName);
-		return true;
+		OutError = FText::Format(LOCTEXT("NoLocTarget", "Localization target '{0}' not found ({1} is missing). Create the target in the Localization Dashboard and run Gather Text once."),
+			FText::FromString(Out.TargetName), FText::FromString(GatherIniPath));
+		return false;
 	}
 
+	FConfigFile Config;
+	Config.Read(GatherIniPath);
+
+	Config.GetString(TEXT("CommonSettings"), TEXT("NativeCulture"), Out.NativeCulture);
+
+	TArray<FString> Cultures;
+	Config.GetArray(TEXT("CommonSettings"), TEXT("CulturesToGenerate"), Cultures);
+	for (const FString& Culture : Cultures)
+	{
+		if (Culture != Out.NativeCulture)
+		{
+			Out.ForeignCultures.Add(Culture);
+		}
+	}
+
+	Config.GetString(TEXT("CommonSettings"), TEXT("ManifestName"), Out.ManifestName);
+	Config.GetString(TEXT("CommonSettings"), TEXT("ArchiveName"), Out.ArchiveName);
+	if (Out.ManifestName.IsEmpty()) { Out.ManifestName = Out.TargetName + TEXT(".manifest"); }
+	if (Out.ArchiveName.IsEmpty()) { Out.ArchiveName = Out.TargetName + TEXT(".archive"); }
+
+	Out.TargetPath = FPaths::Combine(FPaths::ProjectContentDir(), TEXT("Localization"), Out.TargetName);
+	return true;
+}
+
+namespace
+{
 	FString CsvEscape(const FString& Value)
 	{
 		FString Escaped = Value;
@@ -140,7 +134,7 @@ namespace
 		// Wrong-file guard: warn when the file name carries a culture token that is not the chosen culture.
 		FKzLocTargetInfo Target;
 		FText TargetError;
-		if (ReadLocTargetInfo(Target, TargetError))
+		if (FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, TargetError))
 		{
 			TArray<FString> Cultures = Target.ForeignCultures;
 			if (!Target.NativeCulture.IsEmpty()) { Cultures.Add(Target.NativeCulture); }
@@ -187,6 +181,136 @@ namespace
 			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
 		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0);
 	}
+
+	void OnCoverageClicked(TArray<FAssetData> SelectedAssets)
+	{
+		TArray<UKzDialogueAsset*> Assets;
+		for (const FAssetData& Data : SelectedAssets)
+		{
+			if (UKzDialogueAsset* Asset = Cast<UKzDialogueAsset>(Data.GetAsset()))
+			{
+				Assets.Add(Asset);
+			}
+		}
+		if (Assets.IsEmpty()) { return; }
+
+		FKzLocTargetInfo Target;
+		FText Error;
+		if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error))
+		{
+			ShowNotification(Error, false);
+			return;
+		}
+
+		FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+		if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &Error))
+		{
+			ShowNotification(FText::Format(LOCTEXT("CoverageNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), Error), false);
+			return;
+		}
+
+		// A culture whose archive is missing simply counts as fully untranslated.
+		TSet<FString> LoadedCultures;
+		for (const FString& Culture : Target.ForeignCultures)
+		{
+			if (LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr))
+			{
+				LoadedCultures.Add(Culture);
+			}
+		}
+
+		// Same per-text unit as the CSV export: line text plus optional speaker override.
+		struct FKzCoverageText
+		{
+			UKzDialogueAsset* Asset = nullptr;
+			int32 LineIndex = 0;
+			FString Namespace;
+			FString Key;
+			FString Source;
+		};
+		TArray<FKzCoverageText> Texts;
+		for (UKzDialogueAsset* Asset : Assets)
+		{
+			for (int32 i = 0; i < Asset->Lines.Num(); ++i)
+			{
+				const FKzDialogueLine& Line = Asset->Lines[i];
+				auto AddText = [&](const FText& Source)
+				{
+					const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+					const TOptional<FString> Key = FTextInspector::GetKey(Source);
+					const FString* SourceString = FTextInspector::GetSourceString(Source);
+					if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+					Texts.Add({ Asset, i, Namespace.GetValue(), Key.GetValue(), *SourceString });
+				};
+				AddText(Line.Text);
+				AddText(Line.Speaker.DisplayNameOverride);
+			}
+		}
+
+		// Audio localization is reported as plain fact, no project policy involved: a
+		// subtitles-only project reads "audio 0/N localized" and moves on.
+		TArray<FString> VoicedPackages;
+		for (const UKzDialogueAsset* Asset : Assets)
+		{
+			for (const FKzDialogueLine& Line : Asset->Lines)
+			{
+				if (!Line.Audio.IsNull())
+				{
+					VoicedPackages.Add(Line.Audio.ToSoftObjectPath().GetLongPackageName());
+				}
+			}
+		}
+
+		FMessageLog Log(TEXT("KzDialogueL10N"));
+		Log.NewPage(FText::Format(LOCTEXT("CoveragePageTitle", "Coverage - target '{0}'"), FText::FromString(Target.TargetName)));
+		Log.Info(FText::Format(LOCTEXT("CoverageHeader", "{0} asset(s), {1} localizable text(s)."), Assets.Num(), Texts.Num()));
+
+		for (const FString& Culture : Target.ForeignCultures)
+		{
+			int32 Translated = 0;
+			TArray<const FKzCoverageText*> StaleTexts;
+			if (LoadedCultures.Contains(Culture))
+			{
+				for (const FKzCoverageText& Text : Texts)
+				{
+					const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
+					if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
+					if (Entry->Source.Text == Text.Source) { ++Translated; } else { StaleTexts.Add(&Text); }
+				}
+			}
+
+			const int32 Missing = Texts.Num() - Translated - StaleTexts.Num();
+			FText CultureLine = FText::Format(LOCTEXT("CoverageCulture", "{0}: {1}/{2} translated, {3} missing, {4} stale."),
+				FText::FromString(Culture), Translated, Texts.Num(), Missing, StaleTexts.Num());
+
+			if (VoicedPackages.Num() > 0)
+			{
+				int32 LocalizedAudio = 0;
+				for (const FString& SourcePackage : VoicedPackages)
+				{
+					FString LocalizedPackage;
+					if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackage, Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
+					{
+						++LocalizedAudio;
+					}
+				}
+				CultureLine = FText::Format(LOCTEXT("CoverageCultureAudio", "{0} Audio: {1}/{2} localized."), CultureLine, LocalizedAudio, VoicedPackages.Num());
+			}
+
+			Log.Info(CultureLine);
+
+			// Stale entries are the actionable ones: translated against an older source, need review.
+			for (const FKzCoverageText* Text : StaleTexts)
+			{
+				Log.Warning()
+					->AddToken(FUObjectToken::Create(Text->Asset))
+					->AddToken(FTextToken::Create(FText::Format(LOCTEXT("CoverageStale", "line {0} ({1}): '{2}' translation predates the current source text; needs review."),
+						Text->LineIndex + 1, FText::FromString(Text->Key), FText::FromString(Culture))));
+			}
+		}
+
+		Log.Open(EMessageSeverity::Info, true);
+	}
 }
 
 void FKzDialogueTranslationCsv::RegisterMenus()
@@ -218,7 +342,7 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 
 				FKzLocTargetInfo Target;
 				FText Error;
-				if (!ReadLocTargetInfo(Target, Error) || Target.ForeignCultures.IsEmpty())
+				if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error) || Target.ForeignCultures.IsEmpty())
 				{
 					CultureSection.AddMenuEntry(TEXT("NoCultures"),
 						LOCTEXT("NoCultures", "No localization target cultures found"),
@@ -237,6 +361,13 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 						FUIAction(FExecuteAction::CreateLambda([Culture]() { OnImportClicked(Culture); })));
 				}
 			}));
+
+		InSection.AddMenuEntry(
+			TEXT("TranslationCoverage"),
+			LOCTEXT("Coverage", "Translation Coverage Report"),
+			LOCTEXT("CoverageTip", "Show how many texts of the selected dialogue assets are translated, missing or stale per culture."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([SelectedAssets = Context->SelectedAssets]() { OnCoverageClicked(SelectedAssets); })));
 	}));
 }
 

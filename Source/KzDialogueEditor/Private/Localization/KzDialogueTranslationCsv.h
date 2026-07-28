@@ -6,6 +6,17 @@
 
 class UKzDialogueAsset;
 
+/** Localization target layout resolved from the target's generated step ini (Config/Localization/<Target>_Gather.ini). */
+struct FKzLocTargetInfo
+{
+	FString TargetName;
+	FString TargetPath;
+	FString ManifestName;
+	FString ArchiveName;
+	FString NativeCulture;
+	TArray<FString> ForeignCultures;
+};
+
 /** Result counters for a translation CSV import. */
 struct FKzTranslationImportStats
 {
@@ -44,4 +55,7 @@ public:
 
 	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed in the output log. */
 	static bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+
+	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
+	static bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
 };

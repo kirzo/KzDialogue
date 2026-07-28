@@ -4,8 +4,11 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueNotify.h"
+#include "Localization/KzDialogueTranslationCsv.h"
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Sound/SoundBase.h"
+
+#include "LocTextHelper.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueValidators"
 
@@ -372,6 +375,132 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 				}
 			}
 		}
+	}
+}
+
+// =======================================================================================
+// Localization
+// =======================================================================================
+
+bool UKzDialogueValidator_Localization::CanValidate_Implementation(const UObject* Asset) const
+{
+	return Asset && Asset->IsA<UKzDialogueAsset>();
+}
+
+void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
+	if (!Dialogue) { return; }
+
+	const FName Id = GetValidatorId();
+
+	auto AddIssue = [&](EKzValidationSeverity Severity, const FText& Message, const FGuid& LineId, int32 LineIndex)
+	{
+		FKzValidationIssue Issue = FKzValidationIssue::WithContextId(Severity, Message, Id, LineId);
+		Issue.ContextIndex = LineIndex;
+		OutIssues.Add(Issue);
+	};
+
+	// Every localizable FText must sit on its stable GUID-derived key, or gather produces
+	// throwaway keys and existing translations orphan. Self-heals on resave.
+	const FString ExpectedNamespace = FString::Printf(TEXT("KzDialogue.%s"), *Dialogue->AssetId.ToString(EGuidFormats::Digits));
+	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+	{
+		const FKzDialogueLine& Line = Dialogue->Lines[i];
+		auto CheckKey = [&](const FText& Source, const TCHAR* Suffix)
+		{
+			if (Source.IsEmpty()) { return; }
+			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+			const TOptional<FString> Key = FTextInspector::GetKey(Source);
+			const FString ExpectedKey = Line.LineId.ToString(EGuidFormats::Digits) + Suffix;
+			if (!Namespace.IsSet() || !Key.IsSet() || Namespace.GetValue() != ExpectedNamespace || Key.GetValue() != ExpectedKey)
+			{
+				AddIssue(EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("UnstableKey", "Line {0}: text is not anchored to its stable localization key; resave the asset to rebind it."), FText::AsNumber(i + 1)),
+					Line.LineId, i);
+			}
+		};
+		CheckKey(Line.Text, TEXT("-Text"));
+		CheckKey(Line.Speaker.DisplayNameOverride, TEXT("-Speaker"));
+	}
+
+	// Translation-dependent checks need a localization target; without one there is nothing to compare against.
+	FKzLocTargetInfo Target;
+	FText TargetError;
+	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
+
+	// Archives are re-read on every validation; fine at this project's asset counts.
+	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, nullptr)) { return; }
+
+	TArray<FString> Cultures;
+	for (const FString& Culture : Target.ForeignCultures)
+	{
+		if (LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr))
+		{
+			Cultures.Add(Culture);
+		}
+	}
+	if (Cultures.IsEmpty()) { return; }
+
+	auto GetFormatArgs = [](const FString& Pattern)
+	{
+		TArray<FString> Args;
+		FTextFormat::FromString(Pattern).GetFormatArgumentNames(Args);
+		return TSet<FString>(Args);
+	};
+
+	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+	{
+		const FKzDialogueLine& Line = Dialogue->Lines[i];
+
+		auto CheckTranslations = [&](const FText& Source, bool bLineText)
+		{
+			if (Source.IsEmpty()) { return; }
+			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+			const TOptional<FString> Key = FTextInspector::GetKey(Source);
+			const FString* SourceString = FTextInspector::GetSourceString(Source);
+			if (!Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+
+			const TSet<FString> SourceArgs = GetFormatArgs(*SourceString);
+
+			for (const FString& Culture : Cultures)
+			{
+				const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Namespace.GetValue()), FLocKey(Key.GetValue()), nullptr);
+
+				// Untranslated is the coverage report's business, not a per-save warning.
+				if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
+
+				const FString& Translation = Entry->Translation.Text;
+
+				// Stale translation: the remaining checks would compare against the wrong baseline.
+				if (Entry->Source.Text != *SourceString)
+				{
+					AddIssue(EKzValidationSeverity::Warning,
+						FText::Format(LOCTEXT("StaleTranslation", "Line {0}: the '{1}' translation predates the current source text; needs review."), FText::AsNumber(i + 1), FText::FromString(Culture)),
+						Line.LineId, i);
+					continue;
+				}
+
+				if (bLineText && Line.MaxCharacters > 0 && Translation.Len() > Line.MaxCharacters)
+				{
+					AddIssue(EKzValidationSeverity::Warning,
+						FText::Format(LOCTEXT("MaxCharsExceeded", "Line {0}: the '{1}' translation is {2} characters long, over the line's MaxCharacters ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::AsNumber(Translation.Len()), FText::AsNumber(Line.MaxCharacters)),
+						Line.LineId, i);
+				}
+
+				const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
+				if (SourceArgs.Num() != TranslationArgs.Num() || !SourceArgs.Includes(TranslationArgs))
+				{
+					AddIssue(EKzValidationSeverity::Error,
+						FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
+						Line.LineId, i);
+				}
+			}
+		};
+
+		CheckTranslations(Line.Text, true);
+		CheckTranslations(Line.Speaker.DisplayNameOverride, false);
 	}
 }
 

@@ -43,6 +43,7 @@ public class KzDialogueEditor : ModuleRules
 				"ContentBrowser",
 				"DesktopPlatform",
 				"Localization",
+				"MessageLog",
 			});
 	}
 }

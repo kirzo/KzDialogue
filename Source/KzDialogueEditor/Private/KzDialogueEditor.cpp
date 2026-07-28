@@ -22,6 +22,7 @@
 
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
+#include "MessageLogModule.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 #include "ToolMenus.h"
 
@@ -63,6 +64,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 	FEdGraphUtilities::RegisterVisualPinFactory(LinePinFactory);
 
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FKzDialogueTranslationCsv::RegisterMenus));
+
+	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
+	MessageLogModule.RegisterLogListing(TEXT("KzDialogueL10N"), LOCTEXT("L10NLogLabel", "KzDialogue Localization"));
 }
 
 void FKzDialogueEditorModule::OnShutdownModule()
@@ -72,6 +76,11 @@ void FKzDialogueEditorModule::OnShutdownModule()
 	if (UToolMenus* ToolMenus = UToolMenus::TryGet())
 	{
 		ToolMenus->UnregisterOwner(TEXT("KzDialogueEditor"));
+	}
+
+	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
+	{
+		FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog").UnregisterLogListing(TEXT("KzDialogueL10N"));
 	}
 
 	if (FModuleManager::Get().IsModuleLoaded("Sequencer"))

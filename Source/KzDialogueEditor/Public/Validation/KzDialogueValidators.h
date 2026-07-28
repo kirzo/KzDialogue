@@ -104,3 +104,20 @@ public:
 	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
 	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
 };
+
+/**
+ * Localization correctness checks: texts not anchored to their stable GUID-derived key, stale
+ * translations (source text changed after they were made), translations exceeding the line's
+ * MaxCharacters, and placeholder mismatches between source and translation. Completeness
+ * (untranslated texts, missing localized audio) is the coverage report's business, not a
+ * per-save warning. Archive-dependent checks are silently skipped while the project has no
+ * localization target.
+ */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_Localization : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
