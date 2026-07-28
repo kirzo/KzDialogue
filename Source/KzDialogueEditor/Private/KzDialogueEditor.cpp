@@ -18,10 +18,12 @@
 #include "KzDialogueTimeline.h"
 
 #include "Editors/KzArrayAssetEditor.h"
+#include "Localization/KzDialogueTranslationCsv.h"
 
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
+#include "ToolMenus.h"
 
 #define LOCTEXT_NAMESPACE "FKzDialogueEditorModule"
 
@@ -59,11 +61,18 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 	LinePinFactory = MakeShared<FKzDialogueLinePinFactory>();
 	FEdGraphUtilities::RegisterVisualPinFactory(LinePinFactory);
+
+	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FKzDialogueTranslationCsv::RegisterMenus));
 }
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
 	FKzDialogueEditorStyle::Shutdown();
+
+	if (UToolMenus* ToolMenus = UToolMenus::TryGet())
+	{
+		ToolMenus->UnregisterOwner(TEXT("KzDialogueEditor"));
+	}
 
 	if (FModuleManager::Get().IsModuleLoaded("Sequencer"))
 	{

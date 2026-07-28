@@ -47,6 +47,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "General")
 	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker;
 
+	/** Localization Dashboard target that dialogue translation CSVs are imported into (usually "Game"). Editor-only workflow, harmless at runtime. */
+	UPROPERTY(Config, EditAnywhere, Category = "Localization")
+	FString LocalizationTargetName = TEXT("Game");
+
 	/** Default mouth/jaw "speaking level" tuning derived from a line's audio. Speakers can override per character. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speaking")
 	FKzSpeakingLevelSettings SpeakingDefaults;

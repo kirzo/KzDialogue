@@ -39,6 +39,10 @@ public class KzDialogueEditor : ModuleRules
 				"MovieSceneTracks",
 				"GameplayTags",
 				"GraphEditor",
+				"ToolMenus",
+				"ContentBrowser",
+				"DesktopPlatform",
+				"Localization",
 			});
 	}
 }
