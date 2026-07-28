@@ -188,6 +188,16 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Line")
 	TObjectPtr<UKzDialogueTimeline> Timeline = nullptr;
 	
+#if WITH_EDITORONLY_DATA
+	/** Director notes for the translator: tone, intent, audience. Not localizable; exported alongside the line in the translation flow, never shipped. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line", meta = (MultiLine = true))
+	FString TranslatorNotes;
+
+	/** Maximum characters a translation of Text may use (fixed-width subtitles, bark bubbles). 0 = no limit. Consumed by validators and the export flow, not at runtime. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line", meta = (ClampMin = 0))
+	int32 MaxCharacters = 0;
+#endif
+
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */
 	UPROPERTY()
 	uint32 SourceTextHash = 0;
