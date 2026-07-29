@@ -79,6 +79,9 @@ private:
 	void SyncEventDetails();
 	void OnEventDetailsChanged(const FPropertyChangedEvent& PropertyChangedEvent);
 
+	/** Dirties this widget and every ancestor so the hosting details panel re-measures us. */
+	void InvalidateHostLayout();
+
 	void BeginRetime();
 	void RetimeEvent(int32 TrackIndex, int32 EventIndex, float StartSeconds, float EndSeconds);
 	void EndRetime();
@@ -144,6 +147,9 @@ private:
 
 	/** Cached audio waveform envelope drawn in the group band; rebuilt when the line's wave changes. */
 	TSharedPtr<FKzWaveformPreview> WaveformPreview;
+
+	/** Frames left to keep re-dirtying the ancestor chain after a size-changing edit; the inner details view rebuilds deferred, so one frame is not enough. */
+	int32 HostInvalidationFramesPending = 0;
 
 	/** Editor-only audio preview: playhead position (seconds), transport state, and the live component. */
 	float PlayheadTime = 0.f;

@@ -1030,7 +1030,9 @@ void UKzDialoguePlayer::BakeTimeline()
 
 	FKzDialogueTimeResolveContext ResolveContext;
 	ResolveContext.LineDuration = CachedLineDuration;
-	ResolveContext.Audio = CurrentLine.Audio.Get();
+	// Synchronous load, not Get(): with AudioStartDelay the wave may not be in memory yet at
+	// bake time, and anchor sources (audio markers) need it to resolve.
+	ResolveContext.Audio = CurrentLine.Audio.IsNull() ? nullptr : CurrentLine.Audio.LoadSynchronous();
 
 	for (const FKzDialogueNotifyTrack& Track : Timeline->Tracks)
 	{

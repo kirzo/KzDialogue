@@ -8,6 +8,7 @@
 #include "Localization/KzDialogueTranslationCsv.h"
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 
 #include "LocTextHelper.h"
 
@@ -352,6 +353,29 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 				{
 					AddIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("TimeSourceUnset", "Line {0}, track '{1}', {2}: no time source set, so it will not fire."), LineLabel, TrackLabel, NotifyName));
 					continue;
+				}
+
+				// Audio-marker sources: an unset name never resolves; a label missing from the source
+				// wave silently uses FallbackTime (localized waves are the loc team's checklist, not this one).
+				if (const FKzDialogueTimeSource_AudioMarker* Marker = Event.TimeSource.GetPtr<FKzDialogueTimeSource_AudioMarker>())
+				{
+					if (Marker->MarkerName.IsNone())
+					{
+						AddIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("MarkerUnset", "Line {0}, track '{1}', {2}: audio marker time source with no marker name; it will always use the fallback time."), LineLabel, TrackLabel, NotifyName));
+					}
+					else if (const USoundWave* Wave = Cast<USoundWave>(ResolveCtx.Audio))
+					{
+						const FString MarkerLabel = Marker->MarkerName.ToString();
+						const bool bFound = Wave->GetCuePoints().ContainsByPredicate([&MarkerLabel](const FSoundWaveCuePoint& Cue) { return Cue.Label == MarkerLabel; });
+						if (!bFound)
+						{
+							AddIssue(EKzValidationSeverity::Warning, FText::Format(LOCTEXT("MarkerNotFound", "Line {0}, track '{1}', {2}: marker '{3}' not found in the line's wave; it will use the fallback time."), LineLabel, TrackLabel, NotifyName, FText::FromName(Marker->MarkerName)));
+						}
+					}
+					else if (ResolveCtx.Audio)
+					{
+						AddIssue(EKzValidationSeverity::Warning, FText::Format(LOCTEXT("MarkerNotAWave", "Line {0}, track '{1}', {2}: audio marker time sources need a SoundWave; this line's audio is a {3}, so the fallback time applies."), LineLabel, TrackLabel, NotifyName, FText::FromString(ResolveCtx.Audio->GetClass()->GetName())));
+					}
 				}
 
 				TArray<FText> NotifyErrors;

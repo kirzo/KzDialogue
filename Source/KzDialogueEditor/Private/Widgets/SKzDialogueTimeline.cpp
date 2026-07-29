@@ -186,11 +186,12 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*TargetTrack*/);
 	DECLARE_DELEGATE_OneParam(FOnActivateEvent, int32 /*EventIndex*/);
 
-	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
+	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
 		SLATE_ARGUMENT(int32, TrackIndex)
 		SLATE_ARGUMENT(TSharedPtr<FKzWaveformPreview>, Waveform)
 		SLATE_ATTRIBUTE(float, Duration)
+		SLATE_ATTRIBUTE(USoundBase*, LineAudio)
 		SLATE_ATTRIBUTE(float, ViewStart)
 		SLATE_ATTRIBUTE(float, ViewEnd)
 		SLATE_ATTRIBUTE(float, SelectionStart)
@@ -216,6 +217,7 @@ public:
 		TrackIndex = InArgs._TrackIndex;
 		Waveform = InArgs._Waveform;
 		Duration = InArgs._Duration;
+		LineAudio = InArgs._LineAudio;
 		SelectedEventAttr = InArgs._SelectedEvent;
 		Playhead = InArgs._Playhead;
 		SelectionStart = InArgs._SelectionStart;
@@ -388,6 +390,10 @@ public:
 				GetEventBounds(T->Tracks[TrackIndex].Events[Hit], Dur, StartSec, EndSec, bState);
 				const float CursorSec = XToTime(LocalX, W);
 
+				// Anchor-based events cannot be retimed or resized; the drag stays alive only
+				// for the vertical move-to-track gesture.
+				if (!IsRetimable(T->Tracks[TrackIndex].Events[Hit])) { Mode = EDragMode::Move; }
+
 				DragIndex = Hit;
 				DragMode = Mode;
 				DragGrabOffsetSec = CursorSec - StartSec;
@@ -424,12 +430,17 @@ public:
 
 		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 
+		// Anchor-based events keep their time; the drag only serves move-to-track on release.
+		const bool bRetimable = IsRetimable(T->Tracks[TrackIndex].Events[DragIndex]);
+
 		if (!bDragStarted)
 		{
 			if (FMath::Abs(LocalX - DragStartLocalX) < DragThreshold) { return FReply::Handled(); }
-			OnBeginRetime.ExecuteIfBound();
+			if (bRetimable) { OnBeginRetime.ExecuteIfBound(); }
 			bDragStarted = true;
 		}
+
+		if (!bRetimable) { return FReply::Handled(); }
 
 		const float CursorSec = XToTime(LocalX, W);
 
@@ -575,6 +586,13 @@ public:
 		const int32 Hit = HitTest(LocalX, W, Dur, Mode);
 		if (Hit != INDEX_NONE)
 		{
+			// Anchor-based events read as non-draggable: their time comes from the audio marker.
+			UKzDialogueTimeline* T = Timeline.Get();
+			if (T && T->Tracks.IsValidIndex(TrackIndex) && T->Tracks[TrackIndex].Events.IsValidIndex(Hit) && !IsRetimable(T->Tracks[TrackIndex].Events[Hit]))
+			{
+				return FCursorReply::Cursor(EMouseCursor::Default);
+			}
+
 			if (Mode == EDragMode::ResizeStart || Mode == EDragMode::ResizeEnd) { return FCursorReply::Cursor(EMouseCursor::ResizeLeftRight); }
 			return FCursorReply::Cursor(EMouseCursor::CardinalCross);
 		}
@@ -599,11 +617,27 @@ private:
 			const float Len = Rel->bNormalized ? Rel->Duration * Dur : Rel->Duration;
 			OutEndSec = OutStartSec + (bOutState ? Len : 0.f);
 		}
+		else if (const FKzDialogueTimeSource* Source = Event.TimeSource.GetPtr<FKzDialogueTimeSource>())
+		{
+			// Anchor-style sources (audio markers) resolve generically against the line's audio,
+			// so the widget shows the same times the runtime will bake.
+			FKzDialogueTimeResolveContext Context;
+			Context.LineDuration = Dur;
+			Context.Audio = LineAudio.Get(nullptr);
+			Source->Resolve(Context, OutStartSec, OutEndSec);
+			if (!bOutState) { OutEndSec = OutStartSec; }
+		}
 		else
 		{
 			OutStartSec = 0.f;
 			OutEndSec = 0.f;
 		}
+	}
+
+	/** Only Relative sources are draggable; anchor-based ones take their time from the audio. */
+	static bool IsRetimable(const FKzDialogueNotifyEvent& Event)
+	{
+		return Event.TimeSource.GetPtr<FKzDialogueTimeSource_Relative>() != nullptr;
 	}
 
 	float PointBoxWidth(const FKzDialogueNotifyEvent& Event) const
@@ -689,6 +723,7 @@ private:
 	int32 TrackIndex = INDEX_NONE;
 	TSharedPtr<FKzWaveformPreview> Waveform;
 	TAttribute<float> Duration;
+	TAttribute<USoundBase*> LineAudio;
 	TAttribute<int32> SelectedEventAttr;
 	TAttribute<float> Playhead;
 	TAttribute<float> SelectionStart;
@@ -958,20 +993,32 @@ float SKzDialogueTimeline::GetViewEnd() const
 float SKzDialogueTimeline::GetSelectionStart() const
 {
 	const FKzDialogueNotifyEvent* Event = SelectedEvent();
-	const FKzDialogueTimeSource_Relative* Rel = Event ? Event->TimeSource.GetPtr<FKzDialogueTimeSource_Relative>() : nullptr;
-	if (!Rel) { return -1.f; }
-	return Rel->bNormalized ? Rel->Time * Duration() : Rel->Time;
+	const FKzDialogueTimeSource* Source = Event ? Event->TimeSource.GetPtr<FKzDialogueTimeSource>() : nullptr;
+	if (!Source) { return -1.f; }
+
+	FKzDialogueTimeResolveContext Context;
+	Context.LineDuration = Duration();
+	Context.Audio = ResolveLineAudio();
+	float Start = 0.f;
+	float End = 0.f;
+	Source->Resolve(Context, Start, End);
+	return Start;
 }
 
 float SKzDialogueTimeline::GetSelectionEnd() const
 {
 	const FKzDialogueNotifyEvent* Event = SelectedEvent();
 	if (!Event || !Event->Notify || !Event->Notify->IsA<UKzDialogueNotifyState>()) { return -1.f; }
-	const FKzDialogueTimeSource_Relative* Rel = Event->TimeSource.GetPtr<FKzDialogueTimeSource_Relative>();
-	if (!Rel) { return -1.f; }
-	const float Start = Rel->bNormalized ? Rel->Time * Duration() : Rel->Time;
-	const float Len = Rel->bNormalized ? Rel->Duration * Duration() : Rel->Duration;
-	return Start + Len;
+	const FKzDialogueTimeSource* Source = Event->TimeSource.GetPtr<FKzDialogueTimeSource>();
+	if (!Source) { return -1.f; }
+
+	FKzDialogueTimeResolveContext Context;
+	Context.LineDuration = Duration();
+	Context.Audio = ResolveLineAudio();
+	float Start = 0.f;
+	float End = 0.f;
+	Source->Resolve(Context, Start, End);
+	return End;
 }
 
 void SKzDialogueTimeline::ZoomView(float CursorTimeSeconds, float WheelDelta, bool bPan)
@@ -1073,6 +1120,15 @@ TSharedPtr<FKzWaveformPreview> SKzDialogueTimeline::GetWaveformPreview()
 void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	// Keep dirtying the host for a couple of frames after a size-changing edit: the inner
+	// structure details view rebuilds its content deferred, so invalidating only at the moment
+	// of the edit measures the pre-growth size and the hosting panel's scrollbar goes stale.
+	if (HostInvalidationFramesPending > 0)
+	{
+		--HostInvalidationFramesPending;
+		InvalidateHostLayout();
+	}
 
 	// Consume a pending notify selection (e.g. from a validation-issue click) once the timeline for
 	// the requested line is alive and ticking.
@@ -1494,6 +1550,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTrackAreaRow(int32 TrackIndex)
 			.Timeline(Timeline)
 			.TrackIndex(TrackIndex)
 			.Duration_Lambda([this]() { return Duration(); })
+			.LineAudio_Lambda([this]() { return ResolveLineAudio(); })
 			.ViewStart_Lambda([this]() { return GetViewStart(); })
 			.ViewEnd_Lambda([this]() { return GetViewEnd(); })
 			.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
@@ -1662,9 +1719,25 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeEventMenuForTrack(int32 TrackIndex,
 	return Menu.MakeWidget();
 }
 
+void SKzDialogueTimeline::InvalidateHostLayout()
+{
+	// The hosting details panel measures this widget once; content that changes height after
+	// construction (the event details filling on selection, tracks added) is never re-measured
+	// until an external resize forces a prepass. Dirty the whole ancestor chain by hand so the
+	// next frame re-measures it, exactly as a resize would.
+	for (SWidget* Widget = this; Widget;)
+	{
+		Widget->MarkPrepassAsDirty();
+		Widget->Invalidate(EInvalidateWidgetReason::Layout);
+		Widget = Widget->GetParentWidget().Get();
+	}
+}
+
 void SKzDialogueTimeline::SyncEventDetails()
 {
 	if (!EventDetailsView.IsValid()) { return; }
+
+	HostInvalidationFramesPending = 2;
 
 	FKzDialogueNotifyEvent* LiveEvent = SelectedEvent();
 	if (!LiveEvent)

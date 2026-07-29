@@ -60,6 +60,33 @@ struct KZDIALOGUE_API FKzDialogueTimeSource_Relative : public FKzDialogueTimeSou
 };
 
 /**
+ * Time anchored to a named cue point of the line's audio wave. The resolve context carries
+ * the audio LOADED for the active culture, so a marker authored per localized wave (e.g. on
+ * the word "fire" in each language's take) fires at the right moment in every dub.
+ * Falls back to FallbackTime when the audio is missing, is not a USoundWave, or has no cue
+ * point with that label.
+ */
+USTRUCT(meta = (DisplayName = "Audio Marker"))
+struct KZDIALOGUE_API FKzDialogueTimeSource_AudioMarker : public FKzDialogueTimeSource
+{
+	GENERATED_BODY()
+
+	/** Label of the cue point in the wave (authored in the .wav markers or on the SoundWave asset). */
+	UPROPERTY(EditAnywhere, Category = "Time")
+	FName MarkerName;
+
+	/** Window length in seconds for state notifies. 0 uses the marker's own region length (plain cues have none = point). */
+	UPROPERTY(EditAnywhere, Category = "Time", meta = (ClampMin = 0))
+	float Duration = 0.0f;
+
+	/** Seconds used when the marker cannot be resolved. */
+	UPROPERTY(EditAnywhere, Category = "Time", meta = (ClampMin = 0))
+	float FallbackTime = 0.0f;
+
+	virtual void Resolve(const FKzDialogueTimeResolveContext& Context, float& OutStart, float& OutEnd) const override;
+};
+
+/**
  * A single timed entry on a timeline track. TimeSource resolves to absolute seconds at
  * line start; the notify's class decides whether the window or just the start is used.
  */
