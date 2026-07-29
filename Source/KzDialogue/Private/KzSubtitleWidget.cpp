@@ -543,7 +543,9 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 
 	if (View.SubtitlesText)
 	{
-		View.SubtitlesText->SetText(Line.Text);
+		// Formatting at display time (not at play time) means a hot culture switch formats the
+		// next line against the freshly resolved translation.
+		View.SubtitlesText->SetText(Line.GetFormattedText());
 	}
 
 	ReceiveSetupLine(Channel, Line);

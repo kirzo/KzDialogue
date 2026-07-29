@@ -170,6 +170,15 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FInstancedPropertyBag AudioParams;
 
 	/**
+	 * Named arguments for a templated Text ("{Count}", "{PlayerName}"), applied by views at
+	 * display time via GetFormattedText. Runtime data set by the call site on its line copy
+	 * (see UKzDialogueFunctionLibrary::SetLine*Argument), never authored or serialized; empty
+	 * for the common static line. Plural/gender grammar lives in the (translated) pattern
+	 * itself via FText's ICU modifiers, so each culture picks its own forms.
+	 */
+	FFormatNamedArguments FormatArguments;
+
+	/**
 	 * Per-line timeline, owned by the asset (UKzDialogueAsset::Timelines, keyed by LineId) and
 	 * filled in whenever the line is resolved from its asset (TryGetLineById and the asset
 	 * provider). Transient and not authored on the line, so a line built by hand has none.
@@ -194,6 +203,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
 	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }
+
+	/** Text with FormatArguments applied; Text as-is when there are none (the common case). */
+	FText GetFormattedText() const;
 
 	/**
 	 * Effective playback length in seconds (before TimeScale) from DurationMode, Duration, the

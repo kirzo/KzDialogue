@@ -159,3 +159,18 @@ bool UKzDialogueFunctionLibrary::LineHasAllTags(const FKzDialogueLine& Line, con
 {
 	return bExact ? Line.Tags.HasAllExact(Tags) : Line.Tags.HasAll(Tags);
 }
+
+void UKzDialogueFunctionLibrary::SetLineTextArgument(FKzDialogueLine& Line, FName Name, FText Value)
+{
+	Line.FormatArguments.Add(Name.ToString(), FFormatArgumentValue(Value));
+}
+
+void UKzDialogueFunctionLibrary::SetLineNumberArgument(FKzDialogueLine& Line, FName Name, double Value)
+{
+	Line.FormatArguments.Add(Name.ToString(), FFormatArgumentValue(Value));
+}
+
+FText UKzDialogueFunctionLibrary::GetLineFormattedText(const FKzDialogueLine& Line)
+{
+	return Line.GetFormattedText();
+}

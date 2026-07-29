@@ -4,6 +4,11 @@
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
 
+FText FKzDialogueLine::GetFormattedText() const
+{
+	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
+}
+
 FText FKzDialogueSpeaker::GetDisplayLabel() const
 {
 	if (!Asset)

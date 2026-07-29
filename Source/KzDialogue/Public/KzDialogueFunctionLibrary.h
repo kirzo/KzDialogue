@@ -19,7 +19,7 @@ class KZDIALOGUE_API UKzDialogueFunctionLibrary : public UBlueprintFunctionLibra
 	GENERATED_BODY()
 
 public:
-	/** Returns true if the speaker is meaningfully set (has either an override name or a valid tag). */
+	/** Returns true if the speaker is meaningfully set (references a speaker asset). */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (DisplayName = "Is Valid", CompactNodeTitle = "IsValid"))
 	static bool IsDialogueSpeakerValid(const FKzDialogueSpeaker& Speaker);
 
@@ -117,6 +117,18 @@ public:
 	/** True if the line has ALL of Tags. bExact uses HasAllExact. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Line", meta = (AutoCreateRefTerm = "Tags"))
 	static bool LineHasAllTags(const FKzDialogueLine& Line, const FGameplayTagContainer& Tags, bool bExact = false);
+
+	/** Set a text argument for the line's "{Name}" placeholder. Call on your line copy before playing it; views format at display time. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Line")
+	static void SetLineTextArgument(UPARAM(ref) FKzDialogueLine& Line, FName Name, FText Value);
+
+	/** Set a numeric argument for the line's "{Name}" placeholder. Numbers drive the pattern's |plural(...) forms per culture. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Line")
+	static void SetLineNumberArgument(UPARAM(ref) FKzDialogueLine& Line, FName Name, double Value);
+
+	/** Line text with its format arguments applied (Text as-is when it has none). What the subtitle views render. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
+	static FText GetLineFormattedText(const FKzDialogueLine& Line);
 
 	/**
 	 * Returns true when a dialogue player exists for the given channel and is currently
