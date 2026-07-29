@@ -356,7 +356,7 @@ TSharedRef<SWidget> SKzDialogueLinePicker::BuildFilterMenu()
 			MenuBuilder.AddMenuEntry(
 				Label,
 				FText::Format(LOCTEXT("FilterBySpeakerTip", "Show only lines spoken by {0}"), Label),
-				FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"),
+				FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.SpeakerIcon"),
 				FUIAction(
 					FExecuteAction::CreateSP(this, &SKzDialogueLinePicker::ToggleSpeakerFilter, Speaker),
 					FCanExecuteAction(),
