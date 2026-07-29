@@ -88,7 +88,7 @@ TSharedPtr<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildAddMenu(TSharedP
 	if (!ArrayHandle.IsValid() || !ResolveAsset()) { return nullptr; }
 
 	UKzDialogueAsset* Asset = ResolveAsset();
-	const FGameplayTag SpeakerTag = ResolveSpeaker();
+	const UKzSpeakerAsset* Speaker = ResolveSpeaker();
 	TSet<FGuid> AlreadyUsed = CollectAlreadyUsed(ArrayHandle);
 	TWeakPtr<IPropertyHandleArray> WeakArrayHandle = ArrayHandle;
 
@@ -97,8 +97,8 @@ TSharedPtr<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildAddMenu(TSharedP
 			SNew(SKzDialogueLinePicker)
 				.Asset(Asset)
 				.bShowAliases(bShowAliases)
-				.RequiredSpeaker(SpeakerTag)
-				.bRequireExactSpeakerMatch(SpeakerTag.IsValid() == false && ResolveSpeakerFn != nullptr)
+				.RequiredSpeaker(Speaker)
+				.bRequireExactSpeakerMatch(Speaker == nullptr && ResolveSpeakerFn != nullptr)
 				.AlreadyUsedLineIds(AlreadyUsed)
 				.OnEntryPicked(SKzDialogueLinePicker::FOnEntryPicked::CreateSP(
 					SharedThis(this), &FKzDialogueLineFromAssetRowCustomizer::OnLinePicked, WeakArrayHandle))

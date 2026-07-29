@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Settings/KzDialogueSettings.h"
+#include "Internationalization/Culture.h"
 #include "Sound/SoundClass.h"
 
 namespace Kz::Tags::Dialogue
@@ -8,7 +9,6 @@ namespace Kz::Tags::Dialogue
 	UE_DEFINE_GAMEPLAY_TAG(MainChannel, "Dialogue.Channel.Main");
 	UE_DEFINE_GAMEPLAY_TAG(BarkChannel, "Dialogue.Channel.Bark");
 	UE_DEFINE_GAMEPLAY_TAG(SystemChannel, "Dialogue.Channel.System");
-	UE_DEFINE_GAMEPLAY_TAG(SpeakerBase, "Dialogue.Speaker");
 }
 
 UKzDialogueSettings::UKzDialogueSettings()
@@ -47,6 +47,24 @@ UKzDialogueSettings::UKzDialogueSettings()
 		System.bAllowInterruption = false;
 		Channels.Add(System);
 	}
+}
+
+const FString& UKzDialogueSettings::GetActiveSpeakerNameFormat() const
+{
+	if (SpeakerNameFormatsPerCulture.Num() > 0)
+	{
+		FInternationalization& I18N = FInternationalization::Get();
+		const FString CurrentCulture = I18N.GetCurrentCulture()->GetName();
+		for (const FString& CultureName : I18N.GetPrioritizedCultureNames(CurrentCulture))
+		{
+			if (const FString* Override = SpeakerNameFormatsPerCulture.Find(CultureName))
+			{
+				return *Override;
+			}
+		}
+	}
+
+	return DefaultSpeakerNameFormat;
 }
 
 const FKzDialogueChannelDefinition* UKzDialogueSettings::FindChannel(const FGameplayTag& Tag) const

@@ -6,6 +6,7 @@
 #include "KzDialogueEditorStyle.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
+#include "KzSpeakerAsset.h"
 
 #include "Customizations/KzDialogueLineRowCustomizer.h"
 #include "Customizations/KzDialogueAliasRowCustomizer.h"
@@ -64,6 +65,13 @@ void FKzDialogueEditorModule::OnStartupModule()
 		{ INVTEXT("Dialogues") },
 		DialogueTabs,
 		DialogueCustomTabs);
+
+	// Speaker assets use the default simple editor: four name fields need no custom toolkit.
+	RegisterAssetTypeAction<UKzSpeakerAsset>(
+		KzAssetCategoryBit,
+		INVTEXT("Dialogue Speaker"),
+		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
+		{ INVTEXT("Dialogues") });
 
 	RegisterPropertyLayout<FKzDialogueAlias, FKzDialogueAliasCustomization>();
 	RegisterPropertyLayout<FKzDialogueLineRef, FKzDialogueLineRefCustomization>();

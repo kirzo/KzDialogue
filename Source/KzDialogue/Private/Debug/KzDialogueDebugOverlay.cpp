@@ -9,6 +9,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueSpeakerComponent.h"
+#include "KzSpeakerAsset.h"
 
 #include "Debug/DebugDrawService.h"
 #include "Engine/Canvas.h"
@@ -243,7 +244,7 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 		const FString OwnerName = Speaker->GetOwner() ? Speaker->GetOwner()->GetName() : TEXT("<no owner>");
 		const FString SpeakerLine = FString::Printf(
 			TEXT("%s   on %s"),
-			*Speaker->SpeakerTag.ToString(),
+			Speaker->Speaker ? *Speaker->Speaker->GetName() : TEXT("<none>"),
 			*OwnerName);
 
 		DrawLine(Canvas, X + Indent, Y, SpeakerLine, MutedColor);

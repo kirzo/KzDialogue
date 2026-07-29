@@ -10,6 +10,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
 #include "KzDialogueSpeakerComponent.h"
+#include "KzSpeakerAsset.h"
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -270,7 +271,7 @@ namespace KzDialogueCmd
 		{
 			LogToConsole(FString::Printf(
 				TEXT("  %s  on %s"),
-				*Speaker->SpeakerTag.ToString(),
+				Speaker->Speaker ? *Speaker->Speaker->GetName() : TEXT("<none>"),
 				Speaker->GetOwner() ? *Speaker->GetOwner()->GetName() : TEXT("<no owner>")));
 		}
 	}

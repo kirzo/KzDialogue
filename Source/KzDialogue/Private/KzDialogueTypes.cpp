@@ -2,6 +2,24 @@
 
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
+#include "KzSpeakerAsset.h"
+
+FText FKzDialogueSpeaker::GetDisplayLabel() const
+{
+	if (!Asset)
+	{
+		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
+	}
+
+	const FText Resolved = Asset->GetResolvedDisplayName();
+	if (!Resolved.IsEmpty())
+	{
+		return Resolved;
+	}
+
+	// Editor fallback for a freshly created asset with no name authored yet.
+	return FText::FromString(FName::NameToDisplayString(Asset->GetName(), false));
+}
 
 bool FKzDialogueLineRef::TryResolve(FKzDialogueLine& OutLine) const
 {

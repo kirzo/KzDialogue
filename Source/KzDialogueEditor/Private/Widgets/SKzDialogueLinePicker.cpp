@@ -3,6 +3,7 @@
 #include "Widgets/SKzDialogueLinePicker.h"
 #include "KzDialogueEditorStyle.h"
 #include "KzDialogueAsset.h"
+#include "KzSpeakerAsset.h"
 #include "Sound/SoundBase.h"
 
 #include "Framework/Application/SlateApplication.h"
@@ -21,18 +22,6 @@
 #include "Widgets/Views/STableRow.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueLinePicker"
-
-namespace
-{
-	/** Sentinel tag used to represent "no speaker / narration" in filter sets. */
-	static const FGameplayTag& GetNarrationSentinel()
-	{
-		// An invalid (default-constructed) tag is used as the narration sentinel. It can
-		// safely live in TSet/TArray and compares equal to other default-constructed tags.
-		static const FGameplayTag Sentinel;
-		return Sentinel;
-	}
-}
 
 void SKzDialogueLinePicker::Construct(const FArguments& InArgs)
 {
@@ -132,6 +121,12 @@ void SKzDialogueLinePicker::BuildAllItems()
 	UKzDialogueAsset* AssetPtr = Asset.Get();
 	if (!IsValid(AssetPtr)) { return; }
 
+	// Speaker part of the search haystack: asset name + resolved display name.
+	auto SpeakerHaystack = [](const UKzSpeakerAsset* Speaker)
+	{
+		return Speaker ? Speaker->GetName() + TEXT(" ") + Speaker->GetResolvedDisplayName().ToString() : FString();
+	};
+
 	// Lines
 	for (const FKzDialogueLine& Line : AssetPtr->Lines)
 	{
@@ -139,13 +134,13 @@ void SKzDialogueLinePicker::BuildAllItems()
 		Entry->bIsAlias = false;
 		Entry->Id = Line.LineId;
 		Entry->DisplayText = Line.GetDisplayLabel().ToString();
-		Entry->SpeakerTag = Line.Speaker.SpeakerTag;
+		Entry->Speaker = Line.Speaker.Asset;
 		Entry->LineTags = Line.Tags;
 		Entry->bHasAudio = !Line.Audio.IsNull();
 		Entry->DefaultDuration = Line.Duration > 0.f ? Line.Duration : 2.f;
 
 		// Haystack: speaker + text, lowercase.
-		Entry->SearchHaystack = (Entry->SpeakerTag.GetTagName().ToString() + TEXT(" ") + Entry->DisplayText).ToLower();
+		Entry->SearchHaystack = (SpeakerHaystack(Line.Speaker.Asset) + TEXT(" ") + Entry->DisplayText).ToLower();
 		AllItems.Add(Entry);
 	}
 
@@ -156,43 +151,33 @@ void SKzDialogueLinePicker::BuildAllItems()
 		Entry->bIsAlias = true;
 		Entry->Id = Alias.AliasId;
 		Entry->DisplayText = Alias.GetDisplayLabel().ToString();
-		Entry->SpeakerTag = Alias.Speaker.SpeakerTag;
+		Entry->Speaker = Alias.Speaker.Asset;
 		Entry->LineTags = FGameplayTagContainer();
 		Entry->bHasAudio = false;
 		Entry->DefaultDuration = 2.f;
 
-		Entry->SearchHaystack = (Entry->SpeakerTag.GetTagName().ToString() + TEXT(" ") + Alias.AliasName.ToString()).ToLower();
+		Entry->SearchHaystack = (SpeakerHaystack(Alias.Speaker.Asset) + TEXT(" ") + Alias.AliasName.ToString()).ToLower();
 		AllItems.Add(Entry);
 	}
 }
 
 void SKzDialogueLinePicker::GatherDistinctSpeakers()
 {
-	DistinctSpeakerTags.Reset();
-	SpeakerDisplayNames.Reset();
+	DistinctSpeakers.Reset();
 
 	UKzDialogueAsset* AssetPtr = Asset.Get();
 	if (!IsValid(AssetPtr)) { return; }
 
 	// Collect distinct speakers, preserving insertion order for a stable filter UI.
-	// At the same time, capture the first non-empty DisplayNameOverride per speaker so
-	// we can show "TagShortName (DisplayName)" in the menu.
-	TSet<FGameplayTag> Seen;
+	// A null entry stands for narration lines.
+	TSet<TWeakObjectPtr<const UKzSpeakerAsset>> Seen;
 	for (const FKzDialogueLine& Line : AssetPtr->Lines)
 	{
-		const FGameplayTag Key = Line.Speaker.SpeakerTag.IsValid()
-			? Line.Speaker.SpeakerTag
-			: GetNarrationSentinel();
-
+		const TWeakObjectPtr<const UKzSpeakerAsset> Key = Line.Speaker.Asset;
 		if (!Seen.Contains(Key))
 		{
 			Seen.Add(Key);
-			DistinctSpeakerTags.Add(Key);
-		}
-
-		if (!Line.Speaker.DisplayNameOverride.IsEmpty() && !SpeakerDisplayNames.Contains(Key))
-		{
-			SpeakerDisplayNames.Add(Key, Line.Speaker.DisplayNameOverride.ToString());
+			DistinctSpeakers.Add(Key);
 		}
 	}
 }
@@ -245,11 +230,11 @@ void SKzDialogueLinePicker::RebuildVisibleItems()
 		// Hard speaker constraint imposed by the caller.
 		if (RequiredSpeaker.IsValid())
 		{
-			if (Item->SpeakerTag != RequiredSpeaker) { continue; }
+			if (Item->Speaker != RequiredSpeaker) { continue; }
 		}
 		else if (bRequireExactSpeakerMatch)
 		{
-			if (Item->SpeakerTag.IsValid()) { continue; }
+			if (Item->Speaker.IsValid()) { continue; }
 		}
 
 		// Aliases visibility (e.g. Sequencer track disables them).
@@ -261,11 +246,10 @@ void SKzDialogueLinePicker::RebuildVisibleItems()
 			continue;
 		}
 
-		// Speaker filter.
+		// Speaker filter. A null weak pointer is the narration key.
 		if (SelectedSpeakerFilters.Num() > 0)
 		{
-			const FGameplayTag Key = Item->SpeakerTag.IsValid() ? Item->SpeakerTag : GetNarrationSentinel();
-			if (!SelectedSpeakerFilters.Contains(Key)) { continue; }
+			if (!SelectedSpeakerFilters.Contains(Item->Speaker)) { continue; }
 		}
 
 		// Line tag filter.
@@ -363,10 +347,10 @@ TSharedRef<SWidget> SKzDialogueLinePicker::BuildFilterMenu()
 	}
 
 	// ---- Speakers -----------------------------------------------------------------
-	if (DistinctSpeakerTags.Num() > 1)
+	if (DistinctSpeakers.Num() > 1)
 	{
 		MenuBuilder.BeginSection("KzDialoguePicker_Speakers", LOCTEXT("SpeakersSection", "Speakers"));
-		for (const FGameplayTag& Speaker : DistinctSpeakerTags)
+		for (const TWeakObjectPtr<const UKzSpeakerAsset>& Speaker : DistinctSpeakers)
 		{
 			const FText Label = GetSpeakerDisplayLabel(Speaker);
 			MenuBuilder.AddMenuEntry(
@@ -412,7 +396,7 @@ TSharedRef<SWidget> SKzDialogueLinePicker::BuildFilterMenu()
 
 	// ---- Clear all (only if anything could be cleared) ----------------------------
 	const bool bHasAnyFilterableMetadata =
-		DistinctSpeakerTags.Num() > 1 ||
+		DistinctSpeakers.Num() > 1 ||
 		DistinctLineTags.Num() > 0 ||
 		AlreadyUsedLineIds.Num() > 0;
 
@@ -444,10 +428,10 @@ TSharedRef<SWidget> SKzDialogueLinePicker::BuildFilterMenu()
 	return MenuBuilder.MakeWidget();
 }
 
-void SKzDialogueLinePicker::ToggleSpeakerFilter(FGameplayTag SpeakerTag)
+void SKzDialogueLinePicker::ToggleSpeakerFilter(TWeakObjectPtr<const UKzSpeakerAsset> Speaker)
 {
-	if (SelectedSpeakerFilters.Contains(SpeakerTag)) { SelectedSpeakerFilters.Remove(SpeakerTag); }
-	else { SelectedSpeakerFilters.Add(SpeakerTag); }
+	if (SelectedSpeakerFilters.Contains(Speaker)) { SelectedSpeakerFilters.Remove(Speaker); }
+	else { SelectedSpeakerFilters.Add(Speaker); }
 	RebuildVisibleItems();
 }
 
@@ -475,28 +459,24 @@ int32 SKzDialogueLinePicker::GetActiveFilterCount() const
 	return Count;
 }
 
-FText SKzDialogueLinePicker::GetSpeakerDisplayLabel(FGameplayTag SpeakerTag) const
+FText SKzDialogueLinePicker::GetSpeakerDisplayLabel(TWeakObjectPtr<const UKzSpeakerAsset> Speaker) const
 {
-	if (!SpeakerTag.IsValid())
+	const UKzSpeakerAsset* Ptr = Speaker.Get();
+	if (!Ptr)
 	{
 		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
 	}
 
-	// Build a synthetic speaker that combines the tag with the display name we cached
-	// while gathering distinct speakers. Lets us reuse the canonical label resolution.
-	FKzDialogueSpeaker Synthetic;
-	Synthetic.SpeakerTag = SpeakerTag;
-
-	if (const FString* DisplayName = SpeakerDisplayNames.Find(SpeakerTag))
+	// Surface both when they differ: the resolved name for reading plus the asset name to
+	// disambiguate two characters sharing a display name.
+	const FString AssetName = Ptr->GetName();
+	const FString Resolved = Ptr->GetResolvedDisplayName().ToString();
+	if (!Resolved.IsEmpty() && Resolved != AssetName)
 	{
-		// In the filter menu we want to surface both: the short tag and the override
-		// when they differ, so the user can disambiguate two NPCs with the same display
-		// name but different tags.
-		const FText Short = Synthetic.GetDisplayLabel(); // resolves to the leaf
-		return FText::FromString(FString::Printf(TEXT("%s  (%s)"), *Short.ToString(), **DisplayName));
+		return FText::FromString(FString::Printf(TEXT("%s  (%s)"), *Resolved, *AssetName));
 	}
 
-	return Synthetic.GetDisplayLabel();
+	return FText::FromString(AssetName);
 }
 
 // =======================================================================================

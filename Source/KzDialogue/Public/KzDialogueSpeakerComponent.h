@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Components/KzComponentReference.h"
 #include "GameplayTagContainer.h"
 #include "GameplayTagAssetInterface.h"
 #include "KzDialogueTypes.h"
@@ -12,16 +13,17 @@
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
 class UKzDialogueAssetSession;
+class UKzSpeakerAsset;
+class USceneComponent;
 
 /** Fired when a speaker's lip-sync suppression flips on (true = became suppressed) or off (false). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingSuppressedChanged, bool, bSuppressed);
 
 /**
  * Attach to any actor that can speak. Provides:
- *   - A SpeakerTag the dialogue system uses to identify "this actor is the speaker"
+ *   - The speaker asset identifying "this actor is that character"
  *   - Speak() helpers that spawn a provider rooted to this actor
- *   - Display name resolution
- *   - A registry so other systems can find speakers by tag
+ *   - A registry so other systems can find the world component for a speaker asset
  */
 UCLASS(ClassGroup = (KzGameplay), Blueprintable, meta = (BlueprintSpawnableComponent))
 class KZDIALOGUE_API UKzDialogueSpeakerComponent : public UActorComponent, public IGameplayTagAssetInterface
@@ -31,17 +33,24 @@ class KZDIALOGUE_API UKzDialogueSpeakerComponent : public UActorComponent, publi
 public:
 	UKzDialogueSpeakerComponent();
 
-	/** Logical identity of this speaker. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker", meta = (Categories = "Dialogue.Speaker"))
-	FGameplayTag SpeakerTag;
-
-	/** Display name shown in subtitles (unless overridden by the line). */
+	/** Character this actor speaks as. Injected into speakerless lines by SpeakLine. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
-	FText DisplayName;
+	TObjectPtr<UKzSpeakerAsset> Speaker;
+
+	/** Additional identities this actor also answers to (hidden persona before a reveal, disguises). Lines referencing any of them resolve to this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
+	TArray<TObjectPtr<UKzSpeakerAsset>> ExtraPersonas;
 
 	/** Default channel for this speaker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
 	FGameplayTag DefaultChannel;
+
+	/** Where attached line audio anchors: a component of the owner plus an optional socket (e.g. the character mesh's head). Unset or unresolvable falls back to the owner's root. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Dialogue|Speaker", meta = (NoOffset = "true"))
+	FKzComponentSocketReference AudioAttachPoint;
+
+	/** Attach point for this speaker's line audio: the resolved AudioAttachPoint, or the owner's root (OutSocketName = None then). */
+	USceneComponent* GetAudioAttachComponent(FName& OutSocketName) const;
 
 	/** Override the project's default speaking-level tuning (gain/threshold/attack/release) for this speaker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker|Speaking")
@@ -81,9 +90,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Speaker|Speaking")
 	FKzOnSpeakingSuppressedChanged OnSpeakingSuppressedChanged;
 
-	/** Get the speaker component matching a tag in the given world. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Speaker"))
-	static UKzDialogueSpeakerComponent* FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag);
+	/** Get the world component registered for a speaker asset (main identity or extra persona). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
+	static UKzDialogueSpeakerComponent* FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker);
 
 	/** Speak an asset on this speaker's default channel. Returns the session for the whole asset. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")

@@ -44,8 +44,12 @@ struct FKzCultureCoverage
 /** One stale translation: it predates the current source text and needs review. */
 struct FKzStaleTranslation
 {
-	UKzDialogueAsset* Asset = nullptr;
-	int32 LineIndex = 0;
+	/** Owning UKzDialogueAsset or UKzSpeakerAsset. */
+	UObject* Asset = nullptr;
+
+	/** Line index for dialogue rows; INDEX_NONE for speaker-asset name rows. */
+	int32 LineIndex = INDEX_NONE;
+
 	FString Key;
 	FString Culture;
 };

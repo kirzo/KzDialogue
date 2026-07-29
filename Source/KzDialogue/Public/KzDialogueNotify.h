@@ -9,6 +9,7 @@
 class AActor;
 class UKzDialoguePlayer;
 class UKzDialogueSpeakerComponent;
+class UKzSpeakerAsset;
 
 /**
  * Runtime context handed to every notify call. The player resolves the effective
@@ -64,8 +65,8 @@ class KZDIALOGUE_API UKzDialogueNotifyBase : public UObject
 
 public:
 	/** Optional target override. When unset, the notify acts on the line's speaker. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Notify", meta = (Categories = "Dialogue.Speaker"))
-	FGameplayTag TargetSpeakerOverride;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Notify")
+	TObjectPtr<UKzSpeakerAsset> TargetSpeakerOverride;
 
 	/** Label shown on the timeline marker, the add menu and debug overlays. */
 	virtual FText GetNotifyName() const;

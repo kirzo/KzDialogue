@@ -108,7 +108,8 @@ public:
 /**
  * Localization correctness checks: texts not anchored to their stable GUID-derived key, stale
  * translations (source text changed after they were made), translations exceeding the line's
- * MaxCharacters, and placeholder mismatches between source and translation. Completeness
+ * MaxCharacters, and placeholder mismatches between source and translation. Also validates
+ * speaker assets (name field key anchoring + stale name translations). Completeness
  * (untranslated texts, missing localized audio) is the coverage report's business, not a
  * per-save warning. Archive-dependent checks are silently skipped while the project has no
  * localization target.
@@ -120,4 +121,8 @@ class KZDIALOGUEEDITOR_API UKzDialogueValidator_Localization : public UKzAssetVa
 public:
 	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
 	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+
+private:
+	/** Speaker-asset branch: key anchoring and stale translations of the name fields. */
+	void ValidateSpeakerAsset(const class UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const;
 };

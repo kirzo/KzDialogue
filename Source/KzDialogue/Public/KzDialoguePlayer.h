@@ -335,6 +335,7 @@ private:
 	void HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue);
 	float ResolveLineDuration(const FKzDialogueLine& Line) const;
 	EKzLineAudioInterruptionPolicy ResolveAudioPolicy(const FKzDialogueLine& Line) const;
+	EKzLineAudioSpatialization ResolveAudioSpatialization(const FKzDialogueLine& Line) const;
 	void ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine, const FKzDialogueLine* IncomingLine);
 	void StopReleasedAudios(float FadeTime = 0.1f);
 	void HandleLineTimerElapsed();

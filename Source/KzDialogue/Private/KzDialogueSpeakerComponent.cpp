@@ -6,24 +6,45 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueSubsystem.h"
+#include "KzSpeakerAsset.h"
 #include "Settings/KzDialogueSettings.h"
 
 #include "Engine/World.h"
+#include "UObject/ObjectKey.h"
 
 namespace KzDialogueSpeakerInternal
 {
-	// Per-world, per-tag registration stack. We key on UWorld* and use weak pointers to the
+	// Per-world, per-speaker registration stack. We key on UWorld* and use weak pointers to the
 	// components so that worlds tearing down without explicit unregistration don't keep stale
-	// pointers. Several components may share a tag (e.g. a Sequencer spawnable duplicating a
-	// level character): the last registered valid one wins lookups, and unregistering removes
-	// only that component's own entry, so the previous registrant takes over again.
-	static TMap<TWeakObjectPtr<const UWorld>, TMap<FGameplayTag, TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>>> Registry;
+	// pointers. TObjectKey rather than a raw asset pointer: the static registry outlives worlds
+	// and a recycled object slot must not alias a dead speaker. Several components may share a
+	// speaker (e.g. a Sequencer spawnable duplicating a level character): the last registered
+	// valid one wins lookups, and unregistering removes only that component's own entry, so the
+	// previous registrant takes over again.
+	static TMap<TWeakObjectPtr<const UWorld>, TMap<TObjectKey<const UKzSpeakerAsset>, TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>>> Registry;
 }
 
 UKzDialogueSpeakerComponent::UKzDialogueSpeakerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	bAutoActivate = true;
+}
+
+USceneComponent* UKzDialogueSpeakerComponent::GetAudioAttachComponent(FName& OutSocketName) const
+{
+	OutSocketName = NAME_None;
+
+	if (!AudioAttachPoint.ComponentName.IsNone())
+	{
+		if (USceneComponent* Component = AudioAttachPoint.GetComponent(this))
+		{
+			OutSocketName = AudioAttachPoint.SocketName;
+			return Component;
+		}
+	}
+
+	const AActor* Owner = GetOwner();
+	return Owner ? Owner->GetRootComponent() : nullptr;
 }
 
 FKzSpeakingLevelSettings UKzDialogueSpeakerComponent::ResolveSpeakingSettings() const
@@ -63,11 +84,22 @@ void UKzDialogueSpeakerComponent::OnRegister()
 {
 	Super::OnRegister();
 
-	if (UWorld* World = GetWorld(); World && SpeakerTag.IsValid())
+	if (UWorld* World = GetWorld(); World && (Speaker || ExtraPersonas.Num() > 0))
 	{
-		TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>& Stack = KzDialogueSpeakerInternal::Registry.FindOrAdd(World).FindOrAdd(SpeakerTag);
-		Stack.Remove(this); // re-registration moves us to the top
-		Stack.Add(this);
+		auto& WorldMap = KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
+		auto RegisterUnder = [this, &WorldMap](const UKzSpeakerAsset* Identity)
+		{
+			if (!Identity) { return; }
+			TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>& Stack = WorldMap.FindOrAdd(TObjectKey<const UKzSpeakerAsset>(Identity));
+			Stack.Remove(this); // re-registration moves us to the top
+			Stack.Add(this);
+		};
+
+		RegisterUnder(Speaker);
+		for (const UKzSpeakerAsset* Persona : ExtraPersonas)
+		{
+			RegisterUnder(Persona);
+		}
 	}
 }
 
@@ -77,11 +109,22 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 	{
 		if (auto* WorldMap = KzDialogueSpeakerInternal::Registry.Find(World))
 		{
-			if (TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(SpeakerTag))
+			auto UnregisterFrom = [this, WorldMap](const UKzSpeakerAsset* Identity)
 			{
-				// Remove only our own entry — never evict another registrant sharing the tag.
-				Stack->Remove(this);
-				if (Stack->IsEmpty()) { WorldMap->Remove(SpeakerTag); }
+				if (!Identity) { return; }
+				const TObjectKey<const UKzSpeakerAsset> Key(Identity);
+				if (TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(Key))
+				{
+					// Remove only our own entry — never evict another registrant sharing the speaker.
+					Stack->Remove(this);
+					if (Stack->IsEmpty()) { WorldMap->Remove(Key); }
+				}
+			};
+
+			UnregisterFrom(Speaker);
+			for (const UKzSpeakerAsset* Persona : ExtraPersonas)
+			{
+				UnregisterFrom(Persona);
 			}
 		}
 	}
@@ -97,16 +140,16 @@ void UKzDialogueSpeakerComponent::SetSpeakingLevel(float NewLevel)
 	}
 }
 
-UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeakerByTag(const UObject* WorldContextObject, FGameplayTag InSpeakerTag)
+UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker)
 {
-	if (!IsValid(WorldContextObject) || !InSpeakerTag.IsValid()) { return nullptr; }
+	if (!IsValid(WorldContextObject) || !InSpeaker) { return nullptr; }
 
 	const UWorld* World = WorldContextObject->GetWorld();
 	if (!World) { return nullptr; }
 
 	if (auto* WorldMap = KzDialogueSpeakerInternal::Registry.Find(World))
 	{
-		if (const TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(InSpeakerTag))
+		if (const TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(TObjectKey<const UKzSpeakerAsset>(InSpeaker)))
 		{
 			// Latest valid registrant wins; stale weak entries are skipped.
 			for (int32 Index = Stack->Num() - 1; Index >= 0; --Index)
@@ -142,8 +185,7 @@ UKzDialoguePlayer* UKzDialogueSpeakerComponent::SpeakLine(const FKzDialogueLine&
 	FKzDialogueLine LineCopy = Line;
 	if (!LineCopy.Speaker.IsValid())
 	{
-		LineCopy.Speaker.SpeakerTag = SpeakerTag;
-		LineCopy.Speaker.DisplayNameOverride = DisplayName;
+		LineCopy.Speaker.Asset = Speaker;
 	}
 	return Sub->PlayLine(LineCopy, DefaultChannel);
 }

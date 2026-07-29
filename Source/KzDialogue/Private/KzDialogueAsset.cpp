@@ -285,13 +285,6 @@ void UKzDialogueAsset::RefreshLineMetadata()
 			Line.SourceTextHash = NewTextHash;
 			bDirty = true;
 		}
-
-		const uint32 NewSpeakerHash = ComputeSourceHash(Line.Speaker.DisplayNameOverride);
-		if (NewSpeakerHash != Line.SourceSpeakerHash)
-		{
-			Line.SourceSpeakerHash = NewSpeakerHash;
-			bDirty = true;
-		}
 	}
 
 	if (bDirty)
@@ -313,7 +306,6 @@ void UKzDialogueAsset::RebindFTextKeys()
 		const FString LineGuid = Line.LineId.ToString(EGuidFormats::Digits);
 
 		Line.Text = FText::ChangeKey(Namespace, LineGuid + TEXT("-Text"), Line.Text);
-		Line.Speaker.DisplayNameOverride = FText::ChangeKey(Namespace, LineGuid + TEXT("-Speaker"), Line.Speaker.DisplayNameOverride);
 	}
 }
 

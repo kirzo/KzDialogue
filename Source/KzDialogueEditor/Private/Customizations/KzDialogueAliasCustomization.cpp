@@ -12,6 +12,7 @@
 #include "IPropertyUtilities.h"
 #include "PropertyHandle.h"
 #include "DetailLayoutBuilder.h"
+#include "Utils/KzEditorUtils.h"
 
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
@@ -57,21 +58,9 @@ void FKzDialogueAliasCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> 
 
 void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
 {
-	// Names of children we render manually below — everything else is added with default UI.
-	static const FName LineIdsName = GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, LineIds);
-
-	uint32 NumChildren = 0;
-	StructPropertyHandle->GetNumChildren(NumChildren);
-	for (uint32 i = 0; i < NumChildren; ++i)
-	{
-		TSharedPtr<IPropertyHandle> ChildHandle = StructPropertyHandle->GetChildHandle(i);
-		if (!ChildHandle.IsValid()) { continue; }
-
-		const FName ChildName = ChildHandle->GetProperty() ? ChildHandle->GetProperty()->GetFName() : NAME_None;
-		if (ChildName == LineIdsName) { continue; }   // rendered below as a SKzPropertyStack
-
-		StructBuilder.AddProperty(ChildHandle.ToSharedRef());
-	}
+	// LineIds is rendered manually below as a SKzPropertyStack — everything else gets default UI.
+	FKzPropertyHandleUtils::AddChildrenHonoringInnerProperties(StructBuilder, StructPropertyHandle,
+		{ GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, LineIds) });
 
 	if (LineIdsHandle.IsValid())
 	{
@@ -97,19 +86,19 @@ void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle
 			});
 
 		// Resolve speaker by reading the alias struct directly. The picker uses this
-		// to filter to lines that belong to the alias's speaker (or narration when empty).
+		// to filter to lines that belong to the alias's speaker (or narration when null).
 		TWeakPtr<IPropertyHandle> WeakStructHandle = StructHandle;
-		LineRowCustomizer->SetResolveSpeakerFn([WeakStructHandle]() -> FGameplayTag
+		LineRowCustomizer->SetResolveSpeakerFn([WeakStructHandle]() -> const UKzSpeakerAsset*
 			{
 				TSharedPtr<IPropertyHandle> Pin = WeakStructHandle.Pin();
-				if (!Pin.IsValid()) { return FGameplayTag(); }
+				if (!Pin.IsValid()) { return nullptr; }
 				void* RawData = nullptr;
 				if (Pin->GetValueData(RawData) != FPropertyAccess::Success || !RawData)
 				{
-					return FGameplayTag();
+					return nullptr;
 				}
 				const FKzDialogueAlias* Alias = reinterpret_cast<const FKzDialogueAlias*>(RawData);
-				return Alias ? Alias->Speaker.SpeakerTag : FGameplayTag();
+				return Alias ? Alias->Speaker.Asset.Get() : nullptr;
 			});
 
 		// Aliases can't reference other aliases — picker only shows lines.

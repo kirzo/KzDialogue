@@ -9,6 +9,7 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 
 class UKzDialogueAsset;
+class UKzSpeakerAsset;
 class SSearchBox;
 class SComboButton;
 template<typename ItemType> class SListView;
@@ -25,7 +26,8 @@ namespace KzDialoguePickerInternal
 		FString SearchHaystack;
 		float DefaultDuration = 2.0f;
 
-		FGameplayTag SpeakerTag;
+		/** Speaker asset of the line/alias. Null = narration. */
+		TWeakObjectPtr<const UKzSpeakerAsset> Speaker;
 		FGameplayTagContainer LineTags;
 		bool bHasAudio = false;
 	};
@@ -44,7 +46,8 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnEntryPicked, FKzDialogueAssetReference /*Reference*/, float /*DefaultDuration*/);
 
 	SLATE_BEGIN_ARGS(SKzDialogueLinePicker)
-		: _bRequireExactSpeakerMatch(false)
+		: _RequiredSpeaker(nullptr)
+		, _bRequireExactSpeakerMatch(false)
 		, _bShowAliases(true)
 		{
 		}
@@ -54,8 +57,8 @@ public:
 		 *  track being edited). When non-empty, an extra "Hide already used" filter is
 		 *  shown and enabled by default. */
 		SLATE_ARGUMENT(TSet<FGuid>, AlreadyUsedLineIds)
-		SLATE_ARGUMENT(FGameplayTag, RequiredSpeaker)  // empty = no constraint
-		SLATE_ARGUMENT(bool, bRequireExactSpeakerMatch) // if RequiredSpeaker is empty, require lines without speaker
+		SLATE_ARGUMENT(const UKzSpeakerAsset*, RequiredSpeaker)  // null = no constraint
+		SLATE_ARGUMENT(bool, bRequireExactSpeakerMatch) // if RequiredSpeaker is null, require lines without speaker
 		SLATE_ARGUMENT(bool, bShowAliases)
 		/** Fired when the user clicks a line or hits Enter while focused on the search. */
 		SLATE_EVENT(FOnEntryPicked, OnEntryPicked)
@@ -78,11 +81,11 @@ private:
 
 	// Filter UI
 	TSharedRef<SWidget> BuildFilterMenu();
-	void ToggleSpeakerFilter(FGameplayTag SpeakerTag);
+	void ToggleSpeakerFilter(TWeakObjectPtr<const UKzSpeakerAsset> Speaker);
 	void ToggleLineTagFilter(FGameplayTag LineTag);
 	void ClearAllFilters();
 	int32 GetActiveFilterCount() const;
-	FText GetSpeakerDisplayLabel(FGameplayTag SpeakerTag) const;
+	FText GetSpeakerDisplayLabel(TWeakObjectPtr<const UKzSpeakerAsset> Speaker) const;
 
 	// Apply current search + filter state to VisibleItems.
 	void RebuildVisibleItems();
@@ -96,19 +99,18 @@ private:
 	TArray<KzDialoguePickerInternal::FEntryPtr>	  VisibleItems;
 
 	// Distinct values gathered from the asset, used to populate the filter popup.
-	TArray<FGameplayTag> DistinctSpeakerTags;	 // includes an invalid tag for "narration"
-	TMap<FGameplayTag, FString> SpeakerDisplayNames;	 // representative display name for each speaker
+	TArray<TWeakObjectPtr<const UKzSpeakerAsset>> DistinctSpeakers;	 // includes a null entry for "narration"
 	TArray<FGameplayTag> DistinctLineTags;
 
 	// Speaker constraint (passed by argument, immutable for the lifetime of the picker).
-	FGameplayTag RequiredSpeaker;
+	TWeakObjectPtr<const UKzSpeakerAsset> RequiredSpeaker;
 	bool bRequireExactSpeakerMatch = false;
 
 	bool bShowAliases = true;
 
 	// Active filter state.
 	FString CurrentSearchText;	     // lowercase
-	TSet<FGameplayTag> SelectedSpeakerFilters;	 // empty = no speaker filter
+	TSet<TWeakObjectPtr<const UKzSpeakerAsset>> SelectedSpeakerFilters;	 // empty = no speaker filter; null entry = narration
 	TSet<FGameplayTag> SelectedLineTagFilters;	 // empty = no tag filter
 	bool bHideAlreadyUsed = false;
 

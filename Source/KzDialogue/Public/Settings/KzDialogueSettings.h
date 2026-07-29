@@ -42,14 +42,29 @@ public:
 
 	/**
 	 * Default policy for what happens to a line's audio when the player transitions to the next line.
-	 * Lines and channels may override.
+	 * Lines and channels may override. An Inherit smuggled in via a hand-edited ini resolves as Stop.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category = "General")
+	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ValidEnumValues = "Stop, ContinueIfDifferentSpeaker, Continue"))
 	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker;
+
+	/** Default placement for line audio when neither the line nor its channel override it. An Inherit smuggled in via a hand-edited ini resolves as AttachedToSpeaker. */
+	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ValidEnumValues = "TwoD, AttachedToSpeaker"))
+	EKzLineAudioSpatialization DefaultAudioSpatialization = EKzLineAudioSpatialization::AttachedToSpeaker;
 
 	/** Localization Dashboard target that dialogue translation CSVs are imported into (usually "Game"). Editor-only workflow, harmless at runtime. */
 	UPROPERTY(Config, EditAnywhere, Category = "Localization")
 	FString LocalizationTargetName = TEXT("Game");
+
+	/** FText::Format named-arg pattern composing structured speaker names. Available args: {Honorific}, {Given}, {Family}. Default for cultures without an override. Plain FString on purpose: it is per-culture by construction and must not enter the localization gather. */
+	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
+	FString DefaultSpeakerNameFormat = TEXT("{Honorific} {Given} {Family}");
+
+	/** Per-culture format overrides ("ja" -> "{Family} {Given}{Honorific}"), resolved via the culture priority chain (es-MX falls back to es before the default). */
+	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
+	TMap<FString, FString> SpeakerNameFormatsPerCulture;
+
+	/** Active-culture name format: the per-culture override matching the priority chain, DefaultSpeakerNameFormat otherwise. */
+	const FString& GetActiveSpeakerNameFormat() const;
 
 	/** Default mouth/jaw "speaking level" tuning derived from a line's audio. Speakers can override per character. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speaking")

@@ -13,59 +13,34 @@
 class USoundBase;
 class UKzDialogueAsset;
 class UKzDialogueTimeline;
+class UKzSpeakerAsset;
 
 namespace Kz::Tags::Dialogue
 {
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(MainChannel);
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(BarkChannel);
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(SystemChannel);
-	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(SpeakerBase);
 }
 
 /**
- * Runtime-resolvable identity of a speaker. Allows display name and audio attachment to
- * be decoupled from the line authoring; resolved against speaker components at play time.
+ * Reference to the character speaking a line or alias. The asset reference itself IS the
+ * speaker identity: registry lookups, equality checks and editor filters compare it
+ * directly. Null = narration.
  */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueSpeaker
 {
 	GENERATED_BODY()
 
-	/** Logical identity of the speaker (e.g. "Dialogue.Speaker.NPC.Kirzo"). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker", meta = (Categories = "Dialogue.Speaker"))
-	FGameplayTag SpeakerTag;
+	/** Character speaking. Null = narration. DisplayName keeps flattened rows (ShowOnlyInnerProperties hosts) reading "Speaker". */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker", meta = (DisplayName = "Speaker"))
+	TObjectPtr<UKzSpeakerAsset> Asset = nullptr;
 
-	/**
-	 * Optional override for the display name.
-	 * If empty, the speaker component is queried at runtime.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
-	FText DisplayNameOverride;
+	bool IsValid() const { return Asset != nullptr; }
+	bool operator==(const FKzDialogueSpeaker& Other) const { return Asset == Other.Asset; }
 
-	bool IsValid() const { return SpeakerTag.IsValid() || !DisplayNameOverride.IsEmpty(); }
-
-	/**
-	 * Resolves a human-readable label for this speaker, suitable for editor UI and
-	 * runtime fallbacks. Resolution order:
-	 *   1. DisplayNameOverride if set.
-	 *   2. The leaf of SpeakerTag (e.g. "Dialogue.Speaker.NPC.Kirzo" -> "Kirzo").
-	 *   3. A "<Narration>" placeholder when neither is available.
-	 */
-	FText GetDisplayLabel() const
-	{
-		if (!DisplayNameOverride.IsEmpty())
-		{
-			return DisplayNameOverride;
-		}
-
-		if (SpeakerTag.IsValid())
-		{
-			const FString LeafName = SpeakerTag.GetTagLeafName().ToString();
-			return FText::FromString(FName::NameToDisplayString(LeafName, false));
-		}
-
-		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
-	}
+	/** Human-readable label: the asset's resolved name, its asset name as editor fallback, or "<Narration>" when null. */
+	FText GetDisplayLabel() const;
 };
 
 /**
@@ -87,6 +62,20 @@ enum class EKzLineAudioInterruptionPolicy : uint8
 
 	/** Always let the audio finish; subsequent lines' audios overlap. */
 	Continue
+};
+
+/** How a line's audio is placed in the world. Resolves in cascade: line override -> channel default -> project default. */
+UENUM(BlueprintType)
+enum class EKzLineAudioSpatialization : uint8
+{
+	/** Use the value from the next layer up. Only valid as an override. */
+	Inherit,
+
+	/** Non-spatialized (UI-style) audio. */
+	TwoD UMETA(DisplayName = "2D"),
+
+	/** Attached to the resolved speaker component's actor; follows it. Falls back to 2D when the line has no speaker or no component is registered in the world. */
+	AttachedToSpeaker
 };
 
 /** How a line's playback length is derived from its Duration field and its audio. */
@@ -116,7 +105,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FGuid LineId;
 
 	/** Speaker for this line. May be empty (narration). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ShowOnlyInnerProperties))
 	FKzDialogueSpeaker Speaker;
 
 	/** Localizable subtitle text. */
@@ -151,9 +140,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
 	EKzLineDurationMode DurationMode = EKzLineDurationMode::Auto;
 
-	/** When true and Audio is set, the audio is spawned 2D regardless of speaker location. */
+	/** How this line's audio is placed in the world. Resolution chain: line > channel > project settings. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
-	bool bPlayAudio2D = false;
+	EKzLineAudioSpatialization AudioSpatialization = EKzLineAudioSpatialization::Inherit;
 
 	/** Policy applied to this line's audio when the player transitions to the next line. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
@@ -201,10 +190,6 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */
 	UPROPERTY()
 	uint32 SourceTextHash = 0;
-
-	/** CRC32 of Speaker.DisplayNameOverride's source string. Same role as SourceTextHash for the speaker override. */
-	UPROPERTY()
-	uint32 SourceSpeakerHash = 0;
 
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
@@ -316,15 +301,18 @@ struct FKzDialogueAlias
 	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
 	FGuid AliasId;
 
-	/** Author-facing identifier, e.g. "Greeting", "Surprise", "Insult". Must be unique
-	 *  within the asset. Used by gameplay code as a stable key. */
+	/**
+	 * Author-facing identifier, e.g. "Greeting", "Surprise", "Insult".
+	 * Must be unique within the asset. Used by gameplay code as a stable key.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	FName AliasName;
 
-	/** Speaker constraint: every line referenced by this alias must use this speaker.
-	 *  An empty/invalid speaker tag means the alias is for narration-style lines (no
-	 *  speaker assigned). */
-	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	/**
+	 * Speaker constraint: every line referenced by this alias must use this speaker.
+	 * A null speaker means the alias is for narration-style lines (no speaker assigned).
+	 */
+	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (ShowOnlyInnerProperties))
 	FKzDialogueSpeaker Speaker;
 
 	/** How the subsystem picks a line each time the alias is resolved. */
@@ -362,11 +350,10 @@ struct FKzDialogueAlias
 	{
 		const FString NameStr = AliasName.IsNone() ? TEXT("(unnamed)") : AliasName.ToString();
 
-		const FString SpeakerStr = Speaker.GetDisplayLabel().ToString();
-		if (!SpeakerStr.IsEmpty())
+		if (Speaker.IsValid())
 		{
 			return FText::Format(NSLOCTEXT("KzDialogueAlias", "AliasLabelWithSpeaker", "({0}) {1} [{2}]"),
-				FText::FromString(SpeakerStr),
+				Speaker.GetDisplayLabel(),
 				FText::FromString(NameStr),
 				FText::AsNumber(LineIds.Num()));
 		}
@@ -533,6 +520,10 @@ struct FKzDialogueChannelDefinition
 	/** Default audio interruption policy for lines on this channel. Lines may override per-line. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	EKzLineAudioInterruptionPolicy DefaultAudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
+
+	/** Default audio spatialization for lines on this channel. Lines may override per-line. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	EKzLineAudioSpatialization DefaultAudioSpatialization = EKzLineAudioSpatialization::Inherit;
 
 	/**
 	 * When this channel is active, other channels' audio is reduced by DuckedVolume.

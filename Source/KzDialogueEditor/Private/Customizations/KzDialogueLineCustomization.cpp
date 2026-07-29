@@ -11,6 +11,7 @@
 #include "IPropertyUtilities.h"
 #include "PropertyHandle.h"
 #include "ScopedTransaction.h"
+#include "Utils/KzEditorUtils.h"
 
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Text/STextBlock.h"
@@ -40,15 +41,7 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 	PropertyUtilities = StructCustomizationUtils.GetPropertyUtilities();
 
 	// Editable line fields (the runtime-only Timeline pointer is not among them).
-	uint32 NumChildren = 0;
-	StructPropertyHandle->GetNumChildren(NumChildren);
-	for (uint32 i = 0; i < NumChildren; ++i)
-	{
-		if (TSharedPtr<IPropertyHandle> ChildHandle = StructPropertyHandle->GetChildHandle(i))
-		{
-			StructBuilder.AddProperty(ChildHandle.ToSharedRef());
-		}
-	}
+	FKzPropertyHandleUtils::AddChildrenHonoringInnerProperties(StructBuilder, StructPropertyHandle);
 
 	// Per-line timeline, authored on the asset and presented here by line id.
 	UKzDialogueAsset* Asset = ResolveOwningAsset();

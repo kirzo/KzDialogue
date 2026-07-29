@@ -4,6 +4,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueNotify.h"
+#include "KzSpeakerAsset.h"
 #include "Localization/KzDialogueTranslationCsv.h"
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Sound/SoundBase.h"
@@ -230,22 +231,21 @@ void UKzDialogueValidator_AliasSpeakerMismatch::Validate_Implementation(const UO
 	for (int32 i = 0; i < Dialogue->Aliases.Num(); ++i)
 	{
 		const FKzDialogueAlias& Alias = Dialogue->Aliases[i];
-		const FGameplayTag& AliasSpeaker = Alias.Speaker.SpeakerTag;
 
 		for (const FGuid& LineId : Alias.LineIds)
 		{
 			FKzDialogueLine Line;
 			if (!Dialogue->TryGetLineById(LineId, Line)) { continue; } // covered by InvalidLine validator
 
-			if (Line.Speaker.SpeakerTag != AliasSpeaker)
+			if (!(Line.Speaker == Alias.Speaker))
 			{
 				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 					EKzValidationSeverity::Error,
 					FText::Format(LOCTEXT("AliasSpeakerMismatch",
 						"Alias '{0}' (speaker: {1}) references a line with a different speaker ({2})."),
 						FText::FromName(Alias.AliasName),
-						FText::FromString(AliasSpeaker.ToString()),
-						FText::FromString(Line.Speaker.SpeakerTag.ToString())),
+						Alias.Speaker.GetDisplayLabel(),
+						Line.Speaker.GetDisplayLabel()),
 					Id, Alias.AliasId);
 				Issue.ContextIndex = i;
 				OutIssues.Add(Issue);
@@ -384,11 +384,17 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 
 bool UKzDialogueValidator_Localization::CanValidate_Implementation(const UObject* Asset) const
 {
-	return Asset && Asset->IsA<UKzDialogueAsset>();
+	return Asset && (Asset->IsA<UKzDialogueAsset>() || Asset->IsA<UKzSpeakerAsset>());
 }
 
 void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
 {
+	if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
+	{
+		ValidateSpeakerAsset(SpeakerAsset, OutIssues);
+		return;
+	}
+
 	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
 	if (!Dialogue) { return; }
 
@@ -421,7 +427,6 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 			}
 		};
 		CheckKey(Line.Text, TEXT("-Text"));
-		CheckKey(Line.Speaker.DisplayNameOverride, TEXT("-Speaker"));
 	}
 
 	// Translation-dependent checks need a localization target; without one there is nothing to compare against.
@@ -454,53 +459,104 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 	{
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
 
-		auto CheckTranslations = [&](const FText& Source, bool bLineText)
+		const FText& Source = Line.Text;
+		if (Source.IsEmpty()) { continue; }
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+		const TOptional<FString> Key = FTextInspector::GetKey(Source);
+		const FString* SourceString = FTextInspector::GetSourceString(Source);
+		if (!Namespace.IsSet() || !Key.IsSet() || !SourceString) { continue; }
+
+		const TSet<FString> SourceArgs = GetFormatArgs(*SourceString);
+
+		for (const FString& Culture : Cultures)
 		{
-			if (Source.IsEmpty()) { return; }
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-			const TOptional<FString> Key = FTextInspector::GetKey(Source);
-			const FString* SourceString = FTextInspector::GetSourceString(Source);
-			if (!Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Namespace.GetValue()), FLocKey(Key.GetValue()), nullptr);
 
-			const TSet<FString> SourceArgs = GetFormatArgs(*SourceString);
+			// Untranslated is the coverage report's business, not a per-save warning.
+			if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
 
-			for (const FString& Culture : Cultures)
+			const FString& Translation = Entry->Translation.Text;
+
+			// Stale translation: the remaining checks would compare against the wrong baseline.
+			if (Entry->Source.Text != *SourceString)
 			{
-				const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Namespace.GetValue()), FLocKey(Key.GetValue()), nullptr);
-
-				// Untranslated is the coverage report's business, not a per-save warning.
-				if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
-
-				const FString& Translation = Entry->Translation.Text;
-
-				// Stale translation: the remaining checks would compare against the wrong baseline.
-				if (Entry->Source.Text != *SourceString)
-				{
-					AddIssue(EKzValidationSeverity::Warning,
-						FText::Format(LOCTEXT("StaleTranslation", "Line {0}: the '{1}' translation predates the current source text; needs review."), FText::AsNumber(i + 1), FText::FromString(Culture)),
-						Line.LineId, i);
-					continue;
-				}
-
-				if (bLineText && Line.MaxCharacters > 0 && Translation.Len() > Line.MaxCharacters)
-				{
-					AddIssue(EKzValidationSeverity::Warning,
-						FText::Format(LOCTEXT("MaxCharsExceeded", "Line {0}: the '{1}' translation is {2} characters long, over the line's MaxCharacters ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::AsNumber(Translation.Len()), FText::AsNumber(Line.MaxCharacters)),
-						Line.LineId, i);
-				}
-
-				const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
-				if (SourceArgs.Num() != TranslationArgs.Num() || !SourceArgs.Includes(TranslationArgs))
-				{
-					AddIssue(EKzValidationSeverity::Error,
-						FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
-						Line.LineId, i);
-				}
+				AddIssue(EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("StaleTranslation", "Line {0}: the '{1}' translation predates the current source text; needs review."), FText::AsNumber(i + 1), FText::FromString(Culture)),
+					Line.LineId, i);
+				continue;
 			}
-		};
 
-		CheckTranslations(Line.Text, true);
-		CheckTranslations(Line.Speaker.DisplayNameOverride, false);
+			if (Line.MaxCharacters > 0 && Translation.Len() > Line.MaxCharacters)
+			{
+				AddIssue(EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("MaxCharsExceeded", "Line {0}: the '{1}' translation is {2} characters long, over the line's MaxCharacters ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::AsNumber(Translation.Len()), FText::AsNumber(Line.MaxCharacters)),
+					Line.LineId, i);
+			}
+
+			const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
+			if (SourceArgs.Num() != TranslationArgs.Num() || !SourceArgs.Includes(TranslationArgs))
+			{
+				AddIssue(EKzValidationSeverity::Error,
+					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
+					Line.LineId, i);
+			}
+		}
+	}
+}
+
+void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const FName Id = GetValidatorId();
+	const FString ExpectedNamespace = FString::Printf(TEXT("KzSpeaker.%s"), *Speaker->AssetId.ToString(EGuidFormats::Digits));
+
+	struct FKzNamedField { const TCHAR* Key; const FText& Text; };
+	const FKzNamedField Fields[] = {
+		{ TEXT("DisplayName"), Speaker->DisplayName },
+		{ TEXT("GivenName"), Speaker->GivenName },
+		{ TEXT("FamilyName"), Speaker->FamilyName },
+		{ TEXT("Honorific"), Speaker->Honorific },
+	};
+
+	// Key anchoring. Self-heals on resave.
+	for (const FKzNamedField& Field : Fields)
+	{
+		if (Field.Text.IsEmpty()) { continue; }
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Field.Text);
+		const TOptional<FString> Key = FTextInspector::GetKey(Field.Text);
+		if (!Namespace.IsSet() || !Key.IsSet() || Namespace.GetValue() != ExpectedNamespace || Key.GetValue() != Field.Key)
+		{
+			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning,
+				FText::Format(LOCTEXT("SpeakerUnstableKey", "{0} is not anchored to its stable localization key; resave the asset to rebind it."), FText::FromString(Field.Key)),
+				Id));
+		}
+	}
+
+	// Stale name translations, against the localization target archives.
+	FKzLocTargetInfo Target;
+	FText TargetError;
+	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
+
+	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, nullptr)) { return; }
+
+	for (const FString& Culture : Target.ForeignCultures)
+	{
+		if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr)) { continue; }
+
+		for (const FKzNamedField& Field : Fields)
+		{
+			if (Field.Text.IsEmpty()) { continue; }
+			const FString* SourceString = FTextInspector::GetSourceString(Field.Text);
+			if (!SourceString) { continue; }
+
+			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(ExpectedNamespace), FLocKey(Field.Key), nullptr);
+			if (Entry.IsValid() && !Entry->Translation.Text.IsEmpty() && Entry->Source.Text != *SourceString)
+			{
+				OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("SpeakerStaleTranslation", "{0}: the '{1}' translation predates the current name; needs review."), FText::FromString(Field.Key), FText::FromString(Culture)),
+					Id));
+			}
+		}
 	}
 }
 

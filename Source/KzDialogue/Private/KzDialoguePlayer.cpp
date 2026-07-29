@@ -7,6 +7,7 @@
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
 
+#include "AudioDevice.h"
 #include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
@@ -498,19 +499,50 @@ void UKzDialoguePlayer::StartLineAudioNow()
 		return;
 	}
 
-	// CreateSound2D (not SpawnSound2D) so it isn't auto-played before we bind the envelope follower; we Play() below.
-	// 2D regardless of speaker: attachment is a per-speaker concern (see UKzDialogueSpeakerComponent::Speak()).
-	ActiveAudio = UGameplayStatics::CreateSound2D(World, Sound);
-	if (!IsValid(ActiveAudio))
+	// Attached mode needs a live speaker component; without one (narration line, actor absent,
+	// Sequencer preview world) the line falls back to 2D.
+	USceneComponent* AttachTarget = nullptr;
+	FName AttachSocket = NAME_None;
+	if (ResolveAudioSpatialization(CurrentLine) == EKzLineAudioSpatialization::AttachedToSpeaker && CurrentLine.Speaker.IsValid())
 	{
-		return;
+		if (UKzDialogueSpeakerComponent* SpeakerComponent = UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset))
+		{
+			AttachTarget = SpeakerComponent->GetAudioAttachComponent(AttachSocket);
+		}
+	}
+
+	// Neither path may go through the SpawnSound* helpers: those auto-play, and the envelope
+	// follower must be bound BEFORE Play (see BindAudioEnvelope below). Create silent, Play at the end.
+	if (AttachTarget)
+	{
+		// SpawnSoundAttached's creation, minus its final Play.
+		FAudioDevice::FCreateComponentParams Params(World, AttachTarget->GetOwner());
+		Params.SetLocation(AttachTarget->GetSocketLocation(AttachSocket));
+		Params.bStopWhenOwnerDestroyed = true;
+		ActiveAudio = FAudioDevice::CreateComponent(Sound, Params);
+		if (!IsValid(ActiveAudio))
+		{
+			return;
+		}
+		ActiveAudio->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, AttachSocket);
+		ActiveAudio->bAllowSpatialization = World->IsGameWorld();
+		ActiveAudio->bIsUISound = !World->IsGameWorld();
+	}
+	else
+	{
+		// CreateSound2D (not SpawnSound2D) for the same bind-before-play reason.
+		ActiveAudio = UGameplayStatics::CreateSound2D(World, Sound);
+		if (!IsValid(ActiveAudio))
+		{
+			return;
+		}
+
+		// The UI-sound flag doubles as "keep playing while the game isn't ticking". In game worlds we
+		// clear it so dialogue pauses with SetGamePaused; in the editor world (Sequencer preview) the
+		// game never ticks, so clearing it would mute preview playback entirely.
+		ActiveAudio->bIsUISound = !World->IsGameWorld();
 	}
 	ActiveAudio->bAutoDestroy = true;
-
-	// The UI-sound flag doubles as "keep playing while the game isn't ticking". In game worlds we
-	// clear it so dialogue pauses with SetGamePaused; in the editor world (Sequencer preview) the
-	// game never ticks, so clearing it would mute preview playback entirely.
-	ActiveAudio->bIsUISound = !World->IsGameWorld();
 
 	// Apply audio params from the property bag. Each value is forwarded to the audio
 	// component using the type-appropriate setter.
@@ -663,8 +695,8 @@ void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)
 
 void UKzDialoguePlayer::ResolveSpeakingSpeaker()
 {
-	UKzDialogueSpeakerComponent* NewSpeaker = CurrentLine.Speaker.SpeakerTag.IsValid()
-		? UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag)
+	UKzDialogueSpeakerComponent* NewSpeaker = CurrentLine.Speaker.IsValid()
+		? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset)
 		: nullptr;
 
 	if (NewSpeaker != SpeakingSpeaker.Get())
@@ -706,6 +738,30 @@ EKzLineAudioInterruptionPolicy UKzDialoguePlayer::ResolveAudioPolicy(const FKzDi
 		: EKzLineAudioInterruptionPolicy::Stop;
 }
 
+EKzLineAudioSpatialization UKzDialoguePlayer::ResolveAudioSpatialization(const FKzDialogueLine& Line) const
+{
+	if (Line.AudioSpatialization != EKzLineAudioSpatialization::Inherit)
+	{
+		return Line.AudioSpatialization;
+	}
+
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	if (!Settings) { return EKzLineAudioSpatialization::AttachedToSpeaker; }
+
+	if (const FKzDialogueChannelDefinition* ChannelDef = Settings->FindChannel(Channel))
+	{
+		if (ChannelDef->DefaultAudioSpatialization != EKzLineAudioSpatialization::Inherit)
+		{
+			return ChannelDef->DefaultAudioSpatialization;
+		}
+	}
+
+	// An Inherit smuggled into the project default via a hand-edited ini resolves as attached.
+	return Settings->DefaultAudioSpatialization != EKzLineAudioSpatialization::Inherit
+		? Settings->DefaultAudioSpatialization
+		: EKzLineAudioSpatialization::AttachedToSpeaker;
+}
+
 void UKzDialoguePlayer::ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine, const FKzDialogueLine* IncomingLine)
 {
 	if (!IsValid(ActiveAudio)) { return; }
@@ -719,7 +775,7 @@ void UKzDialoguePlayer::ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine
 			bStop = false;
 			break;
 		case EKzLineAudioInterruptionPolicy::ContinueIfDifferentSpeaker:
-			bStop = !IncomingLine || IncomingLine->Speaker.SpeakerTag == OutgoingLine.Speaker.SpeakerTag;
+			bStop = !IncomingLine || IncomingLine->Speaker == OutgoingLine.Speaker;
 			break;
 		case EKzLineAudioInterruptionPolicy::Stop:
 		default:
@@ -967,9 +1023,9 @@ void UKzDialoguePlayer::BakeTimeline()
 	}
 
 	CachedLineDuration = ResolveLineDuration(CurrentLine);
-	if (CurrentLine.Speaker.SpeakerTag.IsValid())
+	if (CurrentLine.Speaker.IsValid())
 	{
-		CachedLineSpeaker = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, CurrentLine.Speaker.SpeakerTag);
+		CachedLineSpeaker = UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset);
 	}
 
 	FKzDialogueTimeResolveContext ResolveContext;
@@ -1051,9 +1107,9 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogue
 	Context.LineSpeaker = CachedLineSpeaker;
 
 	UKzDialogueSpeakerComponent* Target = CachedLineSpeaker;
-	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride.IsValid())
+	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride)
 	{
-		Target = UKzDialogueSpeakerComponent::FindSpeakerByTag(this, Entry.Notify->TargetSpeakerOverride);
+		Target = UKzDialogueSpeakerComponent::FindSpeaker(this, Entry.Notify->TargetSpeakerOverride);
 	}
 
 	Context.TargetSpeaker = Target;

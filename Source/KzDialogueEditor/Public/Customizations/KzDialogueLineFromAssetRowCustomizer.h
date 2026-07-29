@@ -8,6 +8,7 @@
 #include "Misc/Guid.h"
 
 class UKzDialogueAsset;
+class UKzSpeakerAsset;
 class IPropertyHandle;
 class IPropertyHandleArray;
 
@@ -26,7 +27,7 @@ class FKzDialogueLineFromAssetRowCustomizer : public FKzPropertyStackRowCustomiz
 {
 public:
 	using FResolveAssetFn = TFunction<UKzDialogueAsset* ()>;
-	using FResolveSpeakerFn = TFunction<FGameplayTag()>;
+	using FResolveSpeakerFn = TFunction<const UKzSpeakerAsset* ()>;
 
 	void SetResolveAssetFn(FResolveAssetFn InFn) { ResolveAssetFn = MoveTemp(InFn); }
 	void SetResolveSpeakerFn(FResolveSpeakerFn InFn) { ResolveSpeakerFn = MoveTemp(InFn); }
@@ -48,7 +49,7 @@ public:
 
 private:
 	UKzDialogueAsset* ResolveAsset() const { return ResolveAssetFn ? ResolveAssetFn() : nullptr; }
-	FGameplayTag ResolveSpeaker() const { return ResolveSpeakerFn ? ResolveSpeakerFn() : FGameplayTag(); }
+	const UKzSpeakerAsset* ResolveSpeaker() const { return ResolveSpeakerFn ? ResolveSpeakerFn() : nullptr; }
 
 	FGuid ReadGuid(TSharedPtr<IPropertyHandle> Handle) const;
 
