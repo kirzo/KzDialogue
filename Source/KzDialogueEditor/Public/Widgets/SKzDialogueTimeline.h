@@ -35,6 +35,8 @@ public:
 		SLATE_ATTRIBUTE(float, DisplayDuration)
 		/** Fired after any edit so the host can mark the asset dirty. */
 		SLATE_EVENT(FSimpleDelegate, OnModified)
+		/** Fired when this widget changes height (event details filling on selection); the hosting details panel must refresh its tree or its scrollbar goes stale. */
+		SLATE_EVENT(FSimpleDelegate, OnRequestHostRefresh)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, UKzDialogueTimeline* InTimeline);
@@ -79,9 +81,6 @@ private:
 	void SyncEventDetails();
 	void OnEventDetailsChanged(const FPropertyChangedEvent& PropertyChangedEvent);
 
-	/** Dirties this widget and every ancestor so the hosting details panel re-measures us. */
-	void InvalidateHostLayout();
-
 	void BeginRetime();
 	void RetimeEvent(int32 TrackIndex, int32 EventIndex, float StartSeconds, float EndSeconds);
 	void EndRetime();
@@ -121,6 +120,7 @@ private:
 	TWeakObjectPtr<UKzDialogueTimeline> Timeline;
 	TAttribute<float> DisplayDuration;
 	FSimpleDelegate OnModified;
+	FSimpleDelegate OnRequestHostRefresh;
 
 	int32 SelTrack = INDEX_NONE;
 	int32 SelEvent = INDEX_NONE;
@@ -148,7 +148,7 @@ private:
 	/** Cached audio waveform envelope drawn in the group band; rebuilt when the line's wave changes. */
 	TSharedPtr<FKzWaveformPreview> WaveformPreview;
 
-	/** Frames left to keep re-dirtying the ancestor chain after a size-changing edit; the inner details view rebuilds deferred, so one frame is not enough. */
+	/** Frames left to keep requesting a host tree refresh after a size-changing edit; the inner details view rebuilds deferred, so one frame is not enough. */
 	int32 HostInvalidationFramesPending = 0;
 
 	/** Editor-only audio preview: playhead position (seconds), transport state, and the live component. */

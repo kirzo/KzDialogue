@@ -951,6 +951,7 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 	Timeline = InTimeline;
 	DisplayDuration = InArgs._DisplayDuration;
 	OnModified = InArgs._OnModified;
+	OnRequestHostRefresh = InArgs._OnRequestHostRefresh;
 
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	FDetailsViewArgs DetailsArgs;
@@ -1121,13 +1122,15 @@ void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double I
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
 
-	// Keep dirtying the host for a couple of frames after a size-changing edit: the inner
-	// structure details view rebuilds its content deferred, so invalidating only at the moment
-	// of the edit measures the pre-growth size and the hosting panel's scrollbar goes stale.
+	// The hosting details panel's tree only re-measures on RequestTreeRefresh or when its own
+	// geometry changes size (that is why an external resize used to "fix" the stale scrollbar).
+	// Keep requesting the refresh for a couple of frames after a size-changing edit: the inner
+	// structure details view rebuilds its content deferred, so the first frame still measures
+	// the pre-growth size.
 	if (HostInvalidationFramesPending > 0)
 	{
 		--HostInvalidationFramesPending;
-		InvalidateHostLayout();
+		OnRequestHostRefresh.ExecuteIfBound();
 	}
 
 	// Consume a pending notify selection (e.g. from a validation-issue click) once the timeline for
@@ -1717,20 +1720,6 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeEventMenuForTrack(int32 TrackIndex,
 	}
 	Menu.EndSection();
 	return Menu.MakeWidget();
-}
-
-void SKzDialogueTimeline::InvalidateHostLayout()
-{
-	// The hosting details panel measures this widget once; content that changes height after
-	// construction (the event details filling on selection, tracks added) is never re-measured
-	// until an external resize forces a prepass. Dirty the whole ancestor chain by hand so the
-	// next frame re-measures it, exactly as a resize would.
-	for (SWidget* Widget = this; Widget;)
-	{
-		Widget->MarkPrepassAsDirty();
-		Widget->Invalidate(EInvalidateWidgetReason::Layout);
-		Widget = Widget->GetParentWidget().Get();
-	}
 }
 
 void SKzDialogueTimeline::SyncEventDetails()

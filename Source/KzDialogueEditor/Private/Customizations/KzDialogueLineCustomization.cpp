@@ -73,6 +73,12 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 					{
 						if (UKzDialogueAsset* OwningAsset = ResolveOwningAsset()) { OwningAsset->MarkPackageDirty(); }
 					})
+					.OnRequestHostRefresh_Lambda([this]()
+					{
+						// RefreshTree only: re-measures the hosting details tree (fixing its scroll
+						// after this row grows) without re-running customizations.
+						if (PropertyUtilities.IsValid()) { PropertyUtilities->RequestRefresh(); }
+					})
 			];
 	}
 	else
