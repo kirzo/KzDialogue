@@ -330,6 +330,7 @@ private:
 	void UnbindAudioEnvelope();
 	void UpdateSpeakingLevel(float DeltaTime);
 	void ResolveSpeakingSpeaker();
+	void ResolveLineFormatArguments();
 
 	UFUNCTION()
 	void HandleAudioEnvelope(const USoundWave* PlayingSoundWave, float EnvelopeValue);

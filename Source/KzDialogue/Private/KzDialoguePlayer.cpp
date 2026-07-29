@@ -4,6 +4,7 @@
 #include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueSubsystem.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
 
@@ -325,6 +326,10 @@ void UKzDialoguePlayer::Enter_LineEntering()
 
 	// Decide what to do with the previous line's audio now that we know the incoming one.
 	ResolveOutgoingAudio(PreviousLine, &CurrentLine);
+
+	// Fill ambient template arguments before anyone sees the line, so every event and view
+	// receives a copy that formats correctly.
+	ResolveLineFormatArguments();
 
 	OnLineStarted.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
@@ -689,6 +694,30 @@ void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)
 		if (UKzDialogueSpeakerComponent* Speaker = SpeakingSpeaker.Get())
 		{
 			Speaker->SetSpeakingLevel(SpeakingLevel);
+		}
+	}
+}
+
+void UKzDialoguePlayer::ResolveLineFormatArguments()
+{
+	// Ambient token resolvers only run for lines whose pattern actually uses arguments.
+	TArray<FString> ArgumentNames;
+	FTextFormat(CurrentLine.Text).GetFormatArgumentNames(ArgumentNames);
+	if (ArgumentNames.Num() == 0) { return; }
+
+	UWorld* World = GetWorld();
+	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+	if (!Subsystem) { return; }
+
+	for (const FString& ArgumentName : ArgumentNames)
+	{
+		// Explicit per-play arguments (set by the call site on its line copy) win over ambient resolvers.
+		if (CurrentLine.FormatArguments.Contains(ArgumentName)) { continue; }
+
+		const FKzDialogueTextArgumentResolver* Resolver = Subsystem->FindTextArgumentResolver(FName(*ArgumentName));
+		if (Resolver && Resolver->IsBound())
+		{
+			CurrentLine.FormatArguments.Add(ArgumentName, FFormatArgumentValue(Resolver->Execute(CurrentLine)));
 		}
 	}
 }
