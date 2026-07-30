@@ -22,8 +22,6 @@ UKzDialogueSettings::UKzDialogueSettings()
 		Main.Tag = DefaultChannel;
 		Main.DisplayName = NSLOCTEXT("KzDialogue", "ChannelMain", "Main");
 		Main.DefaultPriority = 100;
-		Main.MinPriority = 0;
-		Main.MaxPriority = 1000;
 		Main.bAllowInterruption = true;
 		Channels.Add(Main);
 	}
@@ -32,8 +30,6 @@ UKzDialogueSettings::UKzDialogueSettings()
 		Bark.Tag = Kz::Tags::Dialogue::BarkChannel;
 		Bark.DisplayName = NSLOCTEXT("KzDialogue", "ChannelBark", "Bark");
 		Bark.DefaultPriority = 10;
-		Bark.MinPriority = 0;
-		Bark.MaxPriority = 50;
 		Bark.bAllowInterruption = true;
 		Channels.Add(Bark);
 	}
@@ -42,8 +38,6 @@ UKzDialogueSettings::UKzDialogueSettings()
 		System.Tag = Kz::Tags::Dialogue::SystemChannel;
 		System.DisplayName = NSLOCTEXT("KzDialogue", "ChannelSystem", "System");
 		System.DefaultPriority = 500;
-		System.MinPriority = 100;
-		System.MaxPriority = 1000;
 		System.bAllowInterruption = false;
 		Channels.Add(System);
 	}

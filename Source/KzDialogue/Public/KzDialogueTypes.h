@@ -490,8 +490,8 @@ struct KZDIALOGUE_API FKzDialogueLineList
 
 /**
  * Per-channel configuration. Lives in UKzDialogueSettings and is consulted by the
- * subsystem on every Play() call to clamp priorities, decide interruption rules,
- * and (eventually) drive cross-channel ducking.
+ * subsystem on every Play() call to decide default priorities, interruption rules,
+ * and (eventually) cross-channel ducking.
  */
 USTRUCT(BlueprintType)
 struct FKzDialogueChannelDefinition
@@ -509,17 +509,6 @@ struct FKzDialogueChannelDefinition
 	/** Priority used when neither the asset nor the caller specify one. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	int32 DefaultPriority = 0;
-
-	/**
-	 * Lower bound for any priority on this channel. Caller priorities are clamped to
-	 * this range, so a "Bark" channel can guarantee it never preempts story dialogue.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
-	int32 MinPriority = 0;
-
-	/** Upper bound for any priority on this channel. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
-	int32 MaxPriority = 1000;
 
 	/**
 	 * When false, dialogues on this channel cannot be interrupted regardless of the

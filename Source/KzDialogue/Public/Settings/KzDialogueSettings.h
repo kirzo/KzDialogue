@@ -14,9 +14,9 @@ class USoundClass;
  * Project-wide settings for the KzDialogue plugin. Available under
  * Project Settings -> Plugins -> KzDialogue.
  *
- * Channel definitions declared here are consulted by UKzDialogueSubsystem to clamp
- * priorities, enforce interruption policies, and (eventually) drive cross-channel
- * audio ducking.
+ * Channel definitions declared here are consulted by UKzDialogueSubsystem to resolve
+ * default priorities, enforce interruption policies, and (eventually) drive
+ * cross-channel audio ducking.
  */
 UCLASS(Config = KzDialogue, DefaultConfig, meta = (DisplayName = "KzDialogue"))
 class KZDIALOGUE_API UKzDialogueSettings : public UDeveloperSettings
