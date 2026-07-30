@@ -57,7 +57,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark")
 	bool bFirstBarkImmediate = false;
 
-	/** Dialogue priority for the barks (-1 = inherit asset / channel default). The channel clamps it. */
+	/** Dialogue priority for the barks (-1 = inherit asset / channel default). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark", AdvancedDisplay)
 	int32 Priority = -1;
 

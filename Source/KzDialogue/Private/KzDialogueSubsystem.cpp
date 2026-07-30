@@ -226,10 +226,6 @@ int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 Asset
 	else if (ChannelDef) { Resolved = ChannelDef->DefaultPriority; }
 	else { Resolved = 0; }
 
-	if (ChannelDef)
-	{
-		Resolved = FMath::Clamp(Resolved, ChannelDef->MinPriority, ChannelDef->MaxPriority);
-	}
 	return Resolved;
 }
 

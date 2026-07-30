@@ -75,8 +75,7 @@ public:
 	 * Returns the player that is now playing it, or nullptr if rejected (lower priority
 	 * than current and channel/asset don't allow interruption).
 	 *
-	 * Pass InheritPriority to fall back to the asset hint / channel default. Otherwise
-	 * the priority is clamped to the channel's [MinPriority, MaxPriority] range.
+	 * Pass InheritPriority to fall back to the asset hint / channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
 	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
@@ -181,7 +180,6 @@ private:
 	 *   - ChannelDef (channel definition from settings, or null if undeclared)
 	 *
 	 * Precedence: explicit caller > asset hint > channel default > 0.
-	 * The result is clamped to the channel's [MinPriority, MaxPriority] range when defined.
 	 */
 	int32 ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const;
 
