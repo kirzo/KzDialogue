@@ -118,6 +118,10 @@ void UKzDialoguePlayer::Pause()
 		{
 			TM.PauseTimer(AudioDelayTimerHandle);
 		}
+		if (TM.IsTimerActive(LineStartDelayTimerHandle))
+		{
+			TM.PauseTimer(LineStartDelayTimerHandle);
+		}
 	}
 
 	if (IsValid(ActiveAudio))
@@ -148,6 +152,10 @@ void UKzDialoguePlayer::Resume()
 		if (AudioDelayTimerHandle.IsValid())
 		{
 			TM.UnPauseTimer(AudioDelayTimerHandle);
+		}
+		if (LineStartDelayTimerHandle.IsValid())
+		{
+			TM.UnPauseTimer(LineStartDelayTimerHandle);
 		}
 	}
 
@@ -331,6 +339,33 @@ void UKzDialoguePlayer::Enter_LineEntering()
 	// receives a copy that formats correctly.
 	ResolveLineFormatArguments();
 
+	// Silent pre-line gap: nothing presents (no subtitle, no audio, no view enter) until it
+	// elapses, then the whole line appears at once. Scaled by TimeScale like every timing.
+	// Clearing first also kills any stale gap timer from an aborted previous dialogue.
+	const float Gap = FMath::Max(0.0f, CurrentLine.LineStartDelay) / FMath::Max(0.1f, TimeScale);
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(LineStartDelayTimerHandle);
+		if (Gap > UE_KINDA_SMALL_NUMBER)
+		{
+			World->GetTimerManager().SetTimer(LineStartDelayTimerHandle, this, &UKzDialoguePlayer::HandleLineStartDelayElapsed, Gap, /*loop=*/false);
+			return;
+		}
+	}
+
+	PresentLine();
+}
+
+void UKzDialoguePlayer::HandleLineStartDelayElapsed()
+{
+	if (State == EKzDialogueState::LineEntering)
+	{
+		PresentLine();
+	}
+}
+
+void UKzDialoguePlayer::PresentLine()
+{
 	OnLineStarted.Broadcast(this, CurrentLine);
 	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
 
@@ -383,10 +418,12 @@ void UKzDialoguePlayer::Enter_LineExiting()
 {
 	State = EKzDialogueState::LineExiting;
 
-	// The line is ending: audio still waiting on its AudioStartDelay must never start now.
+	// The line is ending: audio still waiting on its AudioStartDelay must never start now,
+	// and a pending pre-line gap (stopped mid-gap) must never present.
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
+		World->GetTimerManager().ClearTimer(LineStartDelayTimerHandle);
 	}
 
 	FlushTimeline();
