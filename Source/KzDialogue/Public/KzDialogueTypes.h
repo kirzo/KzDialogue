@@ -200,6 +200,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY()
 	uint32 SourceTextHash = 0;
 
+	/** CRC32 of Text's source string at the moment Audio was last assigned. Compared against SourceTextHash to flag lines whose text changed after their audio was recorded. 0 = no audio. */
+	UPROPERTY()
+	uint32 RecordedTextHash = 0;
+
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
 	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }

@@ -167,6 +167,19 @@ void UKzDialogueAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyCha
 void UKzDialogueAsset::PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeChainProperty(PropertyChangedEvent);
+
+	// (Re)assigning a line's audio acknowledges the current text as the recorded take, even
+	// when a previous take had already stamped the hash (the re-record workflow).
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, Audio))
+	{
+		const int32 LineIndex = PropertyChangedEvent.GetArrayIndex(GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines).ToString());
+		if (Lines.IsValidIndex(LineIndex))
+		{
+			FKzDialogueLine& Line = Lines[LineIndex];
+			Line.RecordedTextHash = Line.Audio.IsNull() ? 0 : ComputeSourceHash(Line.Text);
+		}
+	}
+
 	RefreshLineMetadata();
 }
 
@@ -283,6 +296,23 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		if (NewTextHash != Line.SourceTextHash)
 		{
 			Line.SourceTextHash = NewTextHash;
+			bDirty = true;
+		}
+
+		// Keep RecordedTextHash coherent with the audio slot: baseline newly-voiced lines to
+		// the current text (covers first assignment through any edit path, and legacy assets
+		// on load without false positives) and clear it when the audio is removed.
+		if (Line.Audio.IsNull())
+		{
+			if (Line.RecordedTextHash != 0)
+			{
+				Line.RecordedTextHash = 0;
+				bDirty = true;
+			}
+		}
+		else if (Line.RecordedTextHash == 0)
+		{
+			Line.RecordedTextHash = NewTextHash;
 			bDirty = true;
 		}
 	}

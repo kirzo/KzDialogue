@@ -86,6 +86,41 @@ void UKzDialogueValidator_BrokenAudio::Validate_Implementation(const UObject* As
 }
 
 // =======================================================================================
+// Stale audio (text changed after recording)
+// =======================================================================================
+
+bool UKzDialogueValidator_StaleAudio::CanValidate_Implementation(const UObject* Asset) const
+{
+	return Asset && Asset->IsA<UKzDialogueAsset>();
+}
+
+void UKzDialogueValidator_StaleAudio::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
+	if (!Dialogue) { return; }
+
+	const FName Id = GetValidatorId();
+	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+	{
+		const FKzDialogueLine& Line = Dialogue->Lines[i];
+		if (Line.Audio.IsNull() || Line.RecordedTextHash == 0) { continue; }
+
+		if (Line.RecordedTextHash != Line.SourceTextHash)
+		{
+			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+				EKzValidationSeverity::Warning,
+				FText::Format(
+					LOCTEXT("StaleAudio", "Line {0}: text changed after its audio was recorded. Re-record it, or re-assign the audio to accept the current text."),
+					FText::AsNumber(i + 1)),
+				Id,
+				Line.LineId);
+			Issue.ContextIndex = i;
+			OutIssues.Add(Issue);
+		}
+	}
+}
+
+// =======================================================================================
 // Duplicate LineIds
 // =======================================================================================
 
