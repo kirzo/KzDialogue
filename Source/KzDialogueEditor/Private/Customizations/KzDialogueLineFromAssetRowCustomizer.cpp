@@ -6,16 +6,27 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTypes.h"
 
+#include "Editor.h"
+#include "Editors/KzArrayAssetEditor.h"
 #include "PropertyHandle.h"
 #include "ScopedTransaction.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 
+#include "Components/AudioComponent.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Sound/SoundBase.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueLineFromAssetRowCustomizer"
+
+FKzDialogueLineFromAssetRowCustomizer::~FKzDialogueLineFromAssetRowCustomizer()
+{
+	StopActiveAudition();
+}
 
 TSharedRef<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildLeadingWidget(TSharedPtr<IPropertyHandle> Handle)
 {
@@ -38,6 +49,45 @@ TSharedRef<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildLeadingWidget(TS
 						return FAppStyle::GetBrush("Icons.WarningWithColor");
 					})
 				.ColorAndOpacity(FSlateColor::UseForeground())
+		];
+}
+
+TSharedRef<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildTrailingWidget(TSharedPtr<IPropertyHandle> Handle)
+{
+	// Play/stop button, mirroring the Lines tab rows. Collapsed for alias entries and
+	// stale ids; disabled while the referenced line has no audio.
+	return SNew(SButton)
+		.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+		.ContentPadding(FMargin(2.f))
+		.Visibility_Lambda([this, Handle]()
+			{
+				FKzDialogueLine Line;
+				return TryResolveLine(Handle, Line) ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+		.IsEnabled_Lambda([this, Handle]()
+			{
+				FKzDialogueLine Line;
+				return TryResolveLine(Handle, Line) && !Line.Audio.IsNull();
+			})
+		.OnClicked(FOnClicked::CreateSP(this, &FKzDialogueLineFromAssetRowCustomizer::OnPlayClicked, Handle))
+		.ToolTipText_Lambda([this, Handle]()
+			{
+				return IsAuditioning(Handle)
+					? LOCTEXT("StopAudition", "Stop preview")
+					: LOCTEXT("PlayAudition", "Preview this line's audio");
+			})
+		.Content()
+		[
+			SNew(SBox)
+				.WidthOverride(16.f).HeightOverride(16.f)
+				[
+					SNew(SImage)
+						.Image_Lambda([this, Handle]()
+							{
+								return FAppStyle::GetBrush(IsAuditioning(Handle) ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
+							})
+						.ColorAndOpacity(FSlateColor::UseForeground())
+				]
 		];
 }
 
@@ -128,6 +178,69 @@ void FKzDialogueLineFromAssetRowCustomizer::OnLinePicked(FKzDialogueAssetReferen
 	}
 
 	FSlateApplication::Get().DismissAllMenus();
+}
+
+void FKzDialogueLineFromAssetRowCustomizer::OnRowDoubleClicked(TSharedPtr<IPropertyHandle> Handle)
+{
+	UKzDialogueAsset* Asset = ResolveAsset();
+	const FGuid Id = ReadGuid(Handle);
+	if (!Asset || !Id.IsValid() || !GEditor) { return; }
+
+	// Jump to the referenced entry in its owning tab (Lines, or Aliases for alias entries),
+	// through the same per-tab ContextId resolution the validation panel uses.
+	IAssetEditorInstance* Instance = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(Asset, /*bFocusIfOpen=*/true);
+	if (Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
+	{
+		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(Id);
+	}
+}
+
+bool FKzDialogueLineFromAssetRowCustomizer::TryResolveLine(TSharedPtr<IPropertyHandle> Handle, FKzDialogueLine& OutLine) const
+{
+	UKzDialogueAsset* Asset = ResolveAsset();
+	const FGuid Id = ReadGuid(Handle);
+	return Asset && Id.IsValid() && Asset->TryGetLineById(Id, OutLine);
+}
+
+bool FKzDialogueLineFromAssetRowCustomizer::IsAuditioning(TSharedPtr<IPropertyHandle> Handle) const
+{
+	if (!ActiveEntryId.IsValid()) { return false; }
+	return ReadGuid(Handle) == ActiveEntryId && ActivePreviewAudio.IsValid() && ActivePreviewAudio->IsPlaying();
+}
+
+FReply FKzDialogueLineFromAssetRowCustomizer::OnPlayClicked(TSharedPtr<IPropertyHandle> Handle)
+{
+	// Toggle: if this is the entry currently playing, stop it.
+	if (IsAuditioning(Handle))
+	{
+		StopActiveAudition();
+		return FReply::Handled();
+	}
+
+	StopActiveAudition();
+
+	FKzDialogueLine Line;
+	if (!TryResolveLine(Handle, Line) || !GEditor) { return FReply::Handled(); }
+
+	USoundBase* Sound = Line.Audio.LoadSynchronous();
+	if (!Sound) { return FReply::Handled(); }
+
+	// PlayPreviewSound spawns and manages the component itself.
+	ActivePreviewAudio = GEditor->PlayPreviewSound(Sound);
+	ActiveEntryId = ReadGuid(Handle);
+
+	return FReply::Handled();
+}
+
+void FKzDialogueLineFromAssetRowCustomizer::StopActiveAudition()
+{
+	if (GEditor)
+	{
+		// Kills any preview sound. Safe to call when nothing is playing.
+		GEditor->ResetPreviewAudioComponent();
+	}
+	ActivePreviewAudio = nullptr;
+	ActiveEntryId = FGuid();
 }
 
 FGuid FKzDialogueLineFromAssetRowCustomizer::ReadGuid(TSharedPtr<IPropertyHandle> Handle) const
