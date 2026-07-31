@@ -80,12 +80,17 @@ void SKzDialogueCoveragePanel::Refresh()
 		return;
 	}
 
-	auto AddRow = [this](const FText& Culture, const FText& Translated, const FText& Missing, const FText& StaleCount, const FText& Audio, bool bHeader)
+	FillCoverageRows(*Rows, Cultures);
+}
+
+void SKzDialogueCoveragePanel::FillCoverageRows(SVerticalBox& Rows, const TArray<FKzCultureCoverage>& Cultures)
+{
+	auto AddRow = [&Rows](const FText& Culture, const FText& Translated, const FText& Missing, const FText& StaleCount, const FText& Audio, bool bHeader)
 	{
 		const FSlateFontInfo Font = FAppStyle::GetFontStyle(bHeader ? "BoldFont" : "NormalFont");
 		auto Cell = [&Font](const FText& Value) { return SNew(STextBlock).Text(Value).Font(Font); };
 
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 2.0f)
+		Rows.AddSlot().AutoHeight().Padding(0.0f, 2.0f)
 		[
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(0.2f)[ Cell(Culture) ]

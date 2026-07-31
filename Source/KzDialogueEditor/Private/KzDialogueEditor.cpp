@@ -18,6 +18,7 @@
 #include "Customizations/KzDialogueLineCustomization.h"
 #include "KzDialogueTimeline.h"
 
+#include "Dashboard/SKzDialogueDashboard.h"
 #include "Editors/KzArrayAssetEditor.h"
 #include "Localization/KzDialogueTranslationCsv.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
@@ -27,6 +28,9 @@
 #include "MessageLogModule.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 #include "ToolMenus.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
 
 #define LOCTEXT_NAMESPACE "FKzDialogueEditorModule"
 
@@ -90,10 +94,29 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing(TEXT("KzDialogueL10N"), LOCTEXT("L10NLogLabel", "KzDialogue Localization"));
+
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		TEXT("KzDialogueDashboard"),
+		FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
+		{
+			return SNew(SDockTab)
+				.TabRole(ETabRole::NomadTab)
+				.Label(LOCTEXT("DashboardTabLabel", "Dialogue Dashboard"))
+				[
+					SNew(SKzDialogueDashboard)
+				];
+		}))
+		.SetDisplayName(LOCTEXT("DashboardTabName", "Dialogue Dashboard"))
+		.SetTooltipText(LOCTEXT("DashboardTabTip", "Every dialogue asset in the project: line and voice counts, speakers, translation batch tools."))
+		// Production tool: straight under Tools (the Debug category is for debug-only viewers).
+		.SetGroup(FModuleManager::LoadModuleChecked<FWorkspaceMenuStructureModule>("WorkspaceMenuStructure").GetWorkspaceMenuStructure().GetToolsCategory())
+		.SetIcon(FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"));
 }
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(TEXT("KzDialogueDashboard"));
+
 	FKzDialogueEditorStyle::Shutdown();
 
 	if (UToolMenus* ToolMenus = UToolMenus::TryGet())

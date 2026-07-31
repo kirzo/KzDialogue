@@ -17,11 +17,7 @@ void UKzSubtitleWidget::NativeConstruct()
 
 	// RTL cultures (ar, he, fa, ur) mirror the whole subtitle layout automatically: alignments,
 	// box flow, speaker label side. Opted in here, on the root, so subclasses cannot forget it.
-	FlowDirectionPreference = EFlowDirectionPreference::Culture;
-	if (TSharedPtr<SWidget> CachedWidget = GetCachedWidget())
-	{
-		CachedWidget->SetFlowDirectionPreference(EFlowDirectionPreference::Culture);
-	}
+	SetFlowDirectionPreference(EFlowDirectionPreference::Culture);
 
 	BindFromListenedChannels();
 }

@@ -27,6 +27,10 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
 	FGuid AssetId;
 
+	/** Production-facing label shown by tooling (dialogue dashboard) instead of the asset name. Plain string on purpose: an internal label that must not enter the localization gather. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	FString DisplayName;
+
 	/**
 	 * Logical identifier for the dialogue.
 	 * Optional, useful for analytics or to reference dialogues by tag from gameplay.
@@ -105,7 +109,7 @@ public:
 
 	/**
 	 * Resolve a GUID to a concrete line. The GUID can be either a LineId or an
-	 * AliasId — the asset checks both tables. Returns false if neither matches.
+	 * AliasId; the asset checks both tables. Returns false if neither matches.
 	 */
 	bool TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& OutLine) const;
 
@@ -124,6 +128,13 @@ public:
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostLoad() override;
 	virtual void PostInitProperties() override;
+	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
+
+	/** Registry tag names exported by GetAssetRegistryTags; read by the dialogue dashboard without loading assets. */
+	static const FName TagLineCount;
+	static const FName TagVoicedCount;
+	static const FName TagSpeakers;
+	static const FName TagDisplayName;
 
 private:
 	/** Editor-only invariant pass: ensures unique GUIDs, anchors FText keys, and refreshes source text hashes. Idempotent. */
