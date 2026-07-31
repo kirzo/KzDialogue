@@ -6,7 +6,9 @@
 #include "Widgets/KzPropertyStackRowCustomizer.h"
 #include "GameplayTagContainer.h"
 #include "Misc/Guid.h"
+#include "UObject/WeakObjectPtr.h"
 
+class UAudioComponent;
 class UKzDialogueAsset;
 class UKzSpeakerAsset;
 class IPropertyHandle;
@@ -38,13 +40,17 @@ public:
 	 */
 	void SetShowAliases(bool bInShow) { bShowAliases = bInShow; }
 
+	virtual ~FKzDialogueLineFromAssetRowCustomizer() override;
+
 	//~ Begin FKzPropertyStackRowCustomizer
 	virtual TSharedRef<SWidget> BuildLeadingWidget(TSharedPtr<IPropertyHandle> Handle) override;
+	virtual TSharedRef<SWidget> BuildTrailingWidget(TSharedPtr<IPropertyHandle> Handle) override;
 	virtual FText GetDisplayText(TSharedPtr<IPropertyHandle> Handle) const override;
 	virtual FText GetTooltipText(TSharedPtr<IPropertyHandle> Handle) const override;
 	virtual bool HasAddMenu() const override { return true; }
 	virtual TSharedPtr<SWidget> BuildAddMenu(TSharedPtr<IPropertyHandleArray> ArrayHandle) override;
 	virtual bool TryResolveContextId(const FGuid& ContextId, const TArray<TSharedPtr<IPropertyHandle>>& Handles, TSharedPtr<IPropertyHandle>& OutHandle) const override;
+	virtual void OnRowDoubleClicked(TSharedPtr<IPropertyHandle> Handle) override;
 	//~ End FKzPropertyStackRowCustomizer
 
 private:
@@ -53,6 +59,14 @@ private:
 
 	FGuid ReadGuid(TSharedPtr<IPropertyHandle> Handle) const;
 
+	/** Resolves the referenced entry as a line. False for alias entries and stale ids. */
+	bool TryResolveLine(TSharedPtr<IPropertyHandle> Handle, struct FKzDialogueLine& OutLine) const;
+
+	// Audition (same one-at-a-time editor preview as FKzDialogueLineRowCustomizer).
+	bool IsAuditioning(TSharedPtr<IPropertyHandle> Handle) const;
+	FReply OnPlayClicked(TSharedPtr<IPropertyHandle> Handle);
+	void StopActiveAudition();
+
 	void OnLinePicked(struct FKzDialogueAssetReference InRef, float DefaultDuration, TWeakPtr<IPropertyHandleArray> WeakArrayHandle);
 
 	TSet<FGuid> CollectAlreadyUsed(TSharedPtr<IPropertyHandleArray> ArrayHandle) const;
@@ -60,4 +74,7 @@ private:
 	FResolveAssetFn   ResolveAssetFn;
 	FResolveSpeakerFn ResolveSpeakerFn;
 	bool bShowAliases = true;
+
+	TWeakObjectPtr<UAudioComponent> ActivePreviewAudio;
+	FGuid ActiveEntryId;
 };
