@@ -104,6 +104,24 @@ EKzTranslationState FKzLocQuery::GetTextState(const FString& Namespace, const FS
 	return Entry->Source.Text == SourceString ? EKzTranslationState::Translated : EKzTranslationState::Stale;
 }
 
+bool FKzLocQuery::GetArchiveEntry(const FString& Namespace, const FString& Key, const FString& Culture, FString& OutSource, FString& OutTranslation) const
+{
+	if (!LocHelper.IsValid() || !LoadedCultures.Contains(Culture))
+	{
+		return false;
+	}
+
+	const TSharedPtr<FArchiveEntry> Entry = LocHelper->FindTranslation(Culture, FLocKey(Namespace), FLocKey(Key), nullptr);
+	if (!Entry.IsValid())
+	{
+		return false;
+	}
+
+	OutSource = Entry->Source.Text;
+	OutTranslation = Entry->Translation.Text;
+	return true;
+}
+
 bool FKzLocQuery::IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const
 {
 	FString LocalizedPackage;
@@ -226,7 +244,7 @@ namespace
 		}
 	}
 
-	void OnExportClicked(TArray<FAssetData> SelectedAssets)
+	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr)
 	{
 		TArray<UKzDialogueAsset*> Assets;
 		for (const FAssetData& Data : SelectedAssets)
@@ -252,7 +270,7 @@ namespace
 		}
 
 		FText Error;
-		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error))
+		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter))
 		{
 			ShowNotification(FText::Format(LOCTEXT("ExportDone", "Translation CSV exported to {0}."), FText::FromString(OutFiles[0])), true);
 		}
@@ -427,7 +445,7 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 	}));
 }
 
-bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError)
+bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter)
 {
 	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,SourceHash");
 	Csv += LINE_TERMINATOR;
@@ -440,6 +458,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 
 		for (const FKzDialogueLine& Line : Asset->Lines)
 		{
+			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
 			// Empty for narration lines; GetDisplayLabel's "<Narration>" placeholder is editor UI, not translator context.
 			const FString Speaker = Line.Speaker.IsValid() ? Line.Speaker.GetDisplayLabel().ToString() : FString();
 			const FString Audio = Line.Audio.ToSoftObjectPath().ToString();
@@ -471,17 +490,22 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 
 	// Speaker assets referenced by the exported lines/aliases: a character's name fields are
 	// localized once on its asset, so they export as their own rows (deduped across assets).
+	// A filtered export only carries the speakers of the included lines.
 	TSet<const UKzSpeakerAsset*> Speakers;
 	for (const UKzDialogueAsset* Asset : Assets)
 	{
 		if (!Asset) { continue; }
 		for (const FKzDialogueLine& Line : Asset->Lines)
 		{
+			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
 			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
 		}
-		for (const FKzDialogueAlias& Alias : Asset->Aliases)
+		if (!LineFilter)
 		{
-			if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
+			for (const FKzDialogueAlias& Alias : Asset->Aliases)
+			{
+				if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
+			}
 		}
 	}
 
@@ -680,9 +704,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 	return true;
 }
 
-void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets)
+void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
 {
-	OnExportClicked(MoveTemp(SelectedAssets));
+	OnExportClicked(MoveTemp(SelectedAssets), LineFilter);
 }
 
 void FKzDialogueTranslationCsv::ImportInteractive(const FString& Culture)
