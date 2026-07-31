@@ -5,15 +5,15 @@
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
 #include "KzLibEditorStyle.h"
-#include "Dashboard/SKzDialogueDashboard.h"
 #include "Editors/KzArrayAssetEditor.h"
 #include "Localization/KzDialogueTranslationCsv.h"
 
-#include "Framework/Docking/TabManager.h"
-
 #include "AssetRegistry/AssetData.h"
 #include "Components/AudioComponent.h"
+#include "ContentBrowserModule.h"
 #include "Editor.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "IContentBrowserSingleton.h"
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Misc/PackageName.h"
 #include "Sound/SoundBase.h"
@@ -29,7 +29,6 @@
 #include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Framework/MultiBox/MultiBoxBuilder.h"
 
 #define LOCTEXT_NAMESPACE "SKzDialogueCoveragePanel"
 
@@ -48,14 +47,17 @@ namespace
 	}
 }
 
-void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialogueAsset* InAsset)
+void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets)
 {
-	Asset = InAsset;
+	for (UKzDialogueAsset* Asset : InAssets)
+	{
+		if (Asset) { Assets.Add(Asset); }
+	}
 
 	ChildSlot
 	[
 		SNew(SVerticalBox)
-		// Toolbar band: title left, actions right, on its own panel background.
+		// Toolbar band: title left, filters and actions right, on its own panel background.
 		+ SVerticalBox::Slot().AutoHeight()
 		[
 			SNew(SBorder)
@@ -121,7 +123,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialog
 					[
 						SNew(SComboButton)
 							.OnGetMenuContent(this, &SKzDialogueCoveragePanel::BuildExportMenu)
-							.ToolTipText(LOCTEXT("ExportCsvTip", "Export this asset's texts to a translation CSV: every line, the filtered lines or only the pending text."))
+							.ToolTipText(LOCTEXT("ExportCsvTip", "Export the assets' texts to a translation CSV: every line, the filtered lines or only the pending text."))
 							.ButtonContent()
 							[
 								SNew(STextBlock).Text(LOCTEXT("ExportCsv", "Export CSV"))
@@ -145,14 +147,8 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialog
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 					[
-						SNew(SButton)
-							.Text(LOCTEXT("OpenDashboard", "Open Dashboard"))
-							.ToolTipText(LOCTEXT("OpenDashboardTip", "Open the project-wide Dialogue Dashboard."))
-							.OnClicked_Lambda([]()
-							{
-								FGlobalTabmanager::Get()->TryInvokeTab(SKzDialogueDashboard::TabId);
-								return FReply::Handled();
-							})
+						// Host-specific buttons (Open Dashboard in the asset editor, Gather/Compile in the dashboard).
+						InArgs._ToolbarExtension.Widget
 					]
 				]
 		]
@@ -166,7 +162,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialog
 		]
 	];
 
-	// Follow edits to the asset (line text/audio changes) so the tab never shows stale data.
+	// Follow edits to the assets (line text/audio changes) so the tab never shows stale data.
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &SKzDialogueCoveragePanel::OnObjectPropertyChanged);
 
 	Refresh();
@@ -174,7 +170,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialog
 
 void SKzDialogueCoveragePanel::OnObjectPropertyChanged(UObject* Object, FPropertyChangedEvent& /*Event*/)
 {
-	if (Object && Object == Asset.Get())
+	if (Object && Assets.ContainsByPredicate([Object](const TWeakObjectPtr<UKzDialogueAsset>& Asset) { return Asset.Get() == Object; }))
 	{
 		Refresh();
 	}
@@ -195,10 +191,14 @@ void SKzDialogueCoveragePanel::Refresh()
 		];
 	};
 
-	UKzDialogueAsset* AssetPtr = Asset.Get();
-	if (!AssetPtr)
+	TArray<UKzDialogueAsset*> LiveAssets;
+	for (const TWeakObjectPtr<UKzDialogueAsset>& Asset : Assets)
 	{
-		AddMessage(LOCTEXT("NoAsset", "No asset."));
+		if (UKzDialogueAsset* AssetPtr = Asset.Get()) { LiveAssets.Add(AssetPtr); }
+	}
+	if (LiveAssets.IsEmpty())
+	{
+		AddMessage(LOCTEXT("NoAssets", "No dialogue assets."));
 		return;
 	}
 
@@ -224,37 +224,43 @@ void SKzDialogueCoveragePanel::Refresh()
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
 		int32 PendingCount = 0;
-		TArray<FLineRow> LineRows;
-		for (const FKzDialogueLine& Line : AssetPtr->Lines)
+		TArray<FAssetLines> Groups;
+		for (UKzDialogueAsset* AssetPtr : LiveAssets)
 		{
-			if (!PassesSpeaker(Line)) { continue; }
-			++AudioTotal;
+			FAssetLines& Group = Groups.AddDefaulted_GetRef();
+			Group.Asset = AssetPtr;
 
-			const bool bVoiced = !Line.Audio.IsNull();
-			const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+			for (const FKzDialogueLine& Line : AssetPtr->Lines)
+			{
+				if (!PassesSpeaker(Line)) { continue; }
+				++AudioTotal;
 
-			FLineRow Row;
-			Row.LineId = Line.LineId;
-			Row.Label = Line.GetDisplayLabel(60);
-			if (bVoiced)
-			{
-				Row.AudioPath = Line.Audio.ToSoftObjectPath();
+				const bool bVoiced = !Line.Audio.IsNull();
+				const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+
+				FLineRow Row;
+				Row.LineId = Line.LineId;
+				Row.Label = Line.GetDisplayLabel(60);
+				if (bVoiced)
+				{
+					Row.AudioPath = Line.Audio.ToSoftObjectPath();
+				}
+				if (bVoiced && !bStale)
+				{
+					++AudioDone;
+					Row.State = LOCTEXT("RowOk", "ok");
+					Row.StateColor = KzDoneColor;
+				}
+				else
+				{
+					++PendingCount;
+					Row.bPending = true;
+					Row.bAudioWork = true;
+					Row.State = bVoiced ? LOCTEXT("PendingStaleAudio", "stale audio") : LOCTEXT("PendingNoAudio", "no audio");
+					Row.StateColor = bVoiced ? KzStaleColor : KzMissingColor;
+				}
+				Group.Lines.Add(MoveTemp(Row));
 			}
-			if (bVoiced && !bStale)
-			{
-				++AudioDone;
-				Row.State = LOCTEXT("RowOk", "ok");
-				Row.StateColor = KzDoneColor;
-			}
-			else
-			{
-				++PendingCount;
-				Row.bPending = true;
-				Row.bAudioWork = true;
-				Row.State = bVoiced ? LOCTEXT("PendingStaleAudio", "stale audio") : LOCTEXT("PendingNoAudio", "no audio");
-				Row.StateColor = bVoiced ? KzStaleColor : KzMissingColor;
-			}
-			LineRows.Add(MoveTemp(Row));
 		}
 
 		if (!(bOnlyIncomplete && PendingCount == 0))
@@ -265,7 +271,7 @@ void SKzDialogueCoveragePanel::Refresh()
 			[
 				MakeCultureCard(
 					FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture)),
-					MoveTemp(Bars), LineRows, TEXT("native"))
+					MoveTemp(Bars), Groups, TEXT("native"))
 			];
 		}
 	}
@@ -279,6 +285,7 @@ void SKzDialogueCoveragePanel::Refresh()
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
 	{
 		if (!CultureFilter.IsEmpty() && Culture != CultureFilter) { continue; }
+
 		int32 TextDone = 0;
 		int32 TextTotal = 0;
 		int32 TextStale = 0;
@@ -286,115 +293,121 @@ void SKzDialogueCoveragePanel::Refresh()
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
 		int32 PendingCount = 0;
-		TArray<FLineRow> LineRows;
+		TArray<FAssetLines> Groups;
 
-		for (const FKzDialogueLine& Line : AssetPtr->Lines)
+		for (UKzDialogueAsset* AssetPtr : LiveAssets)
 		{
-			if (!PassesSpeaker(Line)) { continue; }
+			FAssetLines& Group = Groups.AddDefaulted_GetRef();
+			Group.Asset = AssetPtr;
 
-			bool bTextMissing = false;
-			bool bTextStale = false;
-			bool bTextTooLong = false;
-			bool bAudioMissing = false;
-			FText PendingTooltip;
-			FSoftObjectPath LocalizedAudioPath;
-
-			// Text state, anchored to the line's stable namespace/key.
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
-			const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
-			const FString* Source = FTextInspector::GetSourceString(Line.Text);
-			if (!Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet() && Source)
+			for (const FKzDialogueLine& Line : AssetPtr->Lines)
 			{
-				++TextTotal;
+				if (!PassesSpeaker(Line)) { continue; }
 
-				FString ArchiveSource;
-				FString ArchiveTranslation;
-				const bool bHasEntry = Query.GetArchiveEntry(Namespace.GetValue(), Key.GetValue(), Culture, ArchiveSource, ArchiveTranslation);
+				bool bTextMissing = false;
+				bool bTextStale = false;
+				bool bTextTooLong = false;
+				bool bAudioMissing = false;
+				FText PendingTooltip;
+				FSoftObjectPath LocalizedAudioPath;
 
-				switch (Query.GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture))
+				// Text state, anchored to the line's stable namespace/key.
+				const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
+				const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
+				const FString* Source = FTextInspector::GetSourceString(Line.Text);
+				if (!Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet() && Source)
 				{
-				case EKzTranslationState::Translated:
-					++TextDone;
-					// Translated but over the line's subtitle budget: surfaced as pending work.
-					if (Line.MaxCharacters > 0 && bHasEntry && ArchiveTranslation.Len() > Line.MaxCharacters)
+					++TextTotal;
+
+					FString ArchiveSource;
+					FString ArchiveTranslation;
+					const bool bHasEntry = Query.GetArchiveEntry(Namespace.GetValue(), Key.GetValue(), Culture, ArchiveSource, ArchiveTranslation);
+
+					switch (Query.GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture))
 					{
-						bTextTooLong = true;
-						PendingTooltip = FText::Format(
-							LOCTEXT("TooLongTip", "Translation is {0} characters; the line allows {1}:\n{2}"),
-							ArchiveTranslation.Len(), Line.MaxCharacters, FText::FromString(ArchiveTranslation));
+					case EKzTranslationState::Translated:
+						++TextDone;
+						// Translated but over the line's subtitle budget: surfaced as pending work.
+						if (Line.MaxCharacters > 0 && bHasEntry && ArchiveTranslation.Len() > Line.MaxCharacters)
+						{
+							bTextTooLong = true;
+							PendingTooltip = FText::Format(
+								LOCTEXT("TooLongTip", "Translation is {0} characters; the line allows {1}:\n{2}"),
+								ArchiveTranslation.Len(), Line.MaxCharacters, FText::FromString(ArchiveTranslation));
+						}
+						break;
+					case EKzTranslationState::Stale:
+						++TextStale;
+						bTextStale = true;
+						PendingWords += CountWords(*Source);
+						// The archive keeps the source each translation was made against, so the
+						// diff shows exactly what changed since then.
+						if (bHasEntry)
+						{
+							PendingTooltip = FText::Format(
+								LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
+								FText::FromString(ArchiveSource), FText::FromString(*Source), FText::FromString(ArchiveTranslation));
+						}
+						break;
+					default:
+						bTextMissing = true;
+						PendingWords += CountWords(*Source);
+						break;
 					}
-					break;
-				case EKzTranslationState::Stale:
-					++TextStale;
-					bTextStale = true;
-					PendingWords += CountWords(*Source);
-					// The archive keeps the source each translation was made against, so the
-					// diff shows exactly what changed since then.
-					if (bHasEntry)
-					{
-						PendingTooltip = FText::Format(
-							LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
-							FText::FromString(ArchiveSource), FText::FromString(*Source), FText::FromString(ArchiveTranslation));
-					}
-					break;
-				default:
-					bTextMissing = true;
-					PendingWords += CountWords(*Source);
-					break;
 				}
-			}
 
-			// Localized audio variant of voiced lines. The eye toggle silences this whole
-			// dimension for projects that do not localize audio.
-			if (bShowLocalizedAudio && !Line.Audio.IsNull())
-			{
-				++AudioTotal;
-				FString LocalizedPackage;
-				const FSoftObjectPath SourcePath = Line.Audio.ToSoftObjectPath();
-				if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePath.GetLongPackageName(), Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
+				// Localized audio variant of voiced lines. The eye toggle silences this whole
+				// dimension for projects that do not localize audio.
+				if (bShowLocalizedAudio && !Line.Audio.IsNull())
 				{
-					++AudioDone;
-					LocalizedAudioPath = FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *LocalizedPackage, *SourcePath.GetAssetName()));
+					++AudioTotal;
+					FString LocalizedPackage;
+					const FSoftObjectPath SourcePath = Line.Audio.ToSoftObjectPath();
+					if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePath.GetLongPackageName(), Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
+					{
+						++AudioDone;
+						LocalizedAudioPath = FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *LocalizedPackage, *SourcePath.GetAssetName()));
+					}
+					else
+					{
+						bAudioMissing = true;
+					}
+				}
+
+				// One row per line; the state chip says what exactly is pending, or "ok".
+				FLineRow Row;
+				Row.LineId = Line.LineId;
+				Row.Label = Line.GetDisplayLabel(60);
+				Row.Tooltip = PendingTooltip;
+				Row.AudioPath = LocalizedAudioPath;
+				if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
+				{
+					++PendingCount;
+					Row.bPending = true;
+					Row.bAudioWork = bAudioMissing;
+
+					const FText TextPart = bTextMissing ? LOCTEXT("PendingMissing", "text")
+						: bTextStale ? LOCTEXT("PendingStale", "stale")
+						: bTextTooLong ? LOCTEXT("PendingTooLong", "too long")
+						: FText::GetEmpty();
+
+					if (!TextPart.IsEmpty() && bAudioMissing)
+					{
+						Row.State = FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), TextPart);
+					}
+					else
+					{
+						Row.State = TextPart.IsEmpty() ? LOCTEXT("PendingAudio", "audio") : TextPart;
+					}
+					Row.StateColor = (bTextMissing || bAudioMissing) ? KzMissingColor : KzStaleColor;
 				}
 				else
 				{
-					bAudioMissing = true;
+					Row.State = LOCTEXT("RowOk", "ok");
+					Row.StateColor = KzDoneColor;
 				}
+				Group.Lines.Add(MoveTemp(Row));
 			}
-
-			// One row per line; the state chip says what exactly is pending, or "ok".
-			FLineRow Row;
-			Row.LineId = Line.LineId;
-			Row.Label = Line.GetDisplayLabel(60);
-			Row.Tooltip = PendingTooltip;
-			Row.AudioPath = LocalizedAudioPath;
-			if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
-			{
-				++PendingCount;
-				Row.bPending = true;
-				Row.bAudioWork = bAudioMissing;
-
-				const FText TextPart = bTextMissing ? LOCTEXT("PendingMissing", "text")
-					: bTextStale ? LOCTEXT("PendingStale", "stale")
-					: bTextTooLong ? LOCTEXT("PendingTooLong", "too long")
-					: FText::GetEmpty();
-
-				if (!TextPart.IsEmpty() && bAudioMissing)
-				{
-					Row.State = FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), TextPart);
-				}
-				else
-				{
-					Row.State = TextPart.IsEmpty() ? LOCTEXT("PendingAudio", "audio") : TextPart;
-				}
-				Row.StateColor = (bTextMissing || bAudioMissing) ? KzMissingColor : KzStaleColor;
-			}
-			else
-			{
-				Row.State = LOCTEXT("RowOk", "ok");
-				Row.StateColor = KzDoneColor;
-			}
-			LineRows.Add(MoveTemp(Row));
 		}
 
 		if (bOnlyIncomplete && PendingCount == 0)
@@ -411,18 +424,21 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), LineRows, Culture)
+			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), Groups, Culture)
 		];
 	}
 }
 
-TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FLineRow>& Lines, const FString& AudioKeyPrefix)
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix)
 {
 	// Progress (badge + bars) always reflects every line; the ok-filters below only shape the list.
 	int32 PendingCount = 0;
-	for (const FLineRow& Row : Lines)
+	for (const FAssetLines& Group : Groups)
 	{
-		if (Row.bPending) { ++PendingCount; }
+		for (const FLineRow& Row : Group.Lines)
+		{
+			if (Row.bPending) { ++PendingCount; }
+		}
 	}
 
 	TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
@@ -450,104 +466,45 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	}
 
 	// The ok-filters shape which rows show; the counters above ignore them on purpose.
-	TArray<const FLineRow*> Visible;
-	for (const FLineRow& Row : Lines)
+	// Asset header rows only appear when the panel hosts more than one asset.
+	const bool bAssetHeaders = Assets.Num() > 1;
+	int32 VisibleCount = 0;
+	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+	for (const FAssetLines& Group : Groups)
 	{
-		if (bOnlyIncomplete && !Row.bPending) { continue; }
-		if (bOnlyMissingVoice && !Row.bAudioWork) { continue; }
-		Visible.Add(&Row);
-	}
-
-	if (!Visible.IsEmpty())
-	{
-		// Each line is its own list-row cell (same look as the KzLib stack rows): status
-		// chip, its take's play button when there is one, and the navigable label.
-		TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
-		for (const FLineRow* RowPtr : Visible)
+		TArray<const FLineRow*> Visible;
+		for (const FLineRow& Row : Group.Lines)
 		{
-			const FLineRow& Entry = *RowPtr;
-			const FString PlayKey = AudioKeyPrefix + TEXT("|") + Entry.LineId.ToString(EGuidFormats::Digits);
+			if (bOnlyIncomplete && !Row.bPending) { continue; }
+			if (bOnlyMissingVoice && !Row.bAudioWork) { continue; }
+			Visible.Add(&Row);
+		}
+		if (Visible.IsEmpty()) { continue; }
 
-			TSharedRef<SWidget> PlayWidget = SNullWidget::NullWidget;
-			if (Entry.AudioPath.IsValid())
-			{
-				PlayWidget = SNew(SButton)
-					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-					.ContentPadding(FMargin(2.0f))
-					.ToolTipText(LOCTEXT("PlayTakeTip", "Preview this culture's take."))
-					.OnClicked_Lambda([this, PlayKey, Path = Entry.AudioPath]()
-					{
-						const bool bWasThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-						if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
-						PreviewAudio = nullptr;
-						PreviewKey.Reset();
-						if (!bWasThis && GEditor)
-						{
-							if (USoundBase* Sound = Cast<USoundBase>(Path.TryLoad()))
-							{
-								PreviewAudio = GEditor->PlayPreviewSound(Sound);
-								PreviewKey = PlayKey;
-							}
-						}
-						return FReply::Handled();
-					})
-					[
-						SNew(SImage)
-							.Image_Lambda([this, PlayKey]()
-							{
-								const bool bThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-								return FAppStyle::GetBrush(bThis ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
-							})
-							.ColorAndOpacity(FSlateColor::UseForeground())
-					];
-			}
-
-			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+		if (bAssetHeaders)
+		{
+			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
 			[
-				SNew(SBorder)
-					.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
-					.Padding(FMargin(4.0f, 2.0f))
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-						[
-							SNew(SBox).WidthOverride(112.0f)
-							[
-								SNew(STextBlock)
-									.Text(Entry.State)
-									.ColorAndOpacity(FSlateColor(Entry.StateColor))
-									.ToolTipText(Entry.Tooltip)
-							]
-						]
-						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-						[
-							SNew(SBox).WidthOverride(22.0f).HeightOverride(20.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
-							[
-								PlayWidget
-							]
-						]
-						+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-						[
-							SNew(SButton)
-								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-								.ContentPadding(FMargin(2.0f, 1.0f))
-								.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
-								.OnClicked_Lambda([this, LineId = Entry.LineId]() { NavigateToLine(LineId); return FReply::Handled(); })
-								[
-									SNew(STextBlock)
-										.Text(Entry.Label)
-										.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-								]
-						]
-					]
+				MakeAssetHeaderRow(Group.Asset)
 			];
 		}
+		for (const FLineRow* RowPtr : Visible)
+		{
+			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			[
+				MakeLineRowWidget(*RowPtr, Group.Asset, AudioKeyPrefix)
+			];
+		}
+		VisibleCount += Visible.Num();
+	}
 
+	if (VisibleCount > 0)
+	{
 		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(SExpandableArea)
 				.InitiallyCollapsed(true)
-				.AreaTitle(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), Visible.Num()))
+				.AreaTitle(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount))
 				.BodyContent()
 				[
 					// Recessed inset behind the row cells, so the list reads as its own region.
@@ -566,6 +523,133 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		.Padding(10.0f)
 		[
 			Content
+		];
+}
+
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeAssetHeaderRow(TWeakObjectPtr<UKzDialogueAsset> InAsset)
+{
+	UKzDialogueAsset* AssetPtr = InAsset.Get();
+	if (!AssetPtr) { return SNullWidget::NullWidget; }
+
+	const FString Label = AssetPtr->DisplayName.IsEmpty() ? AssetPtr->GetName() : AssetPtr->DisplayName;
+
+	return SNew(SBorder)
+		.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
+		.Padding(FMargin(6.0f, 3.0f))
+		.ToolTipText(FText::Format(LOCTEXT("AssetHeaderTip", "{0}\nDouble-click to open the asset."), FText::FromString(AssetPtr->GetPathName())))
+		.OnMouseDoubleClick(FPointerEventHandler::CreateLambda([InAsset](const FGeometry&, const FPointerEvent&)
+		{
+			if (UKzDialogueAsset* Asset = InAsset.Get(); Asset && GEditor)
+			{
+				GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Asset);
+			}
+			return FReply::Handled();
+		}))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(STextBlock)
+					.Text(FText::FromString(Label))
+					.Font(FAppStyle::GetFontStyle("BoldFont"))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(2.0f))
+					.ToolTipText(LOCTEXT("BrowseToAsset", "Find in Content Browser"))
+					.OnClicked_Lambda([InAsset]()
+					{
+						if (UKzDialogueAsset* Asset = InAsset.Get())
+						{
+							FContentBrowserModule& ContentBrowser = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
+							ContentBrowser.Get().SyncBrowserToAssets(TArray<FAssetData>{ FAssetData(Asset) }, /*bAllowLockedBrowsers=*/true);
+						}
+						return FReply::Handled();
+					})
+					[
+						SNew(SImage)
+							.Image(FAppStyle::GetBrush("Icons.Search"))
+							.ColorAndOpacity(FSlateColor::UseForeground())
+					]
+			]
+		];
+}
+
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& Entry, TWeakObjectPtr<UKzDialogueAsset> InAsset, const FString& AudioKeyPrefix)
+{
+	const FString PlayKey = AudioKeyPrefix + TEXT("|") + Entry.LineId.ToString(EGuidFormats::Digits);
+
+	TSharedRef<SWidget> PlayWidget = SNullWidget::NullWidget;
+	if (Entry.AudioPath.IsValid())
+	{
+		PlayWidget = SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ContentPadding(FMargin(2.0f))
+			.ToolTipText(LOCTEXT("PlayTakeTip", "Preview this culture's take."))
+			.OnClicked_Lambda([this, PlayKey, Path = Entry.AudioPath]()
+			{
+				const bool bWasThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
+				if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
+				PreviewAudio = nullptr;
+				PreviewKey.Reset();
+				if (!bWasThis && GEditor)
+				{
+					if (USoundBase* Sound = Cast<USoundBase>(Path.TryLoad()))
+					{
+						PreviewAudio = GEditor->PlayPreviewSound(Sound);
+						PreviewKey = PlayKey;
+					}
+				}
+				return FReply::Handled();
+			})
+			[
+				SNew(SImage)
+					.Image_Lambda([this, PlayKey]()
+					{
+						const bool bThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
+						return FAppStyle::GetBrush(bThis ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
+					})
+					.ColorAndOpacity(FSlateColor::UseForeground())
+			];
+	}
+
+	return SNew(SBorder)
+		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
+		.Padding(FMargin(4.0f, 2.0f))
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(SBox).WidthOverride(112.0f)
+				[
+					SNew(STextBlock)
+						.Text(Entry.State)
+						.ColorAndOpacity(FSlateColor(Entry.StateColor))
+						.ToolTipText(Entry.Tooltip)
+				]
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(SBox).WidthOverride(22.0f).HeightOverride(20.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+				[
+					PlayWidget
+				]
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(2.0f, 1.0f))
+					.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
+					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId]() { NavigateToLine(InAsset, LineId); return FReply::Handled(); })
+					[
+						SNew(STextBlock)
+							.Text(Entry.Label)
+							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+			]
 		];
 }
 
@@ -619,12 +703,16 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeProgressRow(const FText& Label
 		];
 }
 
-void SKzDialogueCoveragePanel::NavigateToLine(FGuid LineId)
+void SKzDialogueCoveragePanel::NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
 {
-	UKzDialogueAsset* AssetPtr = Asset.Get();
+	UKzDialogueAsset* AssetPtr = InAsset.Get();
 	if (!AssetPtr || !LineId.IsValid() || !GEditor) { return; }
 
-	IAssetEditorInstance* Instance = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(AssetPtr, /*bFocusIfOpen=*/false);
+	// Open (or focus) the asset's editor first: from the dashboard it may not be open yet.
+	UAssetEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	Subsystem->OpenEditorForAsset(AssetPtr);
+
+	IAssetEditorInstance* Instance = Subsystem->FindEditorForAsset(AssetPtr, /*bFocusIfOpen=*/false);
 	if (Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
 	{
 		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(LineId);
@@ -714,12 +802,20 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 {
 	FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
 
-	UKzDialogueAsset* AssetPtr = Asset.Get();
-	if (!AssetPtr)
+	TArray<UKzDialogueAsset*> LiveAssets;
+	TArray<FAssetData> AssetData;
+	for (const TWeakObjectPtr<UKzDialogueAsset>& Asset : Assets)
+	{
+		if (UKzDialogueAsset* AssetPtr = Asset.Get())
+		{
+			LiveAssets.Add(AssetPtr);
+			AssetData.Add(FAssetData(AssetPtr));
+		}
+	}
+	if (LiveAssets.IsEmpty())
 	{
 		return MenuBuilder.MakeWidget();
 	}
-	const FAssetData AssetData(AssetPtr);
 
 	// Self-contained copies of the panel filters, so the export lambdas outlive the menu.
 	auto PassesSpeaker = [bActive = bSpeakerFilterActive, Name = SpeakerFilter](const FKzDialogueLine& Line)
@@ -762,22 +858,27 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		return false;
 	};
 
+	int32 AllCount = 0;
 	int32 FilteredCount = 0;
 	int32 PendingCount = 0;
-	for (const FKzDialogueLine& Line : AssetPtr->Lines)
+	for (const UKzDialogueAsset* AssetPtr : LiveAssets)
 	{
-		if (!PassesSpeaker(Line)) { continue; }
-		++FilteredCount;
-		if (!PendingCultures.IsEmpty() && IsTextPending(Line)) { ++PendingCount; }
+		AllCount += AssetPtr->Lines.Num();
+		for (const FKzDialogueLine& Line : AssetPtr->Lines)
+		{
+			if (!PassesSpeaker(Line)) { continue; }
+			++FilteredCount;
+			if (!PendingCultures.IsEmpty() && IsTextPending(Line)) { ++PendingCount; }
+		}
 	}
 
 	MenuBuilder.AddMenuEntry(
-		FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AssetPtr->Lines.Num()),
-		LOCTEXT("ExportAllLinesTip", "Export every line of the asset."),
+		FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
+		LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
 		FSlateIcon(),
 		FUIAction(FExecuteAction::CreateLambda([AssetData]()
 		{
-			FKzDialogueTranslationCsv::ExportInteractive({ AssetData });
+			FKzDialogueTranslationCsv::ExportInteractive(AssetData);
 		})));
 
 	MenuBuilder.AddMenuEntry(
@@ -787,7 +888,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		FUIAction(
 			FExecuteAction::CreateLambda([AssetData, PassesSpeaker]()
 			{
-				FKzDialogueTranslationCsv::ExportInteractive({ AssetData },
+				FKzDialogueTranslationCsv::ExportInteractive(AssetData,
 					[PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); });
 			}),
 			FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive; })));
@@ -801,7 +902,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		FUIAction(
 			FExecuteAction::CreateLambda([AssetData, PassesSpeaker, IsTextPending]()
 			{
-				FKzDialogueTranslationCsv::ExportInteractive({ AssetData },
+				FKzDialogueTranslationCsv::ExportInteractive(AssetData,
 					[PassesSpeaker, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && IsTextPending(Line); });
 			}),
 			FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
@@ -852,11 +953,13 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildSpeakerFilterMenu()
 		FSlateIcon(),
 		FUIAction(FExecuteAction::CreateLambda([this]() { bSpeakerFilterActive = false; SpeakerFilter.Reset(); Refresh(); })));
 
-	// Only the speakers this asset actually uses; narration listed when present.
+	// Only the speakers these assets actually use; narration listed when present.
 	bool bAnyNarration = false;
 	TArray<FString> Names;
-	if (const UKzDialogueAsset* AssetPtr = Asset.Get())
+	for (const TWeakObjectPtr<UKzDialogueAsset>& Asset : Assets)
 	{
+		const UKzDialogueAsset* AssetPtr = Asset.Get();
+		if (!AssetPtr) { continue; }
 		for (const FKzDialogueLine& Line : AssetPtr->Lines)
 		{
 			if (Line.Speaker.Asset) { Names.AddUnique(Line.Speaker.Asset->GetName()); }
@@ -884,38 +987,6 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildSpeakerFilterMenu()
 	}
 
 	return MenuBuilder.MakeWidget();
-}
-
-void SKzDialogueCoveragePanel::FillCoverageRows(SVerticalBox& Rows, const TArray<FKzCultureCoverage>& Cultures)
-{
-	auto AddRow = [&Rows](const FText& Culture, const FText& Translated, const FText& Missing, const FText& StaleCount, const FText& Audio, bool bHeader)
-	{
-		const FSlateFontInfo Font = FAppStyle::GetFontStyle(bHeader ? "BoldFont" : "NormalFont");
-		auto Cell = [&Font](const FText& Value) { return SNew(STextBlock).Text(Value).Font(Font); };
-
-		Rows.AddSlot().AutoHeight().Padding(0.0f, 2.0f)
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(0.2f)[ Cell(Culture) ]
-			+ SHorizontalBox::Slot().FillWidth(0.25f)[ Cell(Translated) ]
-			+ SHorizontalBox::Slot().FillWidth(0.2f)[ Cell(Missing) ]
-			+ SHorizontalBox::Slot().FillWidth(0.15f)[ Cell(StaleCount) ]
-			+ SHorizontalBox::Slot().FillWidth(0.2f)[ Cell(Audio) ]
-		];
-	};
-
-	AddRow(LOCTEXT("ColCulture", "Culture"), LOCTEXT("ColTranslated", "Translated"), LOCTEXT("ColMissing", "Missing"), LOCTEXT("ColStale", "Stale"), LOCTEXT("ColAudio", "Audio"), true);
-
-	for (const FKzCultureCoverage& Coverage : Cultures)
-	{
-		AddRow(
-			FText::FromString(Coverage.Culture),
-			FText::Format(LOCTEXT("TranslatedCell", "{0} / {1}"), Coverage.Translated, Coverage.Total),
-			FText::AsNumber(Coverage.Missing),
-			FText::AsNumber(Coverage.Stale),
-			Coverage.VoicedLines > 0 ? FText::Format(LOCTEXT("AudioCell", "{0} / {1}"), Coverage.LocalizedAudio, Coverage.VoicedLines) : LOCTEXT("AudioNone", "-"),
-			false);
-	}
 }
 
 #undef LOCTEXT_NAMESPACE

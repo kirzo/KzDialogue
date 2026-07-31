@@ -26,6 +26,7 @@
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
 #include "MessageLogModule.h"
+#include "Widgets/Input/SButton.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
@@ -58,7 +59,20 @@ void FKzDialogueEditorModule::OnStartupModule()
 		CoverageTab.IconStyleName = TEXT("LevelEditor.Tabs.StatsViewer");
 		CoverageTab.MakeWidget = [](UObject* Asset) -> TSharedRef<SWidget>
 		{
-			return SNew(SKzDialogueCoveragePanel, Cast<UKzDialogueAsset>(Asset));
+			// The shared localization panel with just this asset; the dashboard hosts the
+			// same widget with every dialogue asset in the project.
+			return SNew(SKzDialogueCoveragePanel, TArray<UKzDialogueAsset*>{ Cast<UKzDialogueAsset>(Asset) })
+				.ToolbarExtension()
+				[
+					SNew(SButton)
+						.Text(NSLOCTEXT("KzDialogueEditor", "OpenDashboard", "Open Dashboard"))
+						.ToolTipText(NSLOCTEXT("KzDialogueEditor", "OpenDashboardTip", "Open the project-wide Dialogue Dashboard."))
+						.OnClicked_Lambda([]()
+						{
+							FGlobalTabmanager::Get()->TryInvokeTab(SKzDialogueDashboard::TabId);
+							return FReply::Handled();
+						})
+				];
 		};
 	}
 
@@ -107,7 +121,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 				];
 		}))
 		.SetDisplayName(LOCTEXT("DashboardTabName", "Dialogue Dashboard"))
-		.SetTooltipText(LOCTEXT("DashboardTabTip", "Every dialogue asset in the project: line and voice counts, speakers, translation batch tools."))
+		.SetTooltipText(LOCTEXT("DashboardTabTip", "Localization status of every dialogue asset in the project: per-culture progress, per-line states, CSV round-trip and the Gather/Compile pipeline."))
 		// Production tool: straight under Tools (the Debug category is for debug-only viewers).
 		.SetGroup(FModuleManager::LoadModuleChecked<FWorkspaceMenuStructureModule>("WorkspaceMenuStructure").GetWorkspaceMenuStructure().GetToolsCategory())
 		.SetIcon(FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"));

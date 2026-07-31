@@ -7,31 +7,33 @@
 
 class UKzDialogueAsset;
 class SVerticalBox;
-struct FKzCultureCoverage;
 
 /**
- * Per-culture localization status of one dialogue asset, shown as an extra tab in the
- * asset editor. One card per culture (native first, showing recording state): text and
- * audio progress bars plus an expandable list of the exact lines with work left, each
- * entry navigating to its line. Header actions export/import this asset's translation
- * CSV without leaving the editor.
+ * Per-culture localization status of a set of dialogue assets. Shared by the asset editor's
+ * Localization tab (one asset) and the Dialogue Dashboard (every asset in the project), so
+ * both views stay identical: one card per culture (native first, showing recording state),
+ * text/audio progress bars, and the line list with per-line status chips, per-culture take
+ * audition and jump-to-line navigation. With more than one asset the lists group lines under
+ * asset header rows (magnifier to the Content Browser, double-click opens the asset).
+ * Header actions export/import translation CSVs; hosts append their own toolbar buttons via
+ * the ToolbarExtension slot (Open Dashboard in the asset editor, Gather/Compile in the
+ * dashboard).
  */
 class SKzDialogueCoveragePanel : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SKzDialogueCoveragePanel) {}
+		/** Extra host-specific buttons appended at the right end of the toolbar. */
+		SLATE_NAMED_SLOT(FArguments, ToolbarExtension)
 	SLATE_END_ARGS()
 
-	void Construct(const FArguments& InArgs, UKzDialogueAsset* InAsset);
-
-	/** Renders the per-culture coverage table (header row + one row per culture) into Rows. Used by the dialogue dashboard's batch coverage. */
-	static void FillCoverageRows(SVerticalBox& Rows, const TArray<FKzCultureCoverage>& Cultures);
+	void Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets);
 
 private:
-	TWeakObjectPtr<UKzDialogueAsset> Asset;
+	TArray<TWeakObjectPtr<UKzDialogueAsset>> Assets;
 	TSharedPtr<SVerticalBox> Rows;
 
-	// Filters (mirroring the dialogue dashboard).
+	// Filters (mirroring both hosts' toolbars).
 	/** Only this culture's card ("" = every culture; may be the native culture). */
 	FString CultureFilter;
 	/** When active, only lines of this speaker asset name count ("" = narration lines). */
@@ -39,10 +41,8 @@ private:
 	FString SpeakerFilter;
 	/** Show the foreign cards' localized-audio state. Off silences missing-localized-audio warnings (projects that do not localize audio); the native card's recording state (missing and stale takes) is unaffected. */
 	bool bShowLocalizedAudio = true;
-
 	/** Line lists show only rows with audio work (the recording to-do list). */
 	bool bOnlyMissingVoice = false;
-
 	/** Line lists hide "ok" rows; fully complete cultures lose their card. */
 	bool bOnlyIncomplete = false;
 
@@ -63,20 +63,33 @@ private:
 		FSoftObjectPath AudioPath;
 	};
 
+	/** One asset's rows inside a culture card; multi-asset hosts render a header row per group. */
+	struct FAssetLines
+	{
+		TWeakObjectPtr<UKzDialogueAsset> Asset;
+		TArray<FLineRow> Lines;
+	};
+
 	/** Editor audio preview, one at a time. Key = card prefix + line id. */
 	TWeakObjectPtr<class UAudioComponent> PreviewAudio;
 	FString PreviewKey;
 
 	void Refresh();
 
-	/** Auto-refresh: the panel follows edits to the asset instead of relying on the Refresh button. */
+	/** Auto-refresh: the panel follows edits to any of its assets instead of relying on the Refresh button. */
 	void OnObjectPropertyChanged(UObject* Object, struct FPropertyChangedEvent& Event);
 
-	/** Selects the line in the editor's Lines tab (same navigation as validation issues). */
-	void NavigateToLine(FGuid LineId);
+	/** Opens the asset's editor (or focuses it) and selects the line, same navigation as validation issues. */
+	void NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
 
-	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FLineRow>& Lines, const FString& AudioKeyPrefix);
+	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);
+
+	/** Asset separator row inside a multi-asset line list: display name, magnifier, double-click opens. */
+	TSharedRef<SWidget> MakeAssetHeaderRow(TWeakObjectPtr<UKzDialogueAsset> InAsset);
+
+	/** One line cell: status chip, play button for this culture's take (when any), navigable label. */
+	TSharedRef<SWidget> MakeLineRowWidget(const FLineRow& Entry, TWeakObjectPtr<UKzDialogueAsset> InAsset, const FString& AudioKeyPrefix);
 
 	/** Export scope entries: all lines, the filtered lines, or only the pending text. */
 	TSharedRef<SWidget> BuildExportMenu();
@@ -87,12 +100,12 @@ private:
 	/** Culture filter entries: All Cultures, the native culture, each foreign culture. */
 	TSharedRef<SWidget> BuildCultureFilterMenu();
 
-	/** Speaker filter entries: All Speakers, narration, each speaker used by this asset's lines. */
+	/** Speaker filter entries: All Speakers, narration, each speaker used by the assets' lines. */
 	TSharedRef<SWidget> BuildSpeakerFilterMenu();
 
 	/** Row filters (missing voice, only incomplete), mirroring the dashboard's funnel menu. */
 	TSharedRef<SWidget> BuildFiltersMenu();
 
-	/** View options (the localized-audio toggle), mirroring the dashboard's eye menu. */
+	/** View options (the localized-audio toggle). */
 	TSharedRef<SWidget> BuildViewOptionsMenu();
 };
