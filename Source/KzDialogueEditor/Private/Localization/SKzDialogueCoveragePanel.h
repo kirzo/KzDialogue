@@ -91,10 +91,10 @@ private:
 	/** One line cell: status chip, play button for this culture's take (when any), navigable label. */
 	TSharedRef<SWidget> MakeLineRowWidget(const FLineRow& Entry, TWeakObjectPtr<UKzDialogueAsset> InAsset, const FString& AudioKeyPrefix);
 
-	/** Export scope entries: all lines, the filtered lines, or only the pending text. */
+	/** Export entries: CSV and PO submenus, each with the same scopes (all / filtered / pending text). */
 	TSharedRef<SWidget> BuildExportMenu();
 
-	/** Per-culture import entries; imports refresh the panel afterwards. */
+	/** Import entries: CSV and PO submenus, each listing the target's cultures; imports refresh the panel. */
 	TSharedRef<SWidget> BuildImportMenu();
 
 	/** Culture filter entries: All Cultures, the native culture, each foreign culture. */

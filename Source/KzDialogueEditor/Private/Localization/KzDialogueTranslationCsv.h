@@ -147,6 +147,18 @@ public:
 	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
 	static void ImportInteractive(const FString& Culture);
 
+	/** Writes one .po per foreign culture into Directory (<Culture>/<Target>.po), scoped to the assets' lines passing LineFilter. Context (speaker, notes, max characters) travels as "#." comments; existing translations fill msgstr, stale ones flagged "#, fuzzy". */
+	static bool ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr);
+
+	/** Interactive PO export: directory dialog + ExportPoFiles + notification. */
+	static void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr);
+
+	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
+	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+
+	/** Interactive per-culture PO import flow (open-file dialog, ImportPoFile, stats notification). */
+	static void ImportPoInteractive(const FString& Culture);
+
 	/** Writes one clickable warning per stale translation into the KzDialogueL10N message log. Does not open the log. */
 	static void LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale);
 

@@ -15,6 +15,7 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Logging/MessageLog.h"
 #include "Logging/TokenizedMessage.h"
+#include "Internationalization/InternationalizationManifest.h"
 #include "LocTextHelper.h"
 #include "Misc/UObjectToken.h"
 #include "Misc/ConfigCacheIni.h"
@@ -724,6 +725,357 @@ FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
 void FKzDialogueTranslationCsv::ImportInteractive(const FString& Culture)
 {
 	OnImportClicked(Culture);
+}
+
+namespace
+{
+	/** One .po entry: extracted comments plus the escaped-on-write text triplet. */
+	struct FKzPoEntry
+	{
+		TArray<FString> Comments;
+		FString Namespace;
+		FString Key;
+		FString Source;
+	};
+
+	FString PoEscape(const FString& In)
+	{
+		FString Out = In;
+		Out.ReplaceInline(TEXT("\\"), TEXT("\\\\"));
+		Out.ReplaceInline(TEXT("\""), TEXT("\\\""));
+		Out.ReplaceInline(TEXT("\r\n"), TEXT("\\n"));
+		Out.ReplaceInline(TEXT("\n"), TEXT("\\n"));
+		Out.ReplaceInline(TEXT("\r"), TEXT("\\n"));
+		Out.ReplaceInline(TEXT("\t"), TEXT("\\t"));
+		return Out;
+	}
+
+	FString PoUnescape(const FString& In)
+	{
+		FString Out;
+		Out.Reserve(In.Len());
+		for (int32 i = 0; i < In.Len(); ++i)
+		{
+			if (In[i] == TEXT('\\') && i + 1 < In.Len())
+			{
+				++i;
+				switch (In[i])
+				{
+				case TEXT('n'): Out.AppendChar(TEXT('\n')); break;
+				case TEXT('t'): Out.AppendChar(TEXT('\t')); break;
+				default: Out.AppendChar(In[i]); break;
+				}
+			}
+			else
+			{
+				Out.AppendChar(In[i]);
+			}
+		}
+		return Out;
+	}
+
+	void AppendPoText(TArray<FKzPoEntry>& Entries, const FText& Source, TArray<FString>&& Comments)
+	{
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
+		const TOptional<FString> Key = FTextInspector::GetKey(Source);
+		const FString* SourceString = FTextInspector::GetSourceString(Source);
+		if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+
+		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Comments = MoveTemp(Comments);
+		Entry.Namespace = Namespace.GetValue();
+		Entry.Key = Key.GetValue();
+		Entry.Source = *SourceString;
+	}
+}
+
+bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter)
+{
+	FKzLocQuery Query;
+	if (!Query.Load(OutError)) { return false; }
+
+	// Same text set as the CSV export: line texts plus the name fields of the involved
+	// speaker assets (only the speakers of included lines when filtering).
+	TArray<FKzPoEntry> Entries;
+	TSet<const UKzSpeakerAsset*> Speakers;
+	for (const UKzDialogueAsset* Asset : Assets)
+	{
+		if (!Asset) { continue; }
+		for (const FKzDialogueLine& Line : Asset->Lines)
+		{
+			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
+
+			TArray<FString> Comments;
+			if (Line.Speaker.IsValid()) { Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line.Speaker.GetDisplayLabel().ToString())); }
+			if (!Line.TranslatorNotes.IsEmpty()) { Comments.Add(FString::Printf(TEXT("Notes: %s"), *Line.TranslatorNotes)); }
+			if (Line.MaxCharacters > 0) { Comments.Add(FString::Printf(TEXT("MaxCharacters: %d"), Line.MaxCharacters)); }
+			AppendPoText(Entries, Line.Text, MoveTemp(Comments));
+
+			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
+		}
+		if (!LineFilter)
+		{
+			for (const FKzDialogueAlias& Alias : Asset->Aliases)
+			{
+				if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
+			}
+		}
+	}
+	for (const UKzSpeakerAsset* Speaker : Speakers)
+	{
+		const TArray<FString> Comments = { FString::Printf(TEXT("Speaker asset: %s"), *Speaker->GetName()) };
+		AppendPoText(Entries, Speaker->DisplayName, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->GivenName, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->FamilyName, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->Honorific, CopyTemp(Comments));
+	}
+
+	if (Entries.IsEmpty())
+	{
+		OutError = LOCTEXT("PoNothingToExport", "Nothing to export: no localizable texts matched.");
+		return false;
+	}
+
+	// One file per foreign culture, UE layout: <Directory>/<Culture>/<Target>.po. Existing
+	// translations fill msgstr; stale ones get the standard fuzzy flag.
+	for (const FString& Culture : Query.GetTarget().ForeignCultures)
+	{
+		FString Po;
+		Po += TEXT("msgid \"\"") LINE_TERMINATOR;
+		Po += TEXT("msgstr \"\"") LINE_TERMINATOR;
+		Po += FString::Printf(TEXT("\"Project-Id-Version: %s\\n\"") LINE_TERMINATOR, *Query.GetTarget().TargetName);
+		Po += FString::Printf(TEXT("\"Language: %s\\n\"") LINE_TERMINATOR, *Culture);
+		Po += TEXT("\"MIME-Version: 1.0\\n\"") LINE_TERMINATOR;
+		Po += TEXT("\"Content-Type: text/plain; charset=UTF-8\\n\"") LINE_TERMINATOR;
+		Po += TEXT("\"Content-Transfer-Encoding: 8bit\\n\"") LINE_TERMINATOR;
+
+		for (const FKzPoEntry& Entry : Entries)
+		{
+			Po += LINE_TERMINATOR;
+			for (const FString& Comment : Entry.Comments)
+			{
+				Po += FString::Printf(TEXT("#. %s") LINE_TERMINATOR, *Comment);
+			}
+
+			FString ArchiveSource;
+			FString Translation;
+			Query.GetArchiveEntry(Entry.Namespace, Entry.Key, Culture, ArchiveSource, Translation);
+			if (Query.GetTextState(Entry.Namespace, Entry.Key, Entry.Source, Culture) == EKzTranslationState::Stale)
+			{
+				Po += TEXT("#, fuzzy") LINE_TERMINATOR;
+			}
+
+			Po += FString::Printf(TEXT("msgctxt \"%s,%s\"") LINE_TERMINATOR, *PoEscape(Entry.Namespace), *PoEscape(Entry.Key));
+			Po += FString::Printf(TEXT("msgid \"%s\"") LINE_TERMINATOR, *PoEscape(Entry.Source));
+			Po += FString::Printf(TEXT("msgstr \"%s\"") LINE_TERMINATOR, *PoEscape(Translation));
+		}
+
+		const FString FilePath = Directory / Culture / (Query.GetTarget().TargetName + TEXT(".po"));
+		if (!FFileHelper::SaveStringToFile(Po, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+		{
+			OutError = FText::Format(LOCTEXT("PoWriteFailed", "Could not write {0}."), FText::FromString(FilePath));
+			return false;
+		}
+	}
+
+	return true;
+}
+
+void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
+{
+	TArray<UKzDialogueAsset*> Assets;
+	for (const FAssetData& Data : SelectedAssets)
+	{
+		if (UKzDialogueAsset* Asset = Cast<UKzDialogueAsset>(Data.GetAsset())) { Assets.Add(Asset); }
+	}
+	if (Assets.IsEmpty()) { return; }
+
+	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	FString OutDirectory;
+	if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(ParentWindow, LOCTEXT("ExportPoDialogTitle", "Export PO files to...").ToString(), FPaths::ProjectSavedDir(), OutDirectory))
+	{
+		return;
+	}
+
+	FText Error;
+	if (ExportPoFiles(Assets, OutDirectory, Error, LineFilter))
+	{
+		ShowNotification(FText::Format(LOCTEXT("PoExportDone", "PO files exported to {0}."), FText::FromString(OutDirectory)), true);
+	}
+	else
+	{
+		ShowNotification(Error, false);
+	}
+}
+
+bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError)
+{
+	TArray<FString> FileLines;
+	if (!FFileHelper::LoadFileToStringArray(FileLines, *PoPath))
+	{
+		OutError = FText::Format(LOCTEXT("PoReadFailed", "Could not read {0}."), FText::FromString(PoPath));
+		return false;
+	}
+
+	FKzLocTargetInfo Target;
+	if (!ReadLocTargetInfo(Target, OutError)) { return false; }
+	if (!Target.ForeignCultures.Contains(Culture))
+	{
+		OutError = FText::Format(LOCTEXT("ImportUnknownCulture", "Culture '{0}' is not configured in localization target '{1}'."), FText::FromString(Culture), FText::FromString(Target.TargetName));
+		return false;
+	}
+
+	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError))
+	{
+		OutError = FText::Format(LOCTEXT("ImportNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), OutError);
+		return false;
+	}
+	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError) ||
+		!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError))
+	{
+		return false;
+	}
+
+	// Entries validate against the MANIFEST: an entry whose msgid no longer matches the
+	// gathered source was translated against old text and is skipped as drifted.
+	auto ProcessEntry = [&LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr)
+	{
+		const FString Ctxt = PoUnescape(RawCtxt);
+		const FString Id = PoUnescape(RawId);
+		const FString Str = PoUnescape(RawStr);
+
+		if (Ctxt.IsEmpty() && Id.IsEmpty()) { return; }   // .po header block
+
+		if (Str.IsEmpty())
+		{
+			++OutStats.Untranslated;
+			return;
+		}
+
+		FString Namespace;
+		FString Key;
+		if (!Ctxt.Split(TEXT(","), &Namespace, &Key))
+		{
+			++OutStats.Unresolved;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("PO entry with unrecognized msgctxt '%s' (expected 'Namespace,Key')."), *Ctxt);
+			return;
+		}
+
+		const TSharedPtr<FManifestEntry> ManifestEntry = LocHelper.FindSourceText(FLocKey(Namespace), FLocKey(Key));
+		if (!ManifestEntry.IsValid())
+		{
+			++OutStats.Unresolved;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved PO entry '%s,%s': not in the manifest anymore. Re-run Gather Text or drop the entry."), *Namespace, *Key);
+			return;
+		}
+		if (!ManifestEntry->Source.Text.Equals(Id, ESearchCase::CaseSensitive))
+		{
+			++OutStats.Drifted;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted PO entry '%s,%s': the source text changed after this file was exported; needs retranslation."), *Namespace, *Key);
+			return;
+		}
+
+		if (LocHelper.ImportTranslation(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Str), false))
+		{
+			++OutStats.Imported;
+		}
+		else
+		{
+			++OutStats.Unresolved;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Failed to write PO entry '%s,%s' into the '%s' archive."), *Namespace, *Key, *Culture);
+		}
+	};
+
+	// Minimal .po reader: msgctxt/msgid/msgstr plus bare-string continuation lines.
+	FString Ctxt;
+	FString Id;
+	FString Str;
+	FString* Continuation = nullptr;
+	bool bSeenStr = false;
+
+	auto Quoted = [](const FString& In) -> FString
+	{
+		const FString Value = In.TrimStartAndEnd();
+		return Value.Len() >= 2 && Value.StartsWith(TEXT("\"")) && Value.EndsWith(TEXT("\"")) ? Value.Mid(1, Value.Len() - 2) : FString();
+	};
+
+	for (const FString& RawLine : FileLines)
+	{
+		const FString Line = RawLine.TrimStartAndEnd();
+
+		if (Line.StartsWith(TEXT("msgctxt ")) || Line.StartsWith(TEXT("msgid ")))
+		{
+			if (bSeenStr)
+			{
+				ProcessEntry(Ctxt, Id, Str);
+				Ctxt.Reset(); Id.Reset(); Str.Reset();
+				bSeenStr = false;
+			}
+			if (Line.StartsWith(TEXT("msgctxt ")))
+			{
+				Ctxt = Quoted(Line.Mid(8));
+				Continuation = &Ctxt;
+			}
+			else
+			{
+				Id = Quoted(Line.Mid(6));
+				Continuation = &Id;
+			}
+		}
+		else if (Line.StartsWith(TEXT("msgstr ")))
+		{
+			Str = Quoted(Line.Mid(7));
+			Continuation = &Str;
+			bSeenStr = true;
+		}
+		else if (Line.StartsWith(TEXT("\"")) && Continuation)
+		{
+			*Continuation += Quoted(Line);
+		}
+		else
+		{
+			// Comments and blank lines end any string continuation.
+			Continuation = nullptr;
+		}
+	}
+	if (bSeenStr)
+	{
+		ProcessEntry(Ctxt, Id, Str);
+	}
+
+	if (OutStats.Imported > 0 && !LocHelper.SaveArchive(Culture, &OutError))
+	{
+		return false;
+	}
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
+		*Culture, *PoPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
+	return true;
+}
+
+void FKzDialogueTranslationCsv::ImportPoInteractive(const FString& Culture)
+{
+	TArray<FString> OutFiles;
+	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	if (!FDesktopPlatformModule::Get()->OpenFileDialog(ParentWindow,
+		FText::Format(LOCTEXT("ImportPoDialogTitle", "Import PO ({0})"), FText::FromString(Culture)).ToString(),
+		FPaths::ProjectSavedDir(), FString(), TEXT("PO files (*.po)|*.po"), EFileDialogFlags::None, OutFiles))
+	{
+		return;
+	}
+
+	FKzTranslationImportStats Stats;
+	FText Error;
+	if (ImportPoFile(OutFiles[0], Culture, Stats, Error))
+	{
+		ShowNotification(FText::Format(LOCTEXT("PoImportDone", "PO import ({0}): {1} imported, {2} drifted, {3} untranslated, {4} unresolved."),
+			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved), true);
+	}
+	else
+	{
+		ShowNotification(Error, false);
+	}
 }
 
 void FKzDialogueTranslationCsv::LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale)
