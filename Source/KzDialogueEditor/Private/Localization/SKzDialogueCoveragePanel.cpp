@@ -123,20 +123,20 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 					[
 						SNew(SComboButton)
 							.OnGetMenuContent(this, &SKzDialogueCoveragePanel::BuildExportMenu)
-							.ToolTipText(LOCTEXT("ExportCsvTip", "Export the assets' texts to a translation CSV: every line, the filtered lines or only the pending text."))
+							.ToolTipText(LOCTEXT("ExportTip", "Export the assets' texts for translation. Pick the format (CSV with context columns, or standard PO with context comments) and the scope (all, filtered, pending)."))
 							.ButtonContent()
 							[
-								SNew(STextBlock).Text(LOCTEXT("ExportCsv", "Export CSV"))
+								SNew(STextBlock).Text(LOCTEXT("Export", "Export"))
 							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 					[
 						SNew(SComboButton)
 							.OnGetMenuContent(this, &SKzDialogueCoveragePanel::BuildImportMenu)
-							.ToolTipText(LOCTEXT("ImportCsvTip", "Import a translated CSV into a culture's archive."))
+							.ToolTipText(LOCTEXT("ImportTip", "Import a translated CSV or PO file into a culture's archive."))
 							.ButtonContent()
 							[
-								SNew(STextBlock).Text(LOCTEXT("ImportCsv", "Import CSV"))
+								SNew(STextBlock).Text(LOCTEXT("Import", "Import"))
 							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
@@ -735,18 +735,34 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		return MenuBuilder.MakeWidget();
 	}
 
-	for (const FString& Culture : Target.ForeignCultures)
+	// Same culture list under each format; entries run the matching interactive import.
+	auto AddCultureEntries = [this](FMenuBuilder& Sub, const TArray<FString>& Cultures, TFunction<void(const FString&)> Run)
 	{
-		MenuBuilder.AddMenuEntry(
-			FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
-			FText::Format(LOCTEXT("ImportCultureTip", "Import a translated CSV into the '{0}' archive."), FText::FromString(Culture)),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([this, Culture]()
-			{
-				FKzDialogueTranslationCsv::ImportInteractive(Culture);
-				Refresh();
-			})));
-	}
+		for (const FString& Culture : Cultures)
+		{
+			Sub.AddMenuEntry(
+				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+				FText::Format(LOCTEXT("ImportCultureEntryTip", "Import a translated file into the '{0}' archive."), FText::FromString(Culture)),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([this, Culture, Run]() { Run(Culture); Refresh(); })));
+		}
+	};
+
+	MenuBuilder.AddSubMenu(
+		LOCTEXT("ImportCsvSub", "Translation CSV"),
+		FText::GetEmpty(),
+		FNewMenuDelegate::CreateLambda([AddCultureEntries, Cultures = Target.ForeignCultures](FMenuBuilder& Sub)
+		{
+			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { FKzDialogueTranslationCsv::ImportInteractive(Culture); });
+		}));
+
+	MenuBuilder.AddSubMenu(
+		LOCTEXT("ImportPoSub", "Portable Object (.po)"),
+		FText::GetEmpty(),
+		FNewMenuDelegate::CreateLambda([AddCultureEntries, Cultures = Target.ForeignCultures](FMenuBuilder& Sub)
+		{
+			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { FKzDialogueTranslationCsv::ImportPoInteractive(Culture); });
+		}));
 
 	return MenuBuilder.MakeWidget();
 }
@@ -872,40 +888,55 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		}
 	}
 
-	MenuBuilder.AddMenuEntry(
-		FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
-		LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
-		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([AssetData]()
+	// Both formats share the same scopes; each submenu entry runs the matching interactive flow.
+	auto AddScopeEntries = [this, AssetData, PassesSpeaker, IsTextPending, AllCount, FilteredCount, PendingCount](FMenuBuilder& Sub, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&)> Run)
+	{
+		Sub.AddMenuEntry(
+			FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
+			LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([AssetData, Run]() { Run(AssetData, nullptr); })));
+
+		Sub.AddMenuEntry(
+			FText::Format(LOCTEXT("ExportFilteredLines", "Filtered lines ({0})"), FilteredCount),
+			LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker filter."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker]()
+				{
+					Run(AssetData, [PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); });
+				}),
+				FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive; })));
+
+		Sub.AddMenuEntry(
+			FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
+			CultureFilter.IsEmpty()
+				? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker filter applies).")
+				: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker filter applies)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, IsTextPending]()
+				{
+					Run(AssetData, [PassesSpeaker, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && IsTextPending(Line); });
+				}),
+				FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
+	};
+
+	MenuBuilder.AddSubMenu(
+		LOCTEXT("ExportCsvSub", "Translation CSV"),
+		LOCTEXT("ExportCsvSubTip", "One CSV with the source texts and context columns (speaker, notes, max characters, audio, drift hash)."),
+		FNewMenuDelegate::CreateLambda([AddScopeEntries](FMenuBuilder& Sub)
 		{
-			FKzDialogueTranslationCsv::ExportInteractive(AssetData);
-		})));
+			AddScopeEntries(Sub, [](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportInteractive(MoveTemp(Data), Filter); });
+		}));
 
-	MenuBuilder.AddMenuEntry(
-		FText::Format(LOCTEXT("ExportFilteredLines", "Filtered lines ({0})"), FilteredCount),
-		LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker filter."),
-		FSlateIcon(),
-		FUIAction(
-			FExecuteAction::CreateLambda([AssetData, PassesSpeaker]()
-			{
-				FKzDialogueTranslationCsv::ExportInteractive(AssetData,
-					[PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); });
-			}),
-			FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive; })));
-
-	MenuBuilder.AddMenuEntry(
-		FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
-		CultureFilter.IsEmpty()
-			? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker filter applies).")
-			: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker filter applies)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
-		FSlateIcon(),
-		FUIAction(
-			FExecuteAction::CreateLambda([AssetData, PassesSpeaker, IsTextPending]()
-			{
-				FKzDialogueTranslationCsv::ExportInteractive(AssetData,
-					[PassesSpeaker, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && IsTextPending(Line); });
-			}),
-			FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
+	MenuBuilder.AddSubMenu(
+		LOCTEXT("ExportPoSub", "Portable Object (.po)"),
+		LOCTEXT("ExportPoSubTip", "One .po per culture (the standard translation-tool format): context travels as comments, existing translations fill msgstr, stale ones are flagged fuzzy."),
+		FNewMenuDelegate::CreateLambda([AddScopeEntries](FMenuBuilder& Sub)
+		{
+			AddScopeEntries(Sub, [](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter); });
+		}));
 
 	return MenuBuilder.MakeWidget();
 }
