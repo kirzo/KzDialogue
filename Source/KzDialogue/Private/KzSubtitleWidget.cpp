@@ -344,6 +344,10 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 		StopAnimation(Anim);
 	}
 
+	// Flush the shared UMG tick manager so StopAnimation's deferred rewind-to-frame-0 lands now (and fires
+	// OnAnimationFinished synchronously), instead of next tick where it would clobber the reset below. See ApplyMute.
+	FlushAnimations();
+
 	// OnAnimationFinished untracked what it saw; sweep whatever remains for this player (stale
 	// weak anims, or animations that were no longer playing so their stop never notified).
 	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
@@ -471,12 +475,17 @@ void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
 		StopAnimation(Anim);
 	}
 
+	// StopAnimation queues a rewind-to-frame-0 on the shared UMG tick manager (deferred, since widget anims
+	// don't use a private linker). Flush it now so that write lands BEFORE the reset below: for a fade-out
+	// (frame 0 = Opacity 1) the deferred rewind would otherwise fire next tick and clobber
+	// ReceiveResetChannelVisual, leaving the background visible with no text.
+	FlushAnimations();
+
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 
-	// Deterministically zero the animated Opacity (see ReceiveResetChannelVisual): the StopAnimation above
-	// only rewinds on a deferred tick, so a fade stopped mid-mute can otherwise linger at a partial value.
+	// Last write wins now that the rewind has been flushed: snap the animated Opacity to its hidden baseline.
 	ReceiveResetChannelVisual(InPlayer->Channel);
 	ReceiveHide(InPlayer->Channel);
 }
