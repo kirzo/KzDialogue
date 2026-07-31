@@ -43,7 +43,9 @@ public class KzDialogueEditor : ModuleRules
 				"ContentBrowser",
 				"DesktopPlatform",
 				"Localization",
+				"LocalizationCommandletExecution",
 				"MessageLog",
+				"WorkspaceMenuStructure",
 			});
 	}
 }

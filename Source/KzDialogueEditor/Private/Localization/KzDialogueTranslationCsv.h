@@ -3,7 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "AssetRegistry/AssetData.h"
 
+class FLocTextHelper;
 class UKzDialogueAsset;
 
 /** Localization target layout resolved from the target's generated step ini (Config/Localization/<Target>_Gather.ini). */
@@ -15,6 +17,39 @@ struct FKzLocTargetInfo
 	FString ArchiveName;
 	FString NativeCulture;
 	TArray<FString> ForeignCultures;
+};
+
+/** Translation state of one localizable text in one culture. */
+enum class EKzTranslationState : uint8
+{
+	Missing,
+	Stale,
+	Translated
+};
+
+/**
+ * Localization target, manifest and archives opened once, answering per-text and per-audio
+ * questions cheaply afterwards. Used by BuildCoverage and by the dialogue dashboard's
+ * per-line culture states.
+ */
+class FKzLocQuery
+{
+public:
+	/** Loads target info, the manifest (strict: gather must have run) and every foreign archive (a missing archive counts as fully untranslated). */
+	bool Load(FText& OutError);
+
+	const FKzLocTargetInfo& GetTarget() const { return Target; }
+
+	/** State of a text anchored to (Namespace, Key) whose current source string is SourceString. */
+	EKzTranslationState GetTextState(const FString& Namespace, const FString& Key, const FString& SourceString, const FString& Culture) const;
+
+	/** True when the source audio package has a localized variant for Culture. */
+	bool IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const;
+
+private:
+	FKzLocTargetInfo Target;
+	TSharedPtr<FLocTextHelper> LocHelper;
+	TSet<FString> LoadedCultures;
 };
 
 /** Per-culture translation coverage counters. */
@@ -98,4 +133,13 @@ public:
 
 	/** Computes per-culture coverage counters plus the stale-translation list for the given assets. Fails when the localization target or its manifest cannot be read. */
 	static bool BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError);
+
+	/** Interactive export flow (load assets, dirty warning, save-file dialog, ExportAssets, notification). Shared by the content browser menu and the dashboard. */
+	static void ExportInteractive(TArray<FAssetData> SelectedAssets);
+
+	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
+	static void ImportInteractive(const FString& Culture);
+
+	/** Writes one clickable warning per stale translation into the KzDialogueL10N message log. Does not open the log. */
+	static void LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale);
 };

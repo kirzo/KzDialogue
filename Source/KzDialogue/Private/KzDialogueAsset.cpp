@@ -2,8 +2,10 @@
 
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
+#include "KzSpeakerAsset.h"
 #include "Misc/Crc.h"
 #include "Internationalization/Text.h"
+#include "UObject/AssetRegistryTagsContext.h"
 
 UE_DISABLE_OPTIMIZATION
 
@@ -157,6 +159,32 @@ FPrimaryAssetId UKzDialogueAsset::GetPrimaryAssetId() const
 }
 
 #if WITH_EDITOR
+
+const FName UKzDialogueAsset::TagLineCount(TEXT("KzLineCount"));
+const FName UKzDialogueAsset::TagVoicedCount(TEXT("KzVoicedCount"));
+const FName UKzDialogueAsset::TagSpeakers(TEXT("KzSpeakers"));
+const FName UKzDialogueAsset::TagDisplayName(TEXT("KzDisplayName"));
+
+void UKzDialogueAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
+{
+	Super::GetAssetRegistryTags(Context);
+
+	// Baked at save time so the dialogue dashboard lists and filters without loading assets.
+	int32 Voiced = 0;
+	TSet<FString> SpeakerNames;
+	for (const FKzDialogueLine& Line : Lines)
+	{
+		if (!Line.Audio.IsNull()) { ++Voiced; }
+		if (Line.Speaker.Asset) { SpeakerNames.Add(Line.Speaker.Asset->GetName()); }
+	}
+	TArray<FString> SortedSpeakers = SpeakerNames.Array();
+	SortedSpeakers.Sort();
+
+	Context.AddTag(FAssetRegistryTag(TagLineCount, LexToString(Lines.Num()), FAssetRegistryTag::TT_Numerical));
+	Context.AddTag(FAssetRegistryTag(TagVoicedCount, LexToString(Voiced), FAssetRegistryTag::TT_Numerical));
+	Context.AddTag(FAssetRegistryTag(TagSpeakers, FString::Join(SortedSpeakers, TEXT(";")), FAssetRegistryTag::TT_Alphabetical));
+	Context.AddTag(FAssetRegistryTag(TagDisplayName, DisplayName, FAssetRegistryTag::TT_Alphabetical));
+}
 
 void UKzDialogueAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {

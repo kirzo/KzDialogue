@@ -7,6 +7,7 @@
 
 class UKzDialogueAsset;
 class SVerticalBox;
+struct FKzCultureCoverage;
 
 /**
  * Read-only per-culture translation coverage table, shown as an extra tab in the
@@ -20,6 +21,9 @@ public:
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, UKzDialogueAsset* InAsset);
+
+	/** Renders the per-culture coverage table (header row + one row per culture) into Rows. Shared with the dialogue dashboard. */
+	static void FillCoverageRows(SVerticalBox& Rows, const TArray<FKzCultureCoverage>& Cultures);
 
 private:
 	TWeakObjectPtr<UKzDialogueAsset> Asset;
