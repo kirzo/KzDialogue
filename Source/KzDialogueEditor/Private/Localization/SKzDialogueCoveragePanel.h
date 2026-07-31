@@ -37,33 +37,29 @@ private:
 	/** When active, only lines of this speaker asset name count ("" = narration lines). */
 	bool bSpeakerFilterActive = false;
 	FString SpeakerFilter;
-	/** Include audio work (recording state, localized variants). Off = text only. */
-	bool bShowAudio = true;
+	/** Show the foreign cards' localized-audio state. Off silences missing-localized-audio warnings (projects that do not localize audio); the native card's recording state (missing and stale takes) is unaffected. */
+	bool bShowLocalizedAudio = true;
 
-	/** Pending lists show only entries with audio work (the recording to-do list). */
+	/** Line lists show only rows with audio work (the recording to-do list). */
 	bool bOnlyMissingVoice = false;
 
-	/** Hide the cards of cultures with nothing pending. */
+	/** Line lists hide "ok" rows; fully complete cultures lose their card. */
 	bool bOnlyIncomplete = false;
 
-	/** One pending piece of work inside a culture card: a line whose text or audio needs attention. */
-	struct FPending
+	/** One line inside a culture card: its status for that culture, its playable take and its label. */
+	struct FLineRow
 	{
 		FGuid LineId;
 		FText Label;
+		/** Status chip: "ok", or what is pending ("text", "stale", "audio", combos...). */
 		FText State;
 		FLinearColor StateColor;
 		/** Optional detail (e.g. the stale diff); replaces the default row tooltip when set. */
 		FText Tooltip;
-		/** The entry involves audio work; the Missing voice filter keeps only these. */
+		bool bPending = false;
+		/** The pending work involves audio; the Missing voice filter keeps only these. */
 		bool bAudioWork = false;
-	};
-
-	/** One auditionable audio row: a line's take for the card's culture (source take on the native card). */
-	struct FAudioRow
-	{
-		FGuid LineId;
-		FText Label;
+		/** This culture's playable take (localized variant on foreign cards, source take on the native one). */
 		FSoftObjectPath AudioPath;
 	};
 
@@ -79,7 +75,7 @@ private:
 	/** Selects the line in the editor's Lines tab (same navigation as validation issues). */
 	void NavigateToLine(FGuid LineId);
 
-	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FPending>& Pending, const TArray<FAudioRow>& AudioRows, const FString& AudioKeyPrefix);
+	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FLineRow>& Lines, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);
 
 	/** Export scope entries: all lines, the filtered lines, or only the pending text. */
@@ -97,6 +93,6 @@ private:
 	/** Row filters (missing voice, only incomplete), mirroring the dashboard's funnel menu. */
 	TSharedRef<SWidget> BuildFiltersMenu();
 
-	/** View options (the audio toggle), mirroring the dashboard's eye menu. */
+	/** View options (the localized-audio toggle), mirroring the dashboard's eye menu. */
 	TSharedRef<SWidget> BuildViewOptionsMenu();
 };
