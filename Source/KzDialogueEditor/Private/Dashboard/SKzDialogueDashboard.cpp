@@ -10,6 +10,7 @@
 #include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Components/AudioComponent.h"
 #include "ContentBrowserModule.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
@@ -20,6 +21,7 @@
 #include "LocalizationModule.h"
 #include "Logging/MessageLog.h"
 #include "Misc/ScopedSlowTask.h"
+#include "Sound/SoundBase.h"
 #include "Styling/AppStyle.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Widgets/Images/SImage.h"
@@ -65,21 +67,26 @@ namespace
 	public:
 		SLATE_BEGIN_ARGS(SKzDashboardRow) {}
 			SLATE_ARGUMENT(FString, Culture)
+			SLATE_ARGUMENT(bool, bNativeCulture)
+			SLATE_ARGUMENT(TSharedPtr<SKzDialogueDashboard::FAudition>, Audition)
 		SLATE_END_ARGS()
 
 		void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& OwnerTable, SKzDialogueDashboard::FRowPtr InRow)
 		{
 			Row = InRow;
 			Culture = InArgs._Culture;
+			bNativeCulture = InArgs._bNativeCulture;
+			Audition = InArgs._Audition;
 			SMultiColumnTableRow<SKzDialogueDashboard::FRowPtr>::Construct(FSuperRowType::FArguments(), OwnerTable);
 		}
 
 		virtual TSharedRef<SWidget> GenerateWidgetForColumn(const FName& Column) override
 		{
-			auto Cell = [](const FText& Value, const FLinearColor* Color = nullptr) -> TSharedRef<SWidget>
+			auto Cell = [](const FText& Value, const FLinearColor* Color = nullptr, const FText& Tip = FText()) -> TSharedRef<SWidget>
 			{
 				TSharedRef<STextBlock> Text = SNew(STextBlock).Text(Value);
 				if (Color) { Text->SetColorAndOpacity(FSlateColor(*Color)); }
+				if (!Tip.IsEmpty()) { Text->SetToolTipText(Tip); }
 				return SNew(SBox).Padding(4.f, 2.f).VAlign(VAlign_Center)[ Text ];
 			};
 
@@ -93,7 +100,7 @@ namespace
 					FString Preview = Row->LineText;
 					if (Preview.Len() > 90) { Preview = Preview.Left(90) + TEXT("..."); }
 
-					return SNew(SHorizontalBox)
+					TSharedRef<SHorizontalBox> LineBox = SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth()
 						[
 							SNew(SExpanderArrow, SharedThis(this))
@@ -107,6 +114,25 @@ namespace
 									.ToolTipText(FText::FromString(Row->LineText))
 							]
 						];
+
+					if (Row->bLineVoiced)
+					{
+						// Same audition mechanic as the asset editor's per-line play button.
+						LineBox->AddSlot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+						[
+							SNew(SButton)
+								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+								.ToolTipText(LOCTEXT("AuditionLine", "Play this line's audio"))
+								.OnClicked(this, &SKzDashboardRow::OnPlayClicked)
+								[
+									SNew(SImage)
+										.Image_Lambda([this]() { return FAppStyle::GetBrush(IsAuditioningThis() ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play"); })
+										.ColorAndOpacity(FSlateColor::UseForeground())
+								]
+						];
+					}
+
+					return LineBox;
 				}
 
 				// Asset row: display label (asset name + package in the tooltip) plus a magnifier
@@ -157,6 +183,8 @@ namespace
 					{
 						return Cell(Row->LineCount >= 0 ? FText::AsNumber(Row->LineCount) : LOCTEXT("UnknownCount", "?"));
 					}
+					// Native text is the source itself: nothing to translate into.
+					if (bNativeCulture) { return Cell(LOCTEXT("NoValue", "-")); }
 					if (const FIntPoint* Rollup = Row->TextRollup.Find(Culture))
 					{
 						const bool bDone = Rollup->X >= Rollup->Y;
@@ -165,7 +193,7 @@ namespace
 					return Cell(LOCTEXT("UnknownCount", "?"));
 				}
 
-				if (Culture.IsEmpty() || Row->LineKey.IsEmpty()) { return Cell(LOCTEXT("NoValue", "-")); }
+				if (Culture.IsEmpty() || bNativeCulture || Row->LineKey.IsEmpty()) { return Cell(LOCTEXT("NoValue", "-")); }
 				if (const EKzTranslationState* State = Row->LineTextState.Find(Culture))
 				{
 					switch (*State)
@@ -194,8 +222,26 @@ namespace
 					return Cell(LOCTEXT("UnknownCount", "?"));
 				}
 
+				const FText StaleVoTip = LOCTEXT("StaleVoTip", "Text changed after this audio was recorded. Re-record it, or re-assign the audio to accept the current text.");
+
+				if (Culture.IsEmpty())
+				{
+					if (!Row->bLineVoiced) { return Cell(LOCTEXT("NoValue", "-")); }
+					return Row->bLineAudioStale
+						? Cell(LOCTEXT("StateStale", "stale"), &StaleColor, StaleVoTip)
+						: Cell(LOCTEXT("VoicedYes", "yes"));
+				}
+
+				// Native: recording state of the source audio.
+				if (bNativeCulture)
+				{
+					if (!Row->bLineVoiced) { return Cell(LOCTEXT("StateMissing", "missing"), &MissingColor); }
+					return Row->bLineAudioStale
+						? Cell(LOCTEXT("StateStale", "stale"), &StaleColor, StaleVoTip)
+						: Cell(LOCTEXT("StateOk", "ok"), &DoneColor);
+				}
+
 				if (!Row->bLineVoiced) { return Cell(LOCTEXT("NoValue", "-")); }
-				if (Culture.IsEmpty()) { return Cell(LOCTEXT("VoicedYes", "yes")); }
 				if (const bool* bLocalized = Row->LineAudioLocalized.Find(Culture))
 				{
 					return *bLocalized ? Cell(LOCTEXT("StateOk", "ok"), &DoneColor) : Cell(LOCTEXT("StateMissing", "missing"), &MissingColor);
@@ -212,8 +258,37 @@ namespace
 		}
 
 	private:
+		bool bNativeCulture = false;
+
+		bool IsAuditioningThis() const
+		{
+			return Audition.IsValid() && Row.IsValid()
+				&& Audition->LineId == Row->LineId
+				&& Audition->Component.IsValid() && Audition->Component->IsPlaying();
+		}
+
+		FReply OnPlayClicked()
+		{
+			// Toggle: stop whatever is playing; start this line unless it was the one playing.
+			const bool bWasThis = IsAuditioningThis();
+			if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
+			Audition->Component = nullptr;
+			Audition->LineId = FGuid();
+
+			if (!bWasThis && GEditor && Row.IsValid())
+			{
+				if (USoundBase* Sound = Cast<USoundBase>(Row->LineAudioPath.TryLoad()))
+				{
+					Audition->Component = GEditor->PlayPreviewSound(Sound);
+					Audition->LineId = Row->LineId;
+				}
+			}
+			return FReply::Handled();
+		}
+
 		SKzDialogueDashboard::FRowPtr Row;
 		FString Culture;
+		TSharedPtr<SKzDialogueDashboard::FAudition> Audition;
 	};
 }
 
@@ -286,23 +361,14 @@ void SKzDialogueDashboard::Construct(const FArguments& /*InArgs*/)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
 			[
-				SNew(SCheckBox)
-					.Visibility_Lambda([this]() { return SelectedCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible; })
-					.IsChecked_Lambda([this]() { return bOnlyIncomplete ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-					.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { bOnlyIncomplete = State == ECheckBoxState::Checked; RebuildVisible(); })
-					.ToolTipText(LOCTEXT("OnlyIncompleteTip", "Show only assets and lines with work left for the selected culture."))
+				SNew(SComboButton)
+					.OnGetMenuContent(this, &SKzDialogueDashboard::BuildFiltersMenu)
+					.ToolTipText(LOCTEXT("FiltersTip", "Row filters"))
+					.ButtonContent()
 					[
-						SNew(STextBlock).Text(LOCTEXT("OnlyIncomplete", "Only incomplete"))
-					]
-			]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
-			[
-				SNew(SCheckBox)
-					.IsChecked_Lambda([this]() { return bShowDevelopers ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-					.OnCheckStateChanged_Lambda([this](ECheckBoxState State) { bShowDevelopers = State == ECheckBoxState::Checked; RebuildVisible(); })
-					.ToolTipText(LOCTEXT("DevelopersTip", "Show assets under /Game/Developers"))
-					[
-						SNew(STextBlock).Text(LOCTEXT("Developers", "Developers"))
+						SNew(SImage)
+							.Image(FAppStyle::GetBrush("Icons.Filter"))
+							.ColorAndOpacity(FSlateColor::UseForeground())
 					]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
@@ -601,6 +667,36 @@ bool SKzDialogueDashboard::PassesFilters(const FRow& Row) const
 		}
 	}
 
+	if (bOnlyMissingVoice)
+	{
+		if (Row.bChildrenLoaded)
+		{
+			bool bAnyMissing = false;
+			for (const FRowPtr& Child : Row.Children)
+			{
+				if (Child.IsValid() && IsLineMissingVoice(*Child) && (SpeakerFilter.IsEmpty() || Child->LineSpeakerAssetName == SpeakerFilter))
+				{
+					bAnyMissing = true;
+					break;
+				}
+			}
+			if (!bAnyMissing) { return false; }
+		}
+		else if (!SelectedCulture.IsEmpty())
+		{
+			// Unloaded but analyzed rows keep their rollup; no rollup = unknown, stays visible.
+			if (const FIntPoint* Audio = Row.AudioRollup.Find(SelectedCulture))
+			{
+				if (Audio->X >= Audio->Y) { return false; }
+			}
+		}
+		else if (Row.LineCount >= 0 && Row.VoicedCount >= 0 && Row.VoicedCount >= Row.LineCount)
+		{
+			// The tags say every line is voiced (drift is invisible to tags). Unknown counts stay visible.
+			return false;
+		}
+	}
+
 	if (!FilterText.IsEmpty())
 	{
 		const bool bAssetMatch = Row.AssetLabel().Contains(FilterText)
@@ -625,20 +721,43 @@ bool SKzDialogueDashboard::PassesFilters(const FRow& Row) const
 
 bool SKzDialogueDashboard::IsLineIncomplete(const FRow& Line) const
 {
-	if (!Line.LineKey.IsEmpty())
+	const bool bNative = IsNativeSelected();
+
+	// Native text is the source itself: nothing to translate.
+	if (!bNative && !Line.LineKey.IsEmpty())
 	{
 		const EKzTranslationState* State = Line.LineTextState.Find(SelectedCulture);
 		if (!State || *State != EKzTranslationState::Translated) { return true; }
 	}
 
 	// Audio only counts as pending work when the project localizes audio (Voiced column shown).
-	if (bShowVoicedColumn && Line.bLineVoiced)
+	if (bShowVoicedColumn)
 	{
-		const bool* bLocalized = Line.LineAudioLocalized.Find(SelectedCulture);
-		if (!bLocalized || !*bLocalized) { return true; }
+		if (bNative)
+		{
+			if (!Line.bLineVoiced || Line.bLineAudioStale) { return true; }
+		}
+		else if (Line.bLineVoiced)
+		{
+			const bool* bLocalized = Line.LineAudioLocalized.Find(SelectedCulture);
+			if (!bLocalized || !*bLocalized) { return true; }
+		}
 	}
 
 	return false;
+}
+
+bool SKzDialogueDashboard::IsLineMissingVoice(const FRow& Line) const
+{
+	// No culture / native: recording work on the source audio (missing take or drifted text).
+	if (SelectedCulture.IsEmpty() || IsNativeSelected())
+	{
+		return !Line.bLineVoiced || Line.bLineAudioStale;
+	}
+
+	// Foreign culture: the localized variant is what matters. Unanalyzed falls back to source.
+	const bool* bLocalized = Line.LineAudioLocalized.Find(SelectedCulture);
+	return bLocalized ? !*bLocalized : !Line.bLineVoiced;
 }
 
 bool SKzDialogueDashboard::LineMatchesSearch(const FRow& Line) const
@@ -668,10 +787,13 @@ void SKzDialogueDashboard::LoadChildren(const FRowPtr& AssetRow)
 		const FString* Source = FTextInspector::GetSourceString(Line.Text);
 		Child->LineText = Source ? *Source : Line.Text.ToString();
 		Child->LineSpeaker = Line.Speaker.IsValid() ? Line.Speaker.GetDisplayLabel().ToString() : FString();
+		Child->LineSpeakerAssetName = Line.Speaker.Asset ? Line.Speaker.Asset->GetName() : FString();
 		Child->bLineVoiced = !Line.Audio.IsNull();
 		if (Child->bLineVoiced)
 		{
-			Child->LineAudioPackage = Line.Audio.ToSoftObjectPath().GetLongPackageName();
+			Child->bLineAudioStale = Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+			Child->LineAudioPath = Line.Audio.ToSoftObjectPath();
+			Child->LineAudioPackage = Child->LineAudioPath.GetLongPackageName();
 		}
 
 		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
@@ -691,6 +813,7 @@ void SKzDialogueDashboard::ComputeCultureData(const FRowPtr& AssetRow)
 	if (!AssetRow.IsValid() || SelectedCulture.IsEmpty() || !LocQuery.IsValid()) { return; }
 	if (AssetRow->TextRollup.Contains(SelectedCulture)) { return; }
 
+	const bool bNative = IsNativeSelected();
 	int32 TextDone = 0;
 	int32 TextTotal = 0;
 	int32 AudioDone = 0;
@@ -700,7 +823,7 @@ void SKzDialogueDashboard::ComputeCultureData(const FRowPtr& AssetRow)
 	{
 		if (!Child.IsValid()) { continue; }
 
-		if (!Child->LineKey.IsEmpty())
+		if (!bNative && !Child->LineKey.IsEmpty())
 		{
 			++TextTotal;
 			const EKzTranslationState State = LocQuery->GetTextState(Child->LineNamespace, Child->LineKey, Child->LineText, SelectedCulture);
@@ -708,7 +831,13 @@ void SKzDialogueDashboard::ComputeCultureData(const FRowPtr& AssetRow)
 			if (State == EKzTranslationState::Translated) { ++TextDone; }
 		}
 
-		if (Child->bLineVoiced)
+		if (bNative)
+		{
+			// Recording state: every line counts, done = has audio and its text did not drift.
+			++AudioTotal;
+			if (Child->bLineVoiced && !Child->bLineAudioStale) { ++AudioDone; }
+		}
+		else if (Child->bLineVoiced)
 		{
 			++AudioTotal;
 			const bool bLocalized = LocQuery->IsAudioLocalized(Child->LineAudioPackage, SelectedCulture);
@@ -757,13 +886,16 @@ bool SKzDialogueDashboard::EnsureLocQuery()
 	}
 
 	LocQuery = MoveTemp(NewQuery);
+	NativeCulture = LocQuery->GetTarget().NativeCulture;
 	return true;
 }
 
 TSharedRef<ITableRow> SKzDialogueDashboard::OnGenerateRow(FRowPtr Row, const TSharedRef<STableViewBase>& Owner)
 {
 	return SNew(SKzDashboardRow, Owner, Row)
-		.Culture(SelectedCulture);
+		.Culture(SelectedCulture)
+		.bNativeCulture(IsNativeSelected())
+		.Audition(Audition);
 }
 
 void SKzDialogueDashboard::OnGetChildren(FRowPtr Row, TArray<FRowPtr>& OutChildren)
@@ -794,6 +926,8 @@ void SKzDialogueDashboard::OnGetChildren(FRowPtr Row, TArray<FRowPtr>& OutChildr
 	{
 		if (!Child.IsValid()) { continue; }
 		if (bOnlyIncomplete && !SelectedCulture.IsEmpty() && !IsLineIncomplete(*Child)) { continue; }
+		if (bOnlyMissingVoice && !IsLineMissingVoice(*Child)) { continue; }
+		if (!SpeakerFilter.IsEmpty() && Child->LineSpeakerAssetName != SpeakerFilter) { continue; }
 		if (bSearchInLines && !FilterText.IsEmpty() && !LineMatchesSearch(*Child)) { continue; }
 		OutChildren.Add(Child);
 	}
@@ -898,6 +1032,23 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCultureMenu()
 			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([] { return false; })));
 		return MenuBuilder.MakeWidget();
 	}
+	NativeCulture = Target.NativeCulture;
+
+	auto SelectCulture = [this](const FString& Culture)
+	{
+		if (!EnsureLocQuery()) { return; }
+		SelectedCulture = Culture;
+		AnalyzeFiltered(FText::Format(LOCTEXT("AnalyzingCulture", "Analyzing '{0}'..."), FText::FromString(Culture)));
+		RebuildVisible();
+	};
+
+	// Native first: the source-language view, where the audio column shows recording state
+	// (missing takes, takes whose text drifted after recording).
+	MenuBuilder.AddMenuEntry(
+		FText::Format(LOCTEXT("NativeCultureEntry", "{0} (native)"), FText::FromString(Target.NativeCulture)),
+		LOCTEXT("NativeCultureTip", "Source-language view: per-line recording state (missing audio, or audio whose text changed after it was recorded)."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([SelectCulture, Culture = Target.NativeCulture]() { SelectCulture(Culture); })));
 
 	for (const FString& Culture : Target.ForeignCultures)
 	{
@@ -905,14 +1056,48 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCultureMenu()
 			FText::FromString(Culture),
 			FText::Format(LOCTEXT("CultureEntryTip", "Analyze the filtered assets and show text/audio progress for '{0}'."), FText::FromString(Culture)),
 			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([this, Culture]()
-			{
-				if (!EnsureLocQuery()) { return; }
-				SelectedCulture = Culture;
-				AnalyzeFiltered(FText::Format(LOCTEXT("AnalyzingCulture", "Analyzing '{0}'..."), FText::FromString(Culture)));
-				RebuildVisible();
-			})));
+			FUIAction(FExecuteAction::CreateLambda([SelectCulture, Culture]() { SelectCulture(Culture); })));
 	}
+
+	return MenuBuilder.MakeWidget();
+}
+
+TSharedRef<SWidget> SKzDialogueDashboard::BuildFiltersMenu()
+{
+	FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/false, nullptr);
+
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("MissingVoice", "Missing voice"),
+		LOCTEXT("MissingVoiceTip", "Show only lines whose audio is missing or needs re-recording for the selected culture (source audio when no culture is selected). Combine with the speaker filter and Export CSV to build a recording script."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; RebuildVisible(); }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this]() { return bOnlyMissingVoice; })),
+		NAME_None,
+		EUserInterfaceActionType::ToggleButton);
+
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("OnlyIncomplete", "Only incomplete"),
+		LOCTEXT("OnlyIncompleteTip", "Show only assets and lines with work left for the selected culture. Needs a culture selected."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; RebuildVisible(); }),
+			FCanExecuteAction::CreateLambda([this]() { return !SelectedCulture.IsEmpty(); }),
+			FIsActionChecked::CreateLambda([this]() { return bOnlyIncomplete; })),
+		NAME_None,
+		EUserInterfaceActionType::ToggleButton);
+
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("Developers", "Developers"),
+		LOCTEXT("DevelopersTip", "Show assets under /Game/Developers"),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { bShowDevelopers = !bShowDevelopers; RebuildVisible(); }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this]() { return bShowDevelopers; })),
+		NAME_None,
+		EUserInterfaceActionType::ToggleButton);
 
 	return MenuBuilder.MakeWidget();
 }

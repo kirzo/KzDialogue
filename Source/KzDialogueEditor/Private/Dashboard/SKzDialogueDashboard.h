@@ -59,8 +59,12 @@ public:
 		FGuid LineId;
 		FString LineText;
 		FString LineSpeaker;
+		FString LineSpeakerAssetName;
 		bool bLineVoiced = false;
+		/** Source text changed after the audio was assigned: the recording needs a re-take. */
+		bool bLineAudioStale = false;
 		FString LineAudioPackage;
+		FSoftObjectPath LineAudioPath;
 		FString LineNamespace;
 		FString LineKey;
 
@@ -72,6 +76,13 @@ public:
 		FString AssetLabel() const { return DisplayName.IsEmpty() ? Asset.AssetName.ToString() : DisplayName; }
 	};
 	using FRowPtr = TSharedPtr<FRow>;
+
+	/** Shared audition state (one editor preview sound at a time), handed to row widgets. */
+	struct FAudition
+	{
+		TWeakObjectPtr<class UAudioComponent> Component;
+		FGuid LineId;
+	};
 
 private:
 	TArray<FRowPtr> AllRows;
@@ -88,6 +99,14 @@ private:
 	/** Active culture ("" = all cultures / cheap registry view). */
 	FString SelectedCulture;
 	bool bOnlyIncomplete = false;
+
+	/** The localization target's native culture, cached when the target is first read. */
+	FString NativeCulture;
+
+	/** Show only lines whose audio is missing or stale for the selected culture (source audio when none); the recording to-do list. */
+	bool bOnlyMissingVoice = false;
+
+	TSharedPtr<FAudition> Audition = MakeShared<FAudition>();
 
 	/** View option: projects that do not localize audio can hide the Voiced column. */
 	bool bShowVoicedColumn = true;
@@ -110,6 +129,11 @@ private:
 
 	/** True when the line row still needs work for the selected culture. */
 	bool IsLineIncomplete(const FRow& Line) const;
+
+	/** True when the line's audio is missing or stale for the selected culture (source audio when none). */
+	bool IsLineMissingVoice(const FRow& Line) const;
+
+	bool IsNativeSelected() const { return !SelectedCulture.IsEmpty() && SelectedCulture == NativeCulture; }
 
 	/** True when the line row matches the in-line text search. */
 	bool LineMatchesSearch(const FRow& Line) const;
@@ -138,6 +162,9 @@ private:
 
 	/** Culture selector: All cultures + the localization target's foreign cultures. */
 	TSharedRef<SWidget> BuildCultureMenu();
+
+	/** Row filters menu (missing voice, only incomplete, developers). */
+	TSharedRef<SWidget> BuildFiltersMenu();
 
 	/** View options menu (column visibility toggles). */
 	TSharedRef<SWidget> BuildViewOptionsMenu();
