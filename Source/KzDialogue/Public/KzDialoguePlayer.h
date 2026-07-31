@@ -311,6 +311,10 @@ private:
 	void Enter_LineExiting();
 	void Enter_Exiting();
 
+	/** Presentation half of Enter_LineEntering, deferred by LineStartDelay: line-started events, audio kick-off, view enter requests. */
+	void PresentLine();
+	void HandleLineStartDelayElapsed();
+
 	/** Shared by Skip() and Next(): cancel the line timer and move the showing line to LineExiting. */
 	void AdvanceCurrentLine();
 
@@ -396,6 +400,9 @@ private:
 
 	/** Pending deferred audio start for the current line (AudioStartDelay > 0). */
 	FTimerHandle AudioDelayTimerHandle;
+
+	/** Pending silent pre-line gap (LineStartDelay > 0); the line presents when it elapses. */
+	FTimerHandle LineStartDelayTimerHandle;
 
 	// Timeline runtime state (valid only while a timelined line is in LinePlaying).
 

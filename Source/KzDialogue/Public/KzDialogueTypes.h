@@ -118,7 +118,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * soft pointer resolves to the active culture's package automatically. No per-culture
 	 * mapping is stored on the line.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
 	TSoftObjectPtr<USoundBase> Audio;
 
 	/**
@@ -126,26 +126,35 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * Added on top of the line's resolved duration, and scaled by the player's TimeScale like
 	 * every other line timing.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0))
 	float AudioStartDelay = 0.0f;
 
 	/**
 	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
 	 * an extension on top of the audio, or as the explicit length when > 0 (Auto).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0))
 	float Duration = 0.0f;
 
 	/** How the line's playback length is derived from Duration and the audio. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing")
 	EKzLineDurationMode DurationMode = EKzLineDurationMode::Auto;
 
+	/**
+	 * Seconds of silent gap before the line presents: nothing shows and nothing sounds, then
+	 * subtitle and audio appear together. AudioStartDelay composes on top, inside the line
+	 * (the subtitle may still lead the voice). Extends the line's total time and is scaled
+	 * by the player's TimeScale like every other line timing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0))
+	float LineStartDelay = 0.0f;
+
 	/** How this line's audio is placed in the world. Resolution chain: line > channel > project settings. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
 	EKzLineAudioSpatialization AudioSpatialization = EKzLineAudioSpatialization::Inherit;
 
 	/** Policy applied to this line's audio when the player transitions to the next line. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
 	EKzLineAudioInterruptionPolicy AudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
 
 	/**
@@ -154,11 +163,11 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * For alias entries the line level only applies when every line of the alias agrees on the
 	 * same DefaultChannel.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (Categories = "Dialogue.Channel"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Playback", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
 	/** Free-form tags (mood, intent, channel hint, etc.). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Playback")
 	FGameplayTagContainer Tags;
 
 	/**
@@ -166,7 +175,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * FInstancedPropertyBag so any property type (bool, int, float, name, object,
 	 * sound wave) can be stored without a custom variant.
 	 */
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line")
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
 	FInstancedPropertyBag AudioParams;
 
 	/**
@@ -188,12 +197,16 @@ struct KZDIALOGUE_API FKzDialogueLine
 	
 #if WITH_EDITORONLY_DATA
 	/** Director notes for the translator: tone, intent, audience. Not localizable; exported alongside the line in the translation flow, never shipped. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Line", meta = (MultiLine = true))
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Localization", meta = (MultiLine = true))
 	FString TranslatorNotes;
 
 	/** Maximum characters a translation of Text may use (fixed-width subtitles, bark bubbles). 0 = no limit. Consumed by validators and the export flow, not at runtime. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Line", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Localization", meta = (ClampMin = 0))
 	int32 MaxCharacters = 0;
+
+	/** Uncheck when this line's audio is deliberately NOT localized: it stops counting as pending audio work per culture and exports flag it so the studio knows. The source take's recording state is still tracked. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio")
+	bool bLocalizeAudio = true;
 #endif
 
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */

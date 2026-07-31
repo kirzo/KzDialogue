@@ -357,8 +357,9 @@ void SKzDialogueCoveragePanel::Refresh()
 				}
 
 				// Localized audio variant of voiced lines. The eye toggle silences this whole
-				// dimension for projects that do not localize audio.
-				if (bShowLocalizedAudio && !Line.Audio.IsNull())
+				// dimension for projects that do not localize audio; bLocalizeAudio opts a
+				// single line out (its source take plays in every culture on purpose).
+				if (bShowLocalizedAudio && !Line.Audio.IsNull() && Line.bLocalizeAudio)
 				{
 					++AudioTotal;
 					FString LocalizedPackage;

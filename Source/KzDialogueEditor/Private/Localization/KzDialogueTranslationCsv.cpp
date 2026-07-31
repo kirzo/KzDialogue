@@ -163,8 +163,9 @@ bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& A
 
 			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
 
-			// Audio localization is plain data, no project policy: subtitles-only projects read 0/N and move on.
-			if (!Line.Audio.IsNull())
+			// Audio localization is plain data, no project policy: subtitles-only projects read
+			// 0/N and move on. Lines opted out via bLocalizeAudio do not count at all.
+			if (!Line.Audio.IsNull() && Line.bLocalizeAudio)
 			{
 				VoicedPackages.Add(Line.Audio.ToSoftObjectPath().GetLongPackageName());
 			}
@@ -449,7 +450,7 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 
 bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter)
 {
-	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,SourceHash");
+	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash");
 	Csv += LINE_TERMINATOR;
 
 	int32 NumRows = 0;
@@ -464,6 +465,8 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 			// Empty for narration lines; GetDisplayLabel's "<Narration>" placeholder is editor UI, not translator context.
 			const FString Speaker = Line.Speaker.IsValid() ? Line.Speaker.GetDisplayLabel().ToString() : FString();
 			const FString Audio = Line.Audio.ToSoftObjectPath().ToString();
+			// "no" tells the studio this take deliberately plays in every culture; empty otherwise.
+			const FString LocalizeAudio = !Line.Audio.IsNull() && !Line.bLocalizeAudio ? TEXT("no") : TEXT("");
 
 			auto AddRow = [&](const FText& Source, const FString& Notes, int32 MaxChars, uint32 SourceHash)
 			{
@@ -481,6 +484,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 				Csv += CsvEscape(Notes) + TEXT(",");
 				Csv += FString::FromInt(MaxChars) + TEXT(",");
 				Csv += CsvEscape(Audio) + TEXT(",");
+				Csv += LocalizeAudio + TEXT(",");
 				Csv += FString::Printf(TEXT("%u"), SourceHash);
 				Csv += LINE_TERMINATOR;
 				++NumRows;
@@ -531,6 +535,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 			Csv += TEXT(",");
 			Csv += TEXT(",");
 			Csv += TEXT("0,");
+			Csv += TEXT(",");
 			Csv += TEXT(",");
 			Csv += FString::Printf(TEXT("%u"), SourceHash);
 			Csv += LINE_TERMINATOR;
@@ -809,6 +814,7 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 			if (Line.Speaker.IsValid()) { Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line.Speaker.GetDisplayLabel().ToString())); }
 			if (!Line.TranslatorNotes.IsEmpty()) { Comments.Add(FString::Printf(TEXT("Notes: %s"), *Line.TranslatorNotes)); }
 			if (Line.MaxCharacters > 0) { Comments.Add(FString::Printf(TEXT("MaxCharacters: %d"), Line.MaxCharacters)); }
+			if (!Line.Audio.IsNull() && !Line.bLocalizeAudio) { Comments.Add(TEXT("Audio: do not localize (the source take plays in every culture)")); }
 			AppendPoText(Entries, Line.Text, MoveTemp(Comments));
 
 			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }

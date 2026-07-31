@@ -40,8 +40,9 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 	StructHandle = StructPropertyHandle;
 	PropertyUtilities = StructCustomizationUtils.GetPropertyUtilities();
 
-	// Editable line fields (the runtime-only Timeline pointer is not among them).
-	FKzPropertyHandleUtils::AddChildrenHonoringInnerProperties(StructBuilder, StructPropertyHandle);
+	// Editable line fields (the runtime-only Timeline pointer is not among them). Fields with
+	// a third category segment (Audio, Timing, Playback, Localization) render as groups.
+	FKzPropertyHandleUtils::AddChildrenGroupedByCategory(StructBuilder, StructPropertyHandle);
 
 	// Per-line timeline, authored on the asset and presented here by line id.
 	UKzDialogueAsset* Asset = ResolveOwningAsset();
