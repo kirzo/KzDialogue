@@ -40,6 +40,8 @@
 
 #define LOCTEXT_NAMESPACE "KzDialogueDashboard"
 
+const FName SKzDialogueDashboard::TabId(TEXT("KzDialogueDashboard"));
+
 namespace KzDashboardCol
 {
 	static const FName Asset(TEXT("Asset"));

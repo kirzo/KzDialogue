@@ -7,6 +7,10 @@
 
 class FLocTextHelper;
 class UKzDialogueAsset;
+struct FKzDialogueLine;
+
+/** Optional per-line export filter: return false to skip a line's row. Speaker rows follow the included lines. */
+using FKzExportLineFilter = TFunction<bool(const UKzDialogueAsset&, const FKzDialogueLine&)>;
 
 /** Localization target layout resolved from the target's generated step ini (Config/Localization/<Target>_Gather.ini). */
 struct FKzLocTargetInfo
@@ -42,6 +46,9 @@ public:
 
 	/** State of a text anchored to (Namespace, Key) whose current source string is SourceString. */
 	EKzTranslationState GetTextState(const FString& Namespace, const FString& Key, const FString& SourceString, const FString& Culture) const;
+
+	/** The archive entry for (Namespace, Key) in Culture: the source it was translated against and the translation itself. False when the archive has no entry. */
+	bool GetArchiveEntry(const FString& Namespace, const FString& Key, const FString& Culture, FString& OutSource, FString& OutTranslation) const;
 
 	/** True when the source audio package has a localized variant for Culture. */
 	bool IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const;
@@ -123,7 +130,7 @@ public:
 	static void RegisterMenus();
 
 	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. */
-	static bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError);
+	static bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr);
 
 	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed in the output log. */
 	static bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
@@ -135,7 +142,7 @@ public:
 	static bool BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError);
 
 	/** Interactive export flow (load assets, dirty warning, save-file dialog, ExportAssets, notification). Shared by the content browser menu and the dashboard. */
-	static void ExportInteractive(TArray<FAssetData> SelectedAssets);
+	static void ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr);
 
 	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
 	static void ImportInteractive(const FString& Culture);

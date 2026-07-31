@@ -96,7 +96,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 	MessageLogModule.RegisterLogListing(TEXT("KzDialogueL10N"), LOCTEXT("L10NLogLabel", "KzDialogue Localization"));
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-		TEXT("KzDialogueDashboard"),
+		SKzDialogueDashboard::TabId,
 		FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
 		{
 			return SNew(SDockTab)
@@ -115,7 +115,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
-	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(TEXT("KzDialogueDashboard"));
+	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SKzDialogueDashboard::TabId);
 
 	FKzDialogueEditorStyle::Shutdown();
 

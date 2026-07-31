@@ -35,6 +35,9 @@ public:
 	void Construct(const FArguments& InArgs);
 	virtual ~SKzDialogueDashboard() override;
 
+	/** Nomad tab id the dashboard is registered under; TryInvokeTab with it to open/focus the dashboard. */
+	static const FName TabId;
+
 	/** One tree row: a dialogue asset (registry data only) or one of its lines (loaded lazily). */
 	struct FRow
 	{
