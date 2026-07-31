@@ -8,6 +8,7 @@
 
 #include "ContentBrowserMenuContexts.h"
 #include "DesktopPlatformModule.h"
+#include "Internationalization/Culture.h"
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Misc/PackageName.h"
 #include "Framework/Application/SlateApplication.h"
@@ -429,7 +430,7 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 				for (const FString& Culture : Target.ForeignCultures)
 				{
 					CultureSection.AddMenuEntry(FName(*Culture),
-						FText::FromString(Culture),
+						FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 						FText::Format(LOCTEXT("ImportCultureTip", "Import into the '{0}' archive of target '{1}'."), FText::FromString(Culture), FText::FromString(Target.TargetName)),
 						FSlateIcon(),
 						FUIAction(FExecuteAction::CreateLambda([Culture]() { OnImportClicked(Culture); })));
@@ -707,6 +708,17 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
 {
 	OnExportClicked(MoveTemp(SelectedAssets), LineFilter);
+}
+
+FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
+{
+	const FCulturePtr CulturePtr = FInternationalization::Get().GetCulture(Culture);
+	const FString DisplayName = CulturePtr.IsValid() ? CulturePtr->GetDisplayName() : FString();
+	if (DisplayName.IsEmpty() || DisplayName == Culture)
+	{
+		return FText::FromString(Culture);
+	}
+	return FText::FromString(FString::Printf(TEXT("%s (%s)"), *DisplayName, *Culture));
 }
 
 void FKzDialogueTranslationCsv::ImportInteractive(const FString& Culture)

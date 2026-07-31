@@ -76,7 +76,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& /*InArgs*/, UKzDialog
 							.ToolTipText(LOCTEXT("CultureFilterTip", "Show only one culture's card."))
 							.ButtonContent()
 							[
-								SNew(STextBlock).Text_Lambda([this]() { return CultureFilter.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : FText::FromString(CultureFilter); })
+								SNew(STextBlock).Text_Lambda([this]() { return CultureFilter.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter); })
 							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
@@ -219,13 +219,12 @@ void SKzDialogueCoveragePanel::Refresh()
 
 	// Native card first: recording state of the source audio (missing takes, takes whose
 	// text drifted after recording). Every line counts; text has nothing to translate.
-	// It is pure audio work, so the audio toggle hides it entirely.
-	if (bShowAudio && (CultureFilter.IsEmpty() || CultureFilter == Query.GetTarget().NativeCulture))
+	if (CultureFilter.IsEmpty() || CultureFilter == Query.GetTarget().NativeCulture)
 	{
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
-		TArray<FPending> Pending;
-		TArray<FAudioRow> AudioRows;
+		int32 PendingCount = 0;
+		TArray<FLineRow> LineRows;
 		for (const FKzDialogueLine& Line : AssetPtr->Lines)
 		{
 			if (!PassesSpeaker(Line)) { continue; }
@@ -233,32 +232,40 @@ void SKzDialogueCoveragePanel::Refresh()
 
 			const bool bVoiced = !Line.Audio.IsNull();
 			const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+
+			FLineRow Row;
+			Row.LineId = Line.LineId;
+			Row.Label = Line.GetDisplayLabel(60);
 			if (bVoiced)
 			{
-				AudioRows.Add({ Line.LineId, Line.GetDisplayLabel(60), Line.Audio.ToSoftObjectPath() });
+				Row.AudioPath = Line.Audio.ToSoftObjectPath();
 			}
 			if (bVoiced && !bStale)
 			{
 				++AudioDone;
+				Row.State = LOCTEXT("RowOk", "ok");
+				Row.StateColor = KzDoneColor;
 			}
 			else
 			{
-				Pending.Add({ Line.LineId, Line.GetDisplayLabel(60),
-					bVoiced ? LOCTEXT("PendingStaleAudio", "stale audio") : LOCTEXT("PendingNoAudio", "no audio"),
-					bVoiced ? KzStaleColor : KzMissingColor,
-					FText::GetEmpty(), /*bAudioWork=*/true });
+				++PendingCount;
+				Row.bPending = true;
+				Row.bAudioWork = true;
+				Row.State = bVoiced ? LOCTEXT("PendingStaleAudio", "stale audio") : LOCTEXT("PendingNoAudio", "no audio");
+				Row.StateColor = bVoiced ? KzStaleColor : KzMissingColor;
 			}
+			LineRows.Add(MoveTemp(Row));
 		}
 
-		if (!(bOnlyIncomplete && Pending.IsEmpty()))
+		if (!(bOnlyIncomplete && PendingCount == 0))
 		{
 			TArray<TSharedRef<SWidget>> Bars;
 			Bars.Add(MakeProgressRow(LOCTEXT("BarRecording", "Recording"), AudioDone, AudioTotal, 0));
 			Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 			[
 				MakeCultureCard(
-					FText::Format(LOCTEXT("NativeCardTitle", "{0} (native)"), FText::FromString(Query.GetTarget().NativeCulture)),
-					MoveTemp(Bars), Pending, AudioRows, TEXT("native"))
+					FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture)),
+					MoveTemp(Bars), LineRows, TEXT("native"))
 			];
 		}
 	}
@@ -278,8 +285,8 @@ void SKzDialogueCoveragePanel::Refresh()
 		int32 PendingWords = 0;
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
-		TArray<FPending> Pending;
-		TArray<FAudioRow> AudioRows;
+		int32 PendingCount = 0;
+		TArray<FLineRow> LineRows;
 
 		for (const FKzDialogueLine& Line : AssetPtr->Lines)
 		{
@@ -290,6 +297,7 @@ void SKzDialogueCoveragePanel::Refresh()
 			bool bTextTooLong = false;
 			bool bAudioMissing = false;
 			FText PendingTooltip;
+			FSoftObjectPath LocalizedAudioPath;
 
 			// Text state, anchored to the line's stable namespace/key.
 			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
@@ -336,8 +344,9 @@ void SKzDialogueCoveragePanel::Refresh()
 				}
 			}
 
-			// Localized audio variant of voiced lines.
-			if (bShowAudio && !Line.Audio.IsNull())
+			// Localized audio variant of voiced lines. The eye toggle silences this whole
+			// dimension for projects that do not localize audio.
+			if (bShowLocalizedAudio && !Line.Audio.IsNull())
 			{
 				++AudioTotal;
 				FString LocalizedPackage;
@@ -345,7 +354,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePath.GetLongPackageName(), Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
 				{
 					++AudioDone;
-					AudioRows.Add({ Line.LineId, Line.GetDisplayLabel(60), FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *LocalizedPackage, *SourcePath.GetAssetName())) });
+					LocalizedAudioPath = FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *LocalizedPackage, *SourcePath.GetAssetName()));
 				}
 				else
 				{
@@ -353,34 +362,42 @@ void SKzDialogueCoveragePanel::Refresh()
 				}
 			}
 
-			// One entry per line; the state column says what exactly is pending.
+			// One row per line; the state chip says what exactly is pending, or "ok".
+			FLineRow Row;
+			Row.LineId = Line.LineId;
+			Row.Label = Line.GetDisplayLabel(60);
+			Row.Tooltip = PendingTooltip;
+			Row.AudioPath = LocalizedAudioPath;
 			if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
 			{
+				++PendingCount;
+				Row.bPending = true;
+				Row.bAudioWork = bAudioMissing;
+
 				const FText TextPart = bTextMissing ? LOCTEXT("PendingMissing", "text")
 					: bTextStale ? LOCTEXT("PendingStale", "stale")
 					: bTextTooLong ? LOCTEXT("PendingTooLong", "too long")
 					: FText::GetEmpty();
 
-				FText State;
 				if (!TextPart.IsEmpty() && bAudioMissing)
 				{
-					State = FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), TextPart);
+					Row.State = FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), TextPart);
 				}
 				else
 				{
-					State = TextPart.IsEmpty() ? LOCTEXT("PendingAudio", "audio") : TextPart;
+					Row.State = TextPart.IsEmpty() ? LOCTEXT("PendingAudio", "audio") : TextPart;
 				}
-
-				const FLinearColor StateColor = (bTextMissing || bAudioMissing) ? KzMissingColor : KzStaleColor;
-				Pending.Add({ Line.LineId, Line.GetDisplayLabel(60), State, StateColor, PendingTooltip, bAudioMissing });
+				Row.StateColor = (bTextMissing || bAudioMissing) ? KzMissingColor : KzStaleColor;
 			}
+			else
+			{
+				Row.State = LOCTEXT("RowOk", "ok");
+				Row.StateColor = KzDoneColor;
+			}
+			LineRows.Add(MoveTemp(Row));
 		}
 
-		if (bOnlyMissingVoice)
-		{
-			Pending.RemoveAll([](const FPending& Entry) { return !Entry.bAudioWork; });
-		}
-		if (bOnlyIncomplete && Pending.IsEmpty())
+		if (bOnlyIncomplete && PendingCount == 0)
 		{
 			continue;
 		}
@@ -394,13 +411,20 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			MakeCultureCard(FText::FromString(Culture), MoveTemp(Bars), Pending, AudioRows, Culture)
+			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), LineRows, Culture)
 		];
 	}
 }
 
-TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FPending>& Pending, const TArray<FAudioRow>& AudioRows, const FString& AudioKeyPrefix)
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FLineRow>& Lines, const FString& AudioKeyPrefix)
 {
+	// Progress (badge + bars) always reflects every line; the ok-filters below only shape the list.
+	int32 PendingCount = 0;
+	for (const FLineRow& Row : Lines)
+	{
+		if (Row.bPending) { ++PendingCount; }
+	}
+
 	TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
 
 	Content->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 4.0f)
@@ -415,8 +439,8 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 		[
 			SNew(STextBlock)
-				.Text(Pending.IsEmpty() ? LOCTEXT("CardComplete", "complete") : FText::Format(LOCTEXT("CardPendingCount", "{0} pending"), Pending.Num()))
-				.ColorAndOpacity(FSlateColor(Pending.IsEmpty() ? KzDoneColor : KzPartialColor))
+				.Text(PendingCount == 0 ? LOCTEXT("CardComplete", "complete") : FText::Format(LOCTEXT("CardPendingCount", "{0} pending"), PendingCount))
+				.ColorAndOpacity(FSlateColor(PendingCount == 0 ? KzDoneColor : KzPartialColor))
 		]
 	];
 
@@ -425,74 +449,60 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		Content->AddSlot().AutoHeight().Padding(0.0f, 2.0f)[ Bar ];
 	}
 
-	if (!Pending.IsEmpty())
+	// The ok-filters shape which rows show; the counters above ignore them on purpose.
+	TArray<const FLineRow*> Visible;
+	for (const FLineRow& Row : Lines)
 	{
-		// Each entry is its own list-row cell (same look as the KzLib stack rows) so long
-		// lists read as separate items instead of a wall of text on a shared background.
-		TSharedRef<SVerticalBox> PendingBox = SNew(SVerticalBox);
-		for (const FPending& Entry : Pending)
-		{
-			PendingBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-			[
-				SNew(SBorder)
-					.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
-					.Padding(FMargin(4.0f, 2.0f))
-					[
-						SNew(SButton)
-							.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-							.ContentPadding(FMargin(2.0f, 1.0f))
-							.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
-							.OnClicked_Lambda([this, LineId = Entry.LineId]() { NavigateToLine(LineId); return FReply::Handled(); })
-							[
-								SNew(SHorizontalBox)
-								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-								[
-									SNew(SBox).WidthOverride(112.0f)
-									[
-										SNew(STextBlock)
-											.Text(Entry.State)
-											.ColorAndOpacity(FSlateColor(Entry.StateColor))
-									]
-								]
-								+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-								[
-									SNew(STextBlock)
-										.Text(Entry.Label)
-										.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-								]
-							]
-					]
-			];
-		}
-
-		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
-		[
-			SNew(SExpandableArea)
-				.InitiallyCollapsed(true)
-				.AreaTitle(FText::Format(LOCTEXT("PendingArea", "Pending ({0})"), Pending.Num()))
-				.BodyContent()
-				[
-					// Recessed inset behind the row cells, so the list reads as its own region.
-					SNew(SBorder)
-						.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.GroupBorder"))
-						.Padding(4.0f)
-						[
-							PendingBox
-						]
-				]
-		];
+		if (bOnlyIncomplete && !Row.bPending) { continue; }
+		if (bOnlyMissingVoice && !Row.bAudioWork) { continue; }
+		Visible.Add(&Row);
 	}
 
-	if (!AudioRows.IsEmpty())
+	if (!Visible.IsEmpty())
 	{
-		// Auditionable takes for this card's culture: the localized variants on foreign
-		// cards, the source takes on the native one. QA without switching editor language.
-		TSharedRef<SVerticalBox> AudioBox = SNew(SVerticalBox);
-		for (const FAudioRow& Entry : AudioRows)
+		// Each line is its own list-row cell (same look as the KzLib stack rows): status
+		// chip, its take's play button when there is one, and the navigable label.
+		TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+		for (const FLineRow* RowPtr : Visible)
 		{
+			const FLineRow& Entry = *RowPtr;
 			const FString PlayKey = AudioKeyPrefix + TEXT("|") + Entry.LineId.ToString(EGuidFormats::Digits);
 
-			AudioBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			TSharedRef<SWidget> PlayWidget = SNullWidget::NullWidget;
+			if (Entry.AudioPath.IsValid())
+			{
+				PlayWidget = SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(2.0f))
+					.ToolTipText(LOCTEXT("PlayTakeTip", "Preview this culture's take."))
+					.OnClicked_Lambda([this, PlayKey, Path = Entry.AudioPath]()
+					{
+						const bool bWasThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
+						if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
+						PreviewAudio = nullptr;
+						PreviewKey.Reset();
+						if (!bWasThis && GEditor)
+						{
+							if (USoundBase* Sound = Cast<USoundBase>(Path.TryLoad()))
+							{
+								PreviewAudio = GEditor->PlayPreviewSound(Sound);
+								PreviewKey = PlayKey;
+							}
+						}
+						return FReply::Handled();
+					})
+					[
+						SNew(SImage)
+							.Image_Lambda([this, PlayKey]()
+							{
+								const bool bThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
+								return FAppStyle::GetBrush(bThis ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
+							})
+							.ColorAndOpacity(FSlateColor::UseForeground())
+					];
+			}
+
+			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
 			[
 				SNew(SBorder)
 					.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
@@ -501,45 +511,27 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 						SNew(SHorizontalBox)
 						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 						[
-							SNew(SButton)
-								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
-								.ContentPadding(FMargin(2.0f))
-								.ToolTipText(LOCTEXT("PlayTakeTip", "Preview this culture's take."))
-								.OnClicked_Lambda([this, PlayKey, Path = Entry.AudioPath]()
-								{
-									const bool bWasThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-									if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
-									PreviewAudio = nullptr;
-									PreviewKey.Reset();
-									if (!bWasThis && GEditor)
-									{
-										if (USoundBase* Sound = Cast<USoundBase>(Path.TryLoad()))
-										{
-											PreviewAudio = GEditor->PlayPreviewSound(Sound);
-											PreviewKey = PlayKey;
-										}
-									}
-									return FReply::Handled();
-								})
-								[
-									SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)
-									[
-										SNew(SImage)
-											.Image_Lambda([this, PlayKey]()
-											{
-												const bool bThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-												return FAppStyle::GetBrush(bThis ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
-											})
-											.ColorAndOpacity(FSlateColor::UseForeground())
-									]
-								]
+							SNew(SBox).WidthOverride(112.0f)
+							[
+								SNew(STextBlock)
+									.Text(Entry.State)
+									.ColorAndOpacity(FSlateColor(Entry.StateColor))
+									.ToolTipText(Entry.Tooltip)
+							]
+						]
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+						[
+							SNew(SBox).WidthOverride(22.0f).HeightOverride(20.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+							[
+								PlayWidget
+							]
 						]
 						+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 						[
 							SNew(SButton)
 								.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 								.ContentPadding(FMargin(2.0f, 1.0f))
-								.ToolTipText(LOCTEXT("PendingEntryTip", "Select this line in the Lines tab."))
+								.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
 								.OnClicked_Lambda([this, LineId = Entry.LineId]() { NavigateToLine(LineId); return FReply::Handled(); })
 								[
 									SNew(STextBlock)
@@ -551,18 +543,19 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 			];
 		}
 
-		Content->AddSlot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(SExpandableArea)
 				.InitiallyCollapsed(true)
-				.AreaTitle(FText::Format(LOCTEXT("AudioArea", "Audio ({0})"), AudioRows.Num()))
+				.AreaTitle(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), Visible.Num()))
 				.BodyContent()
 				[
+					// Recessed inset behind the row cells, so the list reads as its own region.
 					SNew(SBorder)
 						.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.GroupBorder"))
 						.Padding(4.0f)
 						[
-							AudioBox
+							ListBox
 						]
 				]
 		];
@@ -657,7 +650,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 	for (const FString& Culture : Target.ForeignCultures)
 	{
 		MenuBuilder.AddMenuEntry(
-			FText::FromString(Culture),
+			FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 			FText::Format(LOCTEXT("ImportCultureTip", "Import a translated CSV into the '{0}' archive."), FText::FromString(Culture)),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([this, Culture]()
@@ -676,7 +669,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("MissingVoice", "Missing voice"),
-		LOCTEXT("MissingVoiceTip", "Show only pending entries with audio work: missing or stale takes, missing localized variants."),
+		LOCTEXT("MissingVoiceTip", "Show only lines with audio work: missing or stale takes, missing localized variants."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; Refresh(); }),
@@ -687,7 +680,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 
 	MenuBuilder.AddMenuEntry(
 		LOCTEXT("OnlyIncomplete", "Only incomplete"),
-		LOCTEXT("OnlyIncompleteTip", "Hide the cards of cultures with nothing pending."),
+		LOCTEXT("OnlyIncompleteTip", "Hide the 'ok' lines; cultures with nothing pending lose their whole card."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; Refresh(); }),
@@ -704,13 +697,13 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 	FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/false, nullptr);
 
 	MenuBuilder.AddMenuEntry(
-		LOCTEXT("ShowAudio", "Audio"),
-		LOCTEXT("ShowAudioTip", "Include audio work: recording state and localized variants. Off shows text only."),
+		LOCTEXT("ShowLocalizedAudio", "Localized audio"),
+		LOCTEXT("ShowLocalizedAudioTip", "Show the foreign cultures' localized-audio state. Turn off in projects that do not localize audio; the native recording state (missing and stale takes) always shows."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bShowAudio = !bShowAudio; Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bShowLocalizedAudio = !bShowLocalizedAudio; Refresh(); }),
 			FCanExecuteAction(),
-			FIsActionChecked::CreateLambda([this]() { return bShowAudio; })),
+			FIsActionChecked::CreateLambda([this]() { return bShowLocalizedAudio; })),
 		NAME_None,
 		EUserInterfaceActionType::ToggleButton);
 
@@ -803,7 +796,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
 		CultureFilter.IsEmpty()
 			? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker filter applies).")
-			: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in '{0}' (speaker filter applies)."), FText::FromString(CultureFilter)),
+			: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker filter applies)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([AssetData, PassesSpeaker, IsTextPending]()
@@ -831,7 +824,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 	if (FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error))
 	{
 		MenuBuilder.AddMenuEntry(
-			FText::Format(LOCTEXT("NativeFilterEntry", "{0} (native)"), FText::FromString(Target.NativeCulture)),
+			FText::Format(LOCTEXT("NativeFilterEntry", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Target.NativeCulture)),
 			FText::GetEmpty(),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([this, Culture = Target.NativeCulture]() { CultureFilter = Culture; Refresh(); })));
@@ -839,7 +832,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 		for (const FString& Culture : Target.ForeignCultures)
 		{
 			MenuBuilder.AddMenuEntry(
-				FText::FromString(Culture),
+				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 				FText::GetEmpty(),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { CultureFilter = Culture; Refresh(); })));

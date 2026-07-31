@@ -358,7 +358,7 @@ void SKzDialogueDashboard::Construct(const FArguments& /*InArgs*/)
 					.ToolTipText(LOCTEXT("CultureTip", "Reframe the dashboard to one culture: per-line text/audio states and per-asset progress."))
 					.ButtonContent()
 					[
-						SNew(STextBlock).Text_Lambda([this]() { return SelectedCulture.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : FText::FromString(SelectedCulture); })
+						SNew(STextBlock).Text_Lambda([this]() { return SelectedCulture.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : FKzDialogueTranslationCsv::GetCultureDisplayLabel(SelectedCulture); })
 					]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
@@ -1047,7 +1047,7 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCultureMenu()
 	// Native first: the source-language view, where the audio column shows recording state
 	// (missing takes, takes whose text drifted after recording).
 	MenuBuilder.AddMenuEntry(
-		FText::Format(LOCTEXT("NativeCultureEntry", "{0} (native)"), FText::FromString(Target.NativeCulture)),
+		FText::Format(LOCTEXT("NativeCultureEntry", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Target.NativeCulture)),
 		LOCTEXT("NativeCultureTip", "Source-language view: per-line recording state (missing audio, or audio whose text changed after it was recorded)."),
 		FSlateIcon(),
 		FUIAction(FExecuteAction::CreateLambda([SelectCulture, Culture = Target.NativeCulture]() { SelectCulture(Culture); })));
@@ -1055,7 +1055,7 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCultureMenu()
 	for (const FString& Culture : Target.ForeignCultures)
 	{
 		MenuBuilder.AddMenuEntry(
-			FText::FromString(Culture),
+			FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 			FText::Format(LOCTEXT("CultureEntryTip", "Analyze the filtered assets and show text/audio progress for '{0}'."), FText::FromString(Culture)),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([SelectCulture, Culture]() { SelectCulture(Culture); })));
@@ -1187,7 +1187,7 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildImportCultureMenu()
 	for (const FString& Culture : Target.ForeignCultures)
 	{
 		MenuBuilder.AddMenuEntry(
-			FText::FromString(Culture),
+			FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 			FText::Format(LOCTEXT("ImportCultureTip", "Import a translated CSV into the '{0}' archive."), FText::FromString(Culture)),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([this, Culture]()

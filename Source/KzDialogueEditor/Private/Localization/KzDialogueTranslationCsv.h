@@ -149,4 +149,7 @@ public:
 
 	/** Writes one clickable warning per stale translation into the KzDialogueL10N message log. Does not open the log. */
 	static void LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale);
+
+	/** "Spanish (es)" style label for a culture code, falling back to the bare code when the engine has no display name for it. */
+	static FText GetCultureDisplayLabel(const FString& Culture);
 };
