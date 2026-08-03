@@ -327,6 +327,7 @@ private:
 	/** The actual audio start: create the component, bind the envelope, play. */
 	void StartLineAudioNow();
 	void HandleAudioDelayElapsed();
+	void HandleAudioStopElapsed();
 	void StopLineAudio(float FadeTime = 0.1f);
 
 	// Speaking level: drive a smoothed 0..1 amplitude from the current line's audio envelope.
@@ -403,6 +404,9 @@ private:
 
 	/** Pending silent pre-line gap (LineStartDelay > 0); the line presents when it elapses. */
 	FTimerHandle LineStartDelayTimerHandle;
+
+	/** Pending trim cut for the current line's audio (AudioEndTime > 0). Never armed otherwise. */
+	FTimerHandle AudioStopTimerHandle;
 
 	// Timeline runtime state (valid only while a timelined line is in LinePlaying).
 

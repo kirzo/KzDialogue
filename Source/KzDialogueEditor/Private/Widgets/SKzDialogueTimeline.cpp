@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Widgets/SKzDialogueTimeline.h"
+#include "Widgets/KzWaveformPreview.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueNotify.h"
 #include "KzDialogueAsset.h"
@@ -117,55 +118,8 @@ namespace
 	int32 GPendingSelectionEvent = INDEX_NONE;
 }
 
-// Downsampled min/max envelope of a sound wave, cached on the timeline widget and drawn in the
-// group band so the line's audio is visible along the time axis.
-struct FKzWaveformPreview
-{
-	TWeakObjectPtr<USoundWave> Wave;
-	TArray<FVector2f> Peaks;
-	float Duration = 0.f;
-	float Gain = 1.f;
-};
-
-static TSharedRef<FKzWaveformPreview> BuildWaveformPreview(USoundWave* Wave)
-{
-	TSharedRef<FKzWaveformPreview> Preview = MakeShared<FKzWaveformPreview>();
-	Preview->Wave = Wave;
-
-#if WITH_EDITOR
-	TArray<uint8> RawPCM;
-	uint32 SampleRate = 0;
-	uint16 NumChannels = 0;
-	if (Wave && Wave->GetImportedSoundWaveData(RawPCM, SampleRate, NumChannels) && NumChannels > 0 && SampleRate > 0 && RawPCM.Num() >= static_cast<int32>(sizeof(int16)))
-	{
-		const int16* Samples = reinterpret_cast<const int16*>(RawPCM.GetData());
-		const int32 NumFrames = (RawPCM.Num() / sizeof(int16)) / NumChannels;
-		const int32 BucketCount = FMath::Clamp(NumFrames, 1, 4096);
-		Preview->Peaks.SetNumUninitialized(BucketCount);
-
-		float Peak = 0.f;
-		for (int32 Bucket = 0; Bucket < BucketCount; ++Bucket)
-		{
-			const int32 FrameStart = static_cast<int32>(static_cast<int64>(Bucket) * NumFrames / BucketCount);
-			const int32 FrameEnd = FMath::Max(FrameStart + 1, static_cast<int32>(static_cast<int64>(Bucket + 1) * NumFrames / BucketCount));
-			float Mn = 0.f;
-			float Mx = 0.f;
-			for (int32 Frame = FrameStart; Frame < FrameEnd && Frame < NumFrames; ++Frame)
-			{
-				const float S = Samples[Frame * NumChannels] / 32768.0f;
-				Mn = FMath::Min(Mn, S);
-				Mx = FMath::Max(Mx, S);
-			}
-			Preview->Peaks[Bucket] = FVector2f(Mn, Mx);
-			Peak = FMath::Max(Peak, FMath::Max(-Mn, Mx));
-		}
-		Preview->Duration = static_cast<float>(NumFrames) / static_cast<float>(SampleRate);
-		Preview->Gain = Peak > UE_KINDA_SMALL_NUMBER ? FMath::Min(1.0f / Peak, 10.0f) : 1.0f;
-	}
-#endif
-
-	return Preview;
-}
+// The waveform envelope struct + builder live in Widgets/KzWaveformPreview.h, shared with
+// the audio range strip.
 
 // ---------------------------------------------------------------------------------------
 // SKzTimelineTrack: one lane's interactive notify track, mirroring the AnimMontage notify
@@ -186,11 +140,12 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*TargetTrack*/);
 	DECLARE_DELEGATE_OneParam(FOnActivateEvent, int32 /*EventIndex*/);
 
-	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
+	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _AudioTimeOffset(0.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
 		SLATE_ARGUMENT(int32, TrackIndex)
 		SLATE_ARGUMENT(TSharedPtr<FKzWaveformPreview>, Waveform)
 		SLATE_ATTRIBUTE(float, Duration)
+		SLATE_ATTRIBUTE(float, AudioTimeOffset)
 		SLATE_ATTRIBUTE(USoundBase*, LineAudio)
 		SLATE_ATTRIBUTE(float, ViewStart)
 		SLATE_ATTRIBUTE(float, ViewEnd)
@@ -217,6 +172,7 @@ public:
 		TrackIndex = InArgs._TrackIndex;
 		Waveform = InArgs._Waveform;
 		Duration = InArgs._Duration;
+		AudioTimeOffset = InArgs._AudioTimeOffset;
 		LineAudio = InArgs._LineAudio;
 		SelectedEventAttr = InArgs._SelectedEvent;
 		Playhead = InArgs._Playhead;
@@ -657,11 +613,13 @@ private:
 		const int32 N = Wave.Peaks.Num();
 		const float WaveDur = Wave.Duration;
 		const int32 Width = FMath::FloorToInt(W);
+		// Timeline second 0 = this wave second, when the line plays a cut of its audio.
+		const float Offset = AudioTimeOffset.Get();
 
 		for (int32 Px = 0; Px < Width; ++Px)
 		{
-			const float TLeft = XToTime(static_cast<float>(Px), W);
-			const float TRight = XToTime(static_cast<float>(Px) + 1.f, W);
+			const float TLeft = XToTime(static_cast<float>(Px), W) + Offset;
+			const float TRight = XToTime(static_cast<float>(Px) + 1.f, W) + Offset;
 			if (TRight <= 0.f || TLeft >= WaveDur) { continue; }
 
 			const int32 B0 = FMath::Clamp(static_cast<int32>(FMath::Max(TLeft, 0.f) / WaveDur * N), 0, N - 1);
@@ -723,6 +681,7 @@ private:
 	int32 TrackIndex = INDEX_NONE;
 	TSharedPtr<FKzWaveformPreview> Waveform;
 	TAttribute<float> Duration;
+	TAttribute<float> AudioTimeOffset;
 	TAttribute<USoundBase*> LineAudio;
 	TAttribute<int32> SelectedEventAttr;
 	TAttribute<float> Playhead;
@@ -1050,8 +1009,19 @@ void SKzDialogueTimeline::ZoomView(float CursorTimeSeconds, float WheelDelta, bo
 	End = Start + WindowSize;
 	if (End > Dur) { End = Dur; Start = FMath::Max(0.f, End - WindowSize); }
 
-	ViewStart = Start;
-	ViewEnd = End;
+	// Fully zoomed out is stored as the sentinel (End <= Start = whole line), not as concrete
+	// [0, Dur]: a concrete window would stick to TODAY'S duration and miss it growing later
+	// (e.g. clearing AudioEndTime), while the sentinel always resolves to the full range.
+	if (WindowSize >= Dur - UE_KINDA_SMALL_NUMBER)
+	{
+		ViewStart = 0.f;
+		ViewEnd = 0.f;
+	}
+	else
+	{
+		ViewStart = Start;
+		ViewEnd = End;
+	}
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
@@ -1064,8 +1034,18 @@ void SKzDialogueTimeline::PanView(float DeltaSeconds)
 	float End = Start + Size;
 	if (Start < 0.f) { Start = 0.f; End = Start + Size; }
 	if (End > Dur) { End = Dur; Start = FMath::Max(0.f, End - Size); }
-	ViewStart = Start;
-	ViewEnd = End;
+
+	// Same sentinel rule as ZoomView: a full-range window must not freeze today's duration.
+	if (Size >= Dur - UE_KINDA_SMALL_NUMBER)
+	{
+		ViewStart = 0.f;
+		ViewEnd = 0.f;
+	}
+	else
+	{
+		ViewStart = Start;
+		ViewEnd = End;
+	}
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
@@ -1099,6 +1079,22 @@ USoundBase* SKzDialogueTimeline::ResolveLineAudio() const
 	return nullptr;
 }
 
+float SKzDialogueTimeline::GetAudioTimeOffset() const
+{
+	if (UKzDialogueTimeline* T = Timeline.Get())
+	{
+		if (const UKzDialogueAsset* Asset = T->GetTypedOuter<UKzDialogueAsset>())
+		{
+			FKzDialogueLine Line;
+			if (Asset->TryGetLineById(T->OwningLineId, Line))
+			{
+				return FMath::Max(0.0f, Line.AudioStartTime);
+			}
+		}
+	}
+	return 0.0f;
+}
+
 TSharedPtr<FKzWaveformPreview> SKzDialogueTimeline::GetWaveformPreview()
 {
 	// Only a direct USoundWave is drawable (a SoundCue / MetaSound wrapper has no single waveform).
@@ -1113,7 +1109,7 @@ TSharedPtr<FKzWaveformPreview> SKzDialogueTimeline::GetWaveformPreview()
 	// expand toggle, etc.) so a keystroke doesn't re-decode the audio.
 	if (!WaveformPreview.IsValid() || WaveformPreview->Wave.Get() != Wave)
 	{
-		WaveformPreview = BuildWaveformPreview(Wave);
+		WaveformPreview = KzBuildWaveformPreview(Wave);
 	}
 	return WaveformPreview;
 }
@@ -1196,7 +1192,7 @@ void SKzDialogueTimeline::ScrubTo(float Seconds)
 	// Scrubbing while playing re-seeks the audio and keeps going.
 	if (bPlaying)
 	{
-		if (PreviewAudio.IsValid()) { PreviewAudio->Play(PlayheadTime); }
+		if (PreviewAudio.IsValid()) { PreviewAudio->Play(GetAudioTimeOffset() + PlayheadTime); }
 		else { StartPlayback(); }
 	}
 }
@@ -1225,7 +1221,10 @@ void SKzDialogueTimeline::StartPlayback()
 	{
 		if (UAudioComponent* Comp = UGameplayStatics::CreateSound2D(World, Audio, 1.f, 1.f, 0.f, nullptr, false, /*bAutoDestroy*/ false))
 		{
-			Comp->Play(PlayheadTime);
+			// Timeline time is line time: offset into the wave by the line's custom range
+			// start, so the preview matches what the game will play. The end of the range
+			// falls out of Duration() (the trimmed length), where Tick stops/wraps.
+			Comp->Play(GetAudioTimeOffset() + PlayheadTime);
 			PreviewAudio = TStrongObjectPtr<UAudioComponent>(Comp);
 		}
 	}
@@ -1384,6 +1383,7 @@ void SKzDialogueTimeline::Rebuild()
 				.TrackIndex(INDEX_NONE)
 				.Waveform(Preview)
 				.Duration_Lambda([this]() { return Duration(); })
+				.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); })
 				.ViewStart_Lambda([this]() { return GetViewStart(); })
 				.ViewEnd_Lambda([this]() { return GetViewEnd(); })
 				.SelectionStart_Lambda([this]() { return GetSelectionStart(); })

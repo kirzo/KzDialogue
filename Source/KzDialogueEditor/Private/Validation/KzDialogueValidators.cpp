@@ -86,6 +86,65 @@ void UKzDialogueValidator_BrokenAudio::Validate_Implementation(const UObject* As
 }
 
 // =======================================================================================
+// Custom audio playback ranges
+// =======================================================================================
+
+bool UKzDialogueValidator_AudioRange::CanValidate_Implementation(const UObject* Asset) const
+{
+	return Asset && Asset->IsA<UKzDialogueAsset>();
+}
+
+void UKzDialogueValidator_AudioRange::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
+	if (!Dialogue) { return; }
+
+	const FName Id = GetValidatorId();
+	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+	{
+		const FKzDialogueLine& Line = Dialogue->Lines[i];
+		const bool bHasRange = Line.AudioStartTime > 0.0f || Line.AudioEndTime > 0.0f;
+		if (Line.Audio.IsNull() || !bHasRange) { continue; }
+
+		if (Line.AudioEndTime > 0.0f && Line.AudioEndTime <= Line.AudioStartTime)
+		{
+			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+				EKzValidationSeverity::Error,
+				FText::Format(LOCTEXT("AudioRangeEmpty", "Line {0}: AudioEndTime must be greater than AudioStartTime."), FText::AsNumber(i + 1)),
+				Id,
+				Line.LineId);
+			Issue.ContextIndex = i;
+			OutIssues.Add(Issue);
+		}
+
+		if (Line.bLocalizeAudio)
+		{
+			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+				EKzValidationSeverity::Warning,
+				FText::Format(LOCTEXT("AudioRangeLocalized", "Line {0}: custom playback range on audio marked for localization; localized takes have their own timing. Uncheck Localize Audio or clear the range."), FText::AsNumber(i + 1)),
+				Id,
+				Line.LineId);
+			Issue.ContextIndex = i;
+			OutIssues.Add(Issue);
+		}
+
+		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
+		{
+			if (Line.AudioStartTime >= Sound->GetDuration())
+			{
+				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+					EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("AudioRangePastEnd", "Line {0}: AudioStartTime ({1}s) is at or beyond the audio's length ({2}s)."), FText::AsNumber(i + 1), Line.AudioStartTime, Sound->GetDuration()),
+					Id,
+					Line.LineId);
+				Issue.ContextIndex = i;
+				OutIssues.Add(Issue);
+			}
+		}
+	}
+}
+
+// =======================================================================================
 // Stale audio (text changed after recording)
 // =======================================================================================
 

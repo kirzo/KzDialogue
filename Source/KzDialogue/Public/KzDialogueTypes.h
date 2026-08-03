@@ -126,8 +126,16 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * Added on top of the line's resolved duration, and scaled by the player's TimeScale like
 	 * every other line timing.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
 	float AudioStartDelay = 0.0f;
+
+	/** Seconds into the audio asset where playback starts. 0 = from the beginning. Cuts a section out of a larger wave (sound banks, breaths); meant for non-localized audio, since localized takes have their own timing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
+	float AudioStartTime = 0.0f;
+
+	/** Seconds into the audio asset where playback stops (short fade). 0 = play to the natural end with no extra machinery (the common case). Kept above AudioStartTime and below the wave's length on edit. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
+	float AudioEndTime = 0.0f;
 
 	/**
 	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
@@ -150,11 +158,11 @@ struct KZDIALOGUE_API FKzDialogueLine
 	float LineStartDelay = 0.0f;
 
 	/** How this line's audio is placed in the world. Resolution chain: line > channel > project settings. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio != nullptr"))
 	EKzLineAudioSpatialization AudioSpatialization = EKzLineAudioSpatialization::Inherit;
 
 	/** Policy applied to this line's audio when the player transitions to the next line. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio != nullptr"))
 	EKzLineAudioInterruptionPolicy AudioInterruptionPolicy = EKzLineAudioInterruptionPolicy::Inherit;
 
 	/**
@@ -205,7 +213,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	int32 MaxCharacters = 0;
 
 	/** Uncheck when this line's audio is deliberately NOT localized: it stops counting as pending audio work per culture and exports flag it so the studio knows. The source take's recording state is still tracked. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio")
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio != nullptr"))
 	bool bLocalizeAudio = true;
 #endif
 
@@ -223,6 +231,21 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	/** Text with FormatArguments applied; Text as-is when there are none (the common case). */
 	FText GetFormattedText() const;
+
+	/**
+	 * Effective audio length in seconds given the asset's full duration: the trimmed range when
+	 * AudioStartTime/AudioEndTime are set, the full length otherwise.
+	 */
+	float ResolveAudioLength(float FullDuration) const
+	{
+		const float Start = FMath::Max(0.0f, AudioStartTime);
+		if (AudioEndTime > 0.0f)
+		{
+			const float End = FullDuration > 0.0f ? FMath::Min(AudioEndTime, FullDuration) : AudioEndTime;
+			return FMath::Max(0.0f, End - Start);
+		}
+		return FMath::Max(0.0f, FullDuration - Start);
+	}
 
 	/**
 	 * Effective playback length in seconds (before TimeScale) from DurationMode, Duration, the

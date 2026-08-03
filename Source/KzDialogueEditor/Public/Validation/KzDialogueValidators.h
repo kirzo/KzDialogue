@@ -29,6 +29,20 @@ public:
 };
 
 /**
+ * Reports broken custom audio playback ranges: an empty range (AudioEndTime at or before
+ * AudioStartTime), a start beyond the wave, or a range on audio that is also marked for
+ * localization (localized takes have their own timing, so a source-wave cut cannot apply).
+ */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_AudioRange : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};
+
+/**
  * Reports voiced lines whose text changed after their audio was assigned: the recording no
  * longer matches the script and needs a re-record. Re-assigning the audio (even the same
  * asset) acknowledges the current text and clears the warning.
