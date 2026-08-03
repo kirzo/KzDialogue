@@ -3,6 +3,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
 #include "KzSpeakerAsset.h"
+#include "Sound/SoundBase.h"
 #include "Misc/Crc.h"
 #include "Internationalization/Text.h"
 #include "UObject/AssetRegistryTagsContext.h"
@@ -20,6 +21,46 @@ namespace
 		// which defeats the whole point of drift detection.
 		const FString* Source = FTextInspector::GetSourceString(Text);
 		return Source ? FCrc::StrCrc32(**Source) : 0;
+	}
+
+	// Keeps the custom playback range coherent on interactive edits: inside the wave, and
+	// AudioStartTime strictly below AudioEndTime whenever the end is set (both 0 = no range).
+	// bEndEdited picks which side moves when they collide.
+	void ClampAudioRange(FKzDialogueLine& Line, bool bEndEdited)
+	{
+		if (Line.Audio.IsNull()) { return; }
+
+		float WaveDuration = 0.0f;
+		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
+		{
+			WaveDuration = Sound->GetDuration();
+		}
+
+		constexpr float MinRange = 0.05f;
+		Line.AudioStartTime = FMath::Max(0.0f, Line.AudioStartTime);
+		Line.AudioEndTime = FMath::Max(0.0f, Line.AudioEndTime);
+		if (WaveDuration > 0.0f)
+		{
+			Line.AudioEndTime = Line.AudioEndTime > 0.0f ? FMath::Min(Line.AudioEndTime, WaveDuration) : 0.0f;
+			Line.AudioStartTime = FMath::Min(Line.AudioStartTime, FMath::Max(0.0f, WaveDuration - MinRange));
+		}
+
+		if (Line.AudioEndTime > 0.0f && Line.AudioStartTime >= Line.AudioEndTime)
+		{
+			if (bEndEdited)
+			{
+				Line.AudioEndTime = Line.AudioStartTime + MinRange;
+				if (WaveDuration > 0.0f && Line.AudioEndTime > WaveDuration)
+				{
+					Line.AudioEndTime = WaveDuration;
+					Line.AudioStartTime = FMath::Max(0.0f, WaveDuration - MinRange);
+				}
+			}
+			else
+			{
+				Line.AudioStartTime = FMath::Max(0.0f, Line.AudioEndTime - MinRange);
+			}
+		}
 	}
 }
 #endif
@@ -196,15 +237,31 @@ void UKzDialogueAsset::PostEditChangeChainProperty(FPropertyChangedChainEvent& P
 {
 	Super::PostEditChangeChainProperty(PropertyChangedEvent);
 
-	// (Re)assigning a line's audio acknowledges the current text as the recorded take, even
-	// when a previous take had already stamped the hash (the re-record workflow).
-	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, Audio))
+	const FName ChangedProperty = PropertyChangedEvent.GetPropertyName();
+	const bool bAudioChanged = ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, Audio);
+	const bool bRangeChanged = ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioStartTime) || ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime);
+	if (bAudioChanged || bRangeChanged)
 	{
 		const int32 LineIndex = PropertyChangedEvent.GetArrayIndex(GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines).ToString());
 		if (Lines.IsValidIndex(LineIndex))
 		{
 			FKzDialogueLine& Line = Lines[LineIndex];
-			Line.RecordedTextHash = Line.Audio.IsNull() ? 0 : ComputeSourceHash(Line.Text);
+
+			if (bAudioChanged)
+			{
+				// (Re)assigning a line's audio acknowledges the current text as the recorded
+				// take, even when a previous take had already stamped the hash (re-record).
+				Line.RecordedTextHash = Line.Audio.IsNull() ? 0 : ComputeSourceHash(Line.Text);
+
+				// The playback range is meaningless without its wave.
+				if (Line.Audio.IsNull())
+				{
+					Line.AudioStartTime = 0.0f;
+					Line.AudioEndTime = 0.0f;
+				}
+			}
+
+			ClampAudioRange(Line, /*bEndEdited=*/ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime));
 		}
 	}
 
@@ -341,6 +398,24 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		else if (Line.RecordedTextHash == 0)
 		{
 			Line.RecordedTextHash = NewTextHash;
+			bDirty = true;
+		}
+
+		// Playback-range invariant, as a net for edit paths that bypass the interactive clamp
+		// (external-structure details rows do not carry the array chain): a set end always
+		// stays above the start (0 keeps meaning "natural end"), and no audio = no range.
+		if (Line.Audio.IsNull())
+		{
+			if (Line.AudioStartTime != 0.0f || Line.AudioEndTime != 0.0f)
+			{
+				Line.AudioStartTime = 0.0f;
+				Line.AudioEndTime = 0.0f;
+				bDirty = true;
+			}
+		}
+		else if (Line.AudioEndTime > 0.0f && Line.AudioEndTime <= Line.AudioStartTime)
+		{
+			Line.AudioEndTime = Line.AudioStartTime + 0.05f;
 			bDirty = true;
 		}
 	}

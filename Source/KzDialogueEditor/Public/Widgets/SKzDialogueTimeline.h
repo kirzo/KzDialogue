@@ -107,6 +107,9 @@ private:
 	/** The line's audio (USoundBase) for the editor preview; null if none. */
 	USoundBase* ResolveLineAudio() const;
 
+	/** The line's AudioStartTime: timeline second 0 maps to this wave second when the line cuts a range out of its audio. */
+	float GetAudioTimeOffset() const;
+
 	/** Transport bar (To Front / Play-Pause / To End / Loop) driving the editor audio preview. */
 	TSharedRef<SWidget> BuildTransportControl();
 

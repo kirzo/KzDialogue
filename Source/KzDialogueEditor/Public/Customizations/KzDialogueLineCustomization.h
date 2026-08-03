@@ -3,9 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "IPropertyTypeCustomization.h"
+#include "UObject/WeakObjectPtr.h"
 
+class IDetailGroup;
 class IPropertyUtilities;
+class UAudioComponent;
 class UKzDialogueAsset;
 
 /**
@@ -19,6 +23,7 @@ class FKzDialogueLineCustomization : public IPropertyTypeCustomization
 {
 public:
 	static TSharedRef<IPropertyTypeCustomization> MakeInstance();
+	virtual ~FKzDialogueLineCustomization() override;
 
 	virtual void CustomizeHeader(TSharedRef<IPropertyHandle> StructPropertyHandle, FDetailWidgetRow& HeaderRow, IPropertyTypeCustomizationUtils& StructCustomizationUtils) override;
 	virtual void CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& StructCustomizationUtils) override;
@@ -30,6 +35,18 @@ private:
 	FReply OnCreateTimelineClicked();
 	FReply OnDeleteTimelineClicked();
 
+	/** Waveform strip + play button inside the Audio group, when the line's audio is a plain wave. */
+	void AddAudioRangeRow(IDetailGroup& AudioGroup);
+
+	/** Auditions exactly what the game will play: Play(AudioStartTime) plus a cut at AudioEndTime. */
+	FReply OnPlayRangeClicked();
+	bool IsAuditioningRange() const;
+	void StopRangeAudition();
+
 	TSharedPtr<IPropertyHandle> StructHandle;
 	TSharedPtr<IPropertyUtilities> PropertyUtilities;
+
+	/** Editor preview of the audio range; the ticker cuts it at AudioEndTime. */
+	TWeakObjectPtr<UAudioComponent> RangePreviewAudio;
+	FTSTicker::FDelegateHandle RangeStopTicker;
 };

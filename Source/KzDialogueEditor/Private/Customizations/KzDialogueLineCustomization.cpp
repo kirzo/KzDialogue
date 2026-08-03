@@ -8,22 +8,36 @@
 
 #include "DetailWidgetRow.h"
 #include "IDetailChildrenBuilder.h"
+#include "IDetailGroup.h"
 #include "IPropertyUtilities.h"
 #include "PropertyHandle.h"
 #include "ScopedTransaction.h"
 #include "Utils/KzEditorUtils.h"
 
+#include "Editor.h"
+#include "Styling/AppStyle.h"
+#include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/SKzAudioRangeStrip.h"
 #include "Widgets/SKzDialogueTimeline.h"
 
+#include "Components/AudioComponent.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueLineCustomization"
 
 TSharedRef<IPropertyTypeCustomization> FKzDialogueLineCustomization::MakeInstance()
 {
 	return MakeShared<FKzDialogueLineCustomization>();
+}
+
+FKzDialogueLineCustomization::~FKzDialogueLineCustomization()
+{
+	StopRangeAudition();
 }
 
 void FKzDialogueLineCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> StructPropertyHandle, FDetailWidgetRow& HeaderRow, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
@@ -42,7 +56,30 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 
 	// Editable line fields (the runtime-only Timeline pointer is not among them). Fields with
 	// a third category segment (Audio, Timing, Playback, Localization) render as groups.
-	FKzPropertyHandleUtils::AddChildrenGroupedByCategory(StructBuilder, StructPropertyHandle);
+	// The range fields are skipped here and re-added by AddAudioRangeRow so they sit at the
+	// bottom of the Audio group, right above the visual strip they drive.
+	TMap<FString, IDetailGroup*> Groups;
+	const TSet<FName> RangeFields{ GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioStartTime), GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime) };
+	FKzPropertyHandleUtils::AddChildrenGroupedByCategory(StructBuilder, StructPropertyHandle, RangeFields, &Groups);
+
+	// Visual playback-range editor inside the Audio group (plain waves only: a cue or
+	// metasound wrapper has no single waveform to draw).
+	if (IDetailGroup* const* AudioGroup = Groups.Find(TEXT("Audio")))
+	{
+		AddAudioRangeRow(**AudioGroup);
+	}
+
+	// The strip caches the wave it was built from: rebuild the rows when the audio changes.
+	if (TSharedPtr<IPropertyHandle> AudioHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLine, Audio)))
+	{
+		AudioHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateLambda([WeakUtilities = TWeakPtr<IPropertyUtilities>(PropertyUtilities)]()
+		{
+			if (TSharedPtr<IPropertyUtilities> Utilities = WeakUtilities.Pin())
+			{
+				Utilities->ForceRefresh();
+			}
+		}));
+	}
 
 	// Per-line timeline, authored on the asset and presented here by line id.
 	UKzDialogueAsset* Asset = ResolveOwningAsset();
@@ -100,6 +137,132 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 	}
 }
 
+void FKzDialogueLineCustomization::AddAudioRangeRow(IDetailGroup& AudioGroup)
+{
+	if (!StructHandle.IsValid())
+	{
+		return;
+	}
+
+	// The range fields skipped by the grouped walk, placed here right above their strip.
+	TSharedPtr<IPropertyHandle> StartHandle = StructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioStartTime));
+	TSharedPtr<IPropertyHandle> EndHandle = StructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime));
+	if (StartHandle.IsValid()) { AudioGroup.AddPropertyRow(StartHandle.ToSharedRef()); }
+	if (EndHandle.IsValid()) { AudioGroup.AddPropertyRow(EndHandle.ToSharedRef()); }
+
+	void* RawData = nullptr;
+	if (StructHandle->GetValueData(RawData) != FPropertyAccess::Success || !RawData)
+	{
+		return;
+	}
+	const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
+	USoundWave* Wave = Cast<USoundWave>(Line->Audio.LoadSynchronous());
+	if (!Wave)
+	{
+		return;
+	}
+
+	AudioGroup.AddWidgetRow()
+		.WholeRowContent()
+		[
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+			[
+				SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(2.f))
+					.ToolTipText(LOCTEXT("PlayRangeTip", "Preview exactly what the game will play: the custom range when set, the whole audio otherwise."))
+					.OnClicked(FOnClicked::CreateSP(this, &FKzDialogueLineCustomization::OnPlayRangeClicked))
+					[
+						SNew(SBox).WidthOverride(16.f).HeightOverride(16.f)
+						[
+							SNew(SImage)
+								.Image_Lambda([this]() { return FAppStyle::GetBrush(IsAuditioningRange() ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play"); })
+								.ColorAndOpacity(FSlateColor::UseForeground())
+						]
+					]
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+			[
+				SNew(SKzAudioRangeStrip, Wave)
+					.StartHandle(StartHandle)
+					.EndHandle(EndHandle)
+			]
+		];
+}
+
+bool FKzDialogueLineCustomization::IsAuditioningRange() const
+{
+	return RangePreviewAudio.IsValid() && RangePreviewAudio->IsPlaying();
+}
+
+void FKzDialogueLineCustomization::StopRangeAudition()
+{
+	if (RangeStopTicker.IsValid())
+	{
+		FTSTicker::GetCoreTicker().RemoveTicker(RangeStopTicker);
+		RangeStopTicker.Reset();
+	}
+	if (GEditor)
+	{
+		GEditor->ResetPreviewAudioComponent();
+	}
+	RangePreviewAudio = nullptr;
+}
+
+FReply FKzDialogueLineCustomization::OnPlayRangeClicked()
+{
+	// Toggle off when this row's preview is the one playing.
+	if (IsAuditioningRange())
+	{
+		StopRangeAudition();
+		return FReply::Handled();
+	}
+
+	StopRangeAudition();
+
+	void* RawData = nullptr;
+	if (!StructHandle.IsValid() || StructHandle->GetValueData(RawData) != FPropertyAccess::Success || !RawData || !GEditor)
+	{
+		return FReply::Handled();
+	}
+	const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
+	USoundBase* Sound = Line->Audio.LoadSynchronous();
+	if (!Sound)
+	{
+		return FReply::Handled();
+	}
+
+	UAudioComponent* Preview = GEditor->PlayPreviewSound(Sound);
+	if (!Preview)
+	{
+		return FReply::Handled();
+	}
+	RangePreviewAudio = Preview;
+
+	// Same behavior as the runtime player: start at the offset, cut at the end time.
+	const float Start = FMath::Max(0.0f, Line->AudioStartTime);
+	if (Start > 0.0f)
+	{
+		Preview->Stop();
+		Preview->Play(Start);
+	}
+	if (Line->AudioEndTime > 0.0f)
+	{
+		const float StopIn = FMath::Max(0.05f, Line->AudioEndTime - Start);
+		RangeStopTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAudio = RangePreviewAudio](float)
+		{
+			if (UAudioComponent* Audio = WeakAudio.Get())
+			{
+				Audio->FadeOut(0.1f, 0.0f);
+			}
+			return false;   // one-shot
+		}), StopIn);
+	}
+
+	return FReply::Handled();
+}
+
 UKzDialogueAsset* FKzDialogueLineCustomization::ResolveOwningAsset() const
 {
 	if (!PropertyUtilities.IsValid()) { return nullptr; }
@@ -141,7 +304,7 @@ float FKzDialogueLineCustomization::GetDisplayDuration() const
 			float AudioLength = 0.f;
 			if (USoundBase* Sound = Line->Audio.LoadSynchronous())
 			{
-				AudioLength = Sound->GetDuration();
+				AudioLength = Line->ResolveAudioLength(Sound->GetDuration());
 			}
 			return FMath::Max(0.1f, Line->ResolveDuration(AudioLength, Default));
 		}

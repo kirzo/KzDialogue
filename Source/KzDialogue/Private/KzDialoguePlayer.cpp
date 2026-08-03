@@ -122,6 +122,10 @@ void UKzDialoguePlayer::Pause()
 		{
 			TM.PauseTimer(LineStartDelayTimerHandle);
 		}
+		if (TM.IsTimerActive(AudioStopTimerHandle))
+		{
+			TM.PauseTimer(AudioStopTimerHandle);
+		}
 	}
 
 	if (IsValid(ActiveAudio))
@@ -156,6 +160,10 @@ void UKzDialoguePlayer::Resume()
 		if (LineStartDelayTimerHandle.IsValid())
 		{
 			TM.UnPauseTimer(LineStartDelayTimerHandle);
+		}
+		if (AudioStopTimerHandle.IsValid())
+		{
+			TM.UnPauseTimer(AudioStopTimerHandle);
 		}
 	}
 
@@ -489,7 +497,8 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 	float AudioLength = 0.0f;
 	if (const USoundBase* Sound = Line.Audio.Get())
 	{
-		AudioLength = Sound->GetDuration();
+		// Trimmed range when the line cuts a section out of the wave; full length otherwise.
+		AudioLength = Line.ResolveAudioLength(Sound->GetDuration());
 	}
 
 	// The audio lead extends the line: the text lives its resolved time plus the delay.
@@ -656,15 +665,37 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	// from OnAudioSingleEnvelopeValue.IsBound() at sound-start time, so binding after Play never fires it.
 	BindAudioEnvelope();
 	ResolveSpeakingSpeaker(); // resolve speaker + tuning before the first envelope callback can land
-	ActiveAudio->Play();
+	ActiveAudio->Play(FMath::Max(0.0f, CurrentLine.AudioStartTime));
+
+	// Custom playback end: cut the audio at AudioEndTime. Only when set; the common case
+	// (0 = natural end) arms nothing. Audio plays in real time, so the cut is NOT scaled by
+	// TimeScale, unlike the line timings around it.
+	if (CurrentLine.AudioEndTime > 0.0f && World)
+	{
+		const float StopIn = FMath::Max(0.05f, CurrentLine.AudioEndTime - FMath::Max(0.0f, CurrentLine.AudioStartTime));
+		World->GetTimerManager().SetTimer(AudioStopTimerHandle, this, &UKzDialoguePlayer::HandleAudioStopElapsed, StopIn, /*loop=*/false);
+	}
+}
+
+void UKzDialoguePlayer::HandleAudioStopElapsed()
+{
+	// Same teardown as a policy stop, with a short fade so the cut does not click.
+	// ponytail: audio released to outlive its line (Continue policy) is no longer ActiveAudio
+	// and plays to its natural end; trimmed audio is not expected to combine with Continue.
+	if (IsValid(ActiveAudio))
+	{
+		StopLineAudio(0.1f);
+	}
 }
 
 void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 {
-	// Covers hard teardowns (Abort / Interrupt / destroy): cancel a pending deferred start too.
+	// Covers hard teardowns (Abort / Interrupt / destroy): cancel a pending deferred start
+	// and a pending trim cut too.
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
+		World->GetTimerManager().ClearTimer(AudioStopTimerHandle);
 	}
 
 	UnbindAudioEnvelope();
