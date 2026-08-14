@@ -2,23 +2,9 @@
 
 #include "KzSpeakerAsset.h"
 
+#include "KzDialogueTypes.h"
 #include "Internationalization/Text.h"
-#include "Misc/Crc.h"
 #include "Settings/KzDialogueSettings.h"
-
-#if WITH_EDITOR
-namespace
-{
-	uint32 ComputeSourceHash(const FText& Text)
-	{
-		// GetSourceString returns the authored string, ignoring the active culture's
-		// translation. Text.ToString() would hash the translation, which defeats the
-		// whole point of drift detection.
-		const FString* Source = FTextInspector::GetSourceString(Text);
-		return Source ? FCrc::StrCrc32(**Source) : 0;
-	}
-}
-#endif
 
 FText UKzSpeakerAsset::GetResolvedDisplayName() const
 {
@@ -109,7 +95,7 @@ void UKzSpeakerAsset::RefreshMetadata()
 
 	auto RefreshHash = [&bDirty](const FText& Text, uint32& Hash)
 	{
-		const uint32 NewHash = ComputeSourceHash(Text);
+		const uint32 NewHash = KzComputeSourceTextHash(Text);
 		if (NewHash != Hash)
 		{
 			Hash = NewHash;
