@@ -439,6 +439,10 @@ void UKzDialogueAsset::RebindFTextKeys()
 	{
 		if (!Line.LineId.IsValid()) { continue; }
 
+		// A text the user marked as non-localizable (culture invariant) keeps that choice:
+		// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
+		if (Line.Text.IsCultureInvariant()) { continue; }
+
 		const FString LineGuid = Line.LineId.ToString(EGuidFormats::Digits);
 
 		Line.Text = FText::ChangeKey(Namespace, LineGuid + TEXT("-Text"), Line.Text);
