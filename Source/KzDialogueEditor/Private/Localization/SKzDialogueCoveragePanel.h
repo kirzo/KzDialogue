@@ -22,9 +22,13 @@ class SVerticalBox;
 class SKzDialogueCoveragePanel : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SKzDialogueCoveragePanel) {}
+	SLATE_BEGIN_ARGS(SKzDialogueCoveragePanel)
+		: _bIncludeProjectTexts(false)
+		{}
 		/** Extra host-specific buttons appended at the right end of the toolbar. */
 		SLATE_NAMED_SLOT(FArguments, ToolbarExtension)
+		/** Also show/export the target's NON-dialogue gathered texts (UI, menus...) per culture. Project-scope hosts (the dashboard) enable it; the per-asset tab does not. */
+		SLATE_ARGUMENT(bool, bIncludeProjectTexts)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets);
@@ -46,6 +50,9 @@ private:
 	/** Line lists hide "ok" rows; fully complete cultures lose their card. */
 	bool bOnlyIncomplete = false;
 
+	/** Show the target's non-dialogue texts as an extra per-culture section (dashboard host). */
+	bool bIncludeProjectTexts = false;
+
 	/** One line inside a culture card: its status for that culture, its playable take and its label. */
 	struct FLineRow
 	{
@@ -63,6 +70,10 @@ private:
 		bool bAcknowledgeable = false;
 		/** This culture's playable take (localized variant on foreign cards, source take on the native one). */
 		FSoftObjectPath AudioPath;
+
+		/** Identical-source project texts collapsed behind this row (namespace/key each); more than one enables Merge. */
+		TArray<TPair<FString, FString>> GroupIdentities;
+		FString GroupSource;
 	};
 
 	/** One asset's rows inside a culture card; multi-asset hosts render a header row per group. */
@@ -86,6 +97,9 @@ private:
 
 	/** Accepts the current text for a stale take: re-stamps RecordedTextHash without re-recording. */
 	void AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
+
+	/** Rewrites the identical-source occurrences to one shared namespace/key (MergeIdenticalTexts) and reports the result. */
+	void MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities);
 
 	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);

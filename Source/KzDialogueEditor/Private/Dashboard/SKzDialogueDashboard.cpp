@@ -95,6 +95,7 @@ void SKzDialogueDashboard::RebuildPanel()
 
 	PanelHost->SetContent(
 		SNew(SKzDialogueCoveragePanel, Loaded)
+		.bIncludeProjectTexts(true)
 		.ToolbarExtension()
 		[
 			SNew(SHorizontalBox)

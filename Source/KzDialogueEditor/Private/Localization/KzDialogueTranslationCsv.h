@@ -50,6 +50,12 @@ public:
 	/** The archive entry for (Namespace, Key) in Culture: the source it was translated against and the translation itself. False when the archive has no entry. */
 	bool GetArchiveEntry(const FString& Namespace, const FString& Key, const FString& Culture, FString& OutSource, FString& OutTranslation) const;
 
+	/** Every gathered text whose namespace is OUTSIDE the dialogue pipeline (KzDialogue.* / KzSpeaker.*): the project's other texts (UI, menus, whatever the target gathers). */
+	void EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace, const FString& Key, const FString& Source)> Callback) const;
+
+	/** The manifest contexts' source locations for (Namespace, Key): asset object paths, or code locations for C++-authored texts. */
+	TArray<FString> GetSourceLocations(const FString& Namespace, const FString& Key) const;
+
 	/** True when the source audio package has a localized variant for Culture. */
 	bool IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const;
 
@@ -152,6 +158,20 @@ public:
 
 	/** Interactive PO export: directory dialog + ExportPoFiles + notification. */
 	static void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr);
+
+	/** Writes one <Culture>/<Target>_Other.po per foreign culture with every gathered text outside the dialogue namespaces. Complements the dialogue exports without overlap. */
+	static bool ExportOtherTextsPoFiles(const FString& Directory, FText& OutError);
+
+	/** Interactive flow for ExportOtherTextsPoFiles: directory dialog + notification. */
+	static void ExportOtherTextsPoInteractive();
+
+	/**
+	 * Rewrites every ASSET-authored occurrence of the given identical-source texts so they all
+	 * share one canonical namespace/key (the identity with the most existing translations wins):
+	 * gather then collapses them into a single localizable entry. C++-authored texts cannot be
+	 * rewritten and count as skipped. Dirty assets must be saved and Gather re-run afterwards.
+	 */
+	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped);
 
 	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
 	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);

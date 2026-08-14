@@ -14,6 +14,8 @@
 #include "ContentBrowserModule.h"
 #include "Editor.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "IContentBrowserSingleton.h"
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Misc/PackageName.h"
@@ -51,6 +53,8 @@ namespace
 
 void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets)
 {
+	bIncludeProjectTexts = InArgs._bIncludeProjectTexts;
+
 	for (UKzDialogueAsset* Asset : InAssets)
 	{
 		if (Asset) { Assets.Add(Asset); }
@@ -298,6 +302,22 @@ void SKzDialogueCoveragePanel::Refresh()
 		return;
 	}
 
+	// Non-dialogue gathered texts (UI, menus...), collected once and evaluated per culture.
+	struct FOtherText
+	{
+		FString Namespace;
+		FString Key;
+		FString Source;
+	};
+	TArray<FOtherText> OtherTexts;
+	if (bIncludeProjectTexts)
+	{
+		Query.EnumerateOtherTexts([&OtherTexts](const FString& Namespace, const FString& Key, const FString& Source)
+		{
+			OtherTexts.Add({ Namespace, Key, Source });
+		});
+	}
+
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
 	{
 		if (!CultureFilter.IsEmpty() && Culture != CultureFilter) { continue; }
@@ -427,6 +447,100 @@ void SKzDialogueCoveragePanel::Refresh()
 			}
 		}
 
+		// Project texts, as their own group at the end of the culture's list. Identical
+		// sources collapse into one row ("OK" x5): the bar still counts real archive
+		// entries, but the words count once per unique text (the actual translation work)
+		// and the Merge action can unify the identities into one.
+		int32 OtherDone = 0;
+		int32 OtherStale = 0;
+		int32 OtherWords = 0;
+		if (!OtherTexts.IsEmpty())
+		{
+			FAssetLines& OtherGroup = Groups.AddDefaulted_GetRef();   // null asset = the Other texts area
+
+			TMap<FString, TArray<int32>> IndicesBySource;
+			TArray<FString> SourceOrder;
+			for (int32 i = 0; i < OtherTexts.Num(); ++i)
+			{
+				TArray<int32>& Indices = IndicesBySource.FindOrAdd(OtherTexts[i].Source);
+				if (Indices.IsEmpty()) { SourceOrder.Add(OtherTexts[i].Source); }
+				Indices.Add(i);
+			}
+
+			for (const FString& Source : SourceOrder)
+			{
+				const TArray<int32>& Indices = IndicesBySource[Source];
+
+				int32 GroupMissing = 0;
+				int32 GroupStale = 0;
+				FString IdentityList;
+				FText SingleStaleTooltip;
+				for (const int32 Index : Indices)
+				{
+					const FOtherText& Text = OtherTexts[Index];
+					IdentityList += FString::Printf(TEXT("%s,%s\n"), *Text.Namespace, *Text.Key);
+
+					switch (Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture))
+					{
+					case EKzTranslationState::Translated:
+						++OtherDone;
+						break;
+					case EKzTranslationState::Stale:
+					{
+						++OtherStale;
+						++GroupStale;
+						FString ArchiveSource;
+						FString ArchiveTranslation;
+						if (Indices.Num() == 1 && Query.GetArchiveEntry(Text.Namespace, Text.Key, Culture, ArchiveSource, ArchiveTranslation))
+						{
+							SingleStaleTooltip = FText::Format(
+								LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
+								FText::FromString(ArchiveSource), FText::FromString(Text.Source), FText::FromString(ArchiveTranslation));
+						}
+						break;
+					}
+					default:
+						++GroupMissing;
+						break;
+					}
+				}
+
+				const FString Preview = Source.Len() > 60 ? Source.Left(60) + TEXT("...") : Source;
+
+				FLineRow Row;
+				Row.Label = Indices.Num() > 1
+					? FText::Format(LOCTEXT("OtherTextCollapsed", "{0}   (x{1})"), FText::FromString(Preview), Indices.Num())
+					: FText::FromString(Preview);
+				Row.Tooltip = !SingleStaleTooltip.IsEmpty()
+					? SingleStaleTooltip
+					: FText::Format(LOCTEXT("OtherTextTip", "{0}\n{1}"), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
+
+				if (GroupMissing > 0 || GroupStale > 0)
+				{
+					++PendingCount;
+					Row.bPending = true;
+					OtherWords += CountWords(Source);
+					Row.State = GroupMissing > 0 ? LOCTEXT("PendingMissing", "text") : LOCTEXT("PendingStale", "stale");
+					Row.StateColor = GroupMissing > 0 ? KzMissingColor : KzStaleColor;
+				}
+				else
+				{
+					Row.State = LOCTEXT("RowOk", "ok");
+					Row.StateColor = KzDoneColor;
+				}
+
+				if (Indices.Num() > 1)
+				{
+					Row.GroupSource = Source;
+					for (const int32 Index : Indices)
+					{
+						Row.GroupIdentities.Emplace(OtherTexts[Index].Namespace, OtherTexts[Index].Key);
+					}
+				}
+				OtherGroup.Lines.Add(MoveTemp(Row));
+			}
+		}
+
 		if (bOnlyIncomplete && PendingCount == 0)
 		{
 			continue;
@@ -437,6 +551,10 @@ void SKzDialogueCoveragePanel::Refresh()
 		if (AudioTotal > 0)
 		{
 			Bars.Add(MakeProgressRow(LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal, 0));
+		}
+		if (!OtherTexts.IsEmpty())
+		{
+			Bars.Add(MakeProgressRow(LOCTEXT("BarOtherTexts", "Other"), OtherDone, OtherTexts.Num(), OtherStale, OtherWords));
 		}
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
@@ -483,11 +601,16 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	}
 
 	// The ok-filters shape which rows show; the counters above ignore them on purpose.
-	// Asset header rows only appear when the panel hosts more than one asset.
-	const bool bAssetHeaders = Assets.Num() > 1;
-	int32 VisibleCount = 0;
-	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+	// Dialogue lines and the project-texts group render as SEPARATE areas: they are not lines.
+	const FAssetLines* OtherGroup = nullptr;
+	TArray<const FAssetLines*> AssetGroups;
 	for (const FAssetLines& Group : Groups)
+	{
+		if (Group.Asset.IsValid()) { AssetGroups.Add(&Group); }
+		else { OtherGroup = &Group; }
+	}
+
+	auto FilterVisible = [this](const FAssetLines& Group)
 	{
 		TArray<const FLineRow*> Visible;
 		for (const FLineRow& Row : Group.Lines)
@@ -496,32 +619,16 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 			if (bOnlyMissingVoice && !Row.bAudioWork) { continue; }
 			Visible.Add(&Row);
 		}
-		if (Visible.IsEmpty()) { continue; }
+		return Visible;
+	};
 
-		if (bAssetHeaders)
-		{
-			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
-			[
-				MakeAssetHeaderRow(Group.Asset)
-			];
-		}
-		for (const FLineRow* RowPtr : Visible)
-		{
-			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-			[
-				MakeLineRowWidget(*RowPtr, Group.Asset, AudioKeyPrefix)
-			];
-		}
-		VisibleCount += Visible.Num();
-	}
-
-	if (VisibleCount > 0)
+	auto AddArea = [this, &Content](const FText& Title, TSharedRef<SVerticalBox> Box)
 	{
 		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(SExpandableArea)
 				.InitiallyCollapsed(true)
-				.AreaTitle(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount))
+				.AreaTitle(Title)
 				.BodyContent()
 				[
 					// Recessed inset behind the row cells, so the list reads as its own region.
@@ -529,10 +636,57 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 						.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.GroupBorder"))
 						.Padding(4.0f)
 						[
-							ListBox
+							Box
 						]
 				]
 		];
+	};
+
+	// Asset header rows only when several assets share the list.
+	const bool bAssetHeaders = AssetGroups.Num() > 1;
+	int32 VisibleCount = 0;
+	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+	for (const FAssetLines* Group : AssetGroups)
+	{
+		TArray<const FLineRow*> Visible = FilterVisible(*Group);
+		if (Visible.IsEmpty()) { continue; }
+
+		if (bAssetHeaders)
+		{
+			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
+			[
+				MakeAssetHeaderRow(Group->Asset)
+			];
+		}
+		for (const FLineRow* RowPtr : Visible)
+		{
+			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			[
+				MakeLineRowWidget(*RowPtr, Group->Asset, AudioKeyPrefix)
+			];
+		}
+		VisibleCount += Visible.Num();
+	}
+	if (VisibleCount > 0)
+	{
+		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), ListBox);
+	}
+
+	if (OtherGroup)
+	{
+		TArray<const FLineRow*> Visible = FilterVisible(*OtherGroup);
+		if (!Visible.IsEmpty())
+		{
+			TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
+			for (const FLineRow* RowPtr : Visible)
+			{
+				OtherBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+				[
+					MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
+				];
+			}
+			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox);
+		}
 	}
 
 	return SNew(SBorder)
@@ -662,6 +816,27 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			];
 	}
 
+	// Collapsed identical-source project texts reuse the (empty for them) play column for
+	// the Merge action, keeping every label aligned.
+	if (Entry.GroupIdentities.Num() > 1)
+	{
+		PlayWidget = SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ContentPadding(FMargin(2.0f))
+			.ToolTipText(LOCTEXT("MergeTextsTip", "Merge: rewrite every asset-authored occurrence so they all share one namespace/key - a single text for the localization system (the identity with the most translations wins). C++-authored texts are skipped. Save the dirty assets and re-run Gather afterwards."))
+			.OnClicked_Lambda([this, Source = Entry.GroupSource, Identities = Entry.GroupIdentities]()
+			{
+				MergeOtherTexts(Source, Identities);
+				return FReply::Handled();
+			})
+			[
+				SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)
+				[
+					SNew(SImage).Image(FAppStyle::GetBrush("Icons.Merge")).ColorAndOpacity(FSlateColor::UseForeground())
+				]
+			];
+	}
+
 	return SNew(SBorder)
 		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
 		.Padding(FMargin(4.0f, 2.0f))
@@ -761,6 +936,25 @@ void SKzDialogueCoveragePanel::NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> I
 	{
 		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(LineId);
 	}
+}
+
+void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities)
+{
+	FText Error;
+	int32 Rewritten = 0;
+	int32 Skipped = 0;
+	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped);
+
+	FNotificationInfo Info(bRan
+		? FText::Format(LOCTEXT("MergeDone", "Merge: {0} occurrence(s) re-keyed, {1} skipped (see the output log). Save the dirty assets and run Gather to see them as one text."), Rewritten, Skipped)
+		: Error);
+	Info.ExpireDuration = 8.0f;
+	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+	{
+		Item->SetCompletionState(bRan && Rewritten > 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+	}
+
+	Refresh();
 }
 
 void SKzDialogueCoveragePanel::AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
@@ -996,6 +1190,21 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		{
 			AddScopeEntries(Sub, [](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter); });
 		}));
+
+	// Everything the target gathers OUTSIDE the dialogue pipeline; project-scope hosts only.
+	if (bIncludeProjectTexts)
+	{
+		int32 OtherCount = 0;
+		Query->EnumerateOtherTexts([&OtherCount](const FString&, const FString&, const FString&) { ++OtherCount; });
+
+		MenuBuilder.AddMenuEntry(
+			FText::Format(LOCTEXT("ExportOtherTexts", "Project texts (.po) ({0})"), OtherCount),
+			LOCTEXT("ExportOtherTextsTip", "Every gathered text outside the dialogue assets (UI, menus...), one <Target>_Other.po per culture. The speaker and pending filters do not apply."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([]() { FKzDialogueTranslationCsv::ExportOtherTextsPoInteractive(); }),
+				FCanExecuteAction::CreateLambda([OtherCount]() { return OtherCount > 0; })));
+	}
 
 	return MenuBuilder.MakeWidget();
 }
