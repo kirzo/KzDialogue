@@ -8,8 +8,14 @@
 
 #include "ContentBrowserMenuContexts.h"
 #include "DesktopPlatformModule.h"
+#include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "Engine/Blueprint.h"
+#include "Engine/DataTable.h"
+#include "Kismet2/BlueprintEditorUtils.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/PackageLocalizationUtil.h"
+#include "Internationalization/TextNamespaceUtil.h"
 #include "Misc/PackageName.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -24,6 +30,9 @@
 #include "Misc/Paths.h"
 #include "Serialization/Csv/CsvParser.h"
 #include "ToolMenus.h"
+#include "UObject/Package.h"
+#include "UObject/UnrealType.h"
+#include "UObject/UObjectHash.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueTranslationCsv"
@@ -128,6 +137,42 @@ bool FKzLocQuery::IsAudioLocalized(const FString& SourcePackageName, const FStri
 {
 	FString LocalizedPackage;
 	return FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackageName, Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage);
+}
+
+void FKzLocQuery::EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace, const FString& Key, const FString& Source)> Callback) const
+{
+	if (!LocHelper.IsValid()) { return; }
+
+	LocHelper->EnumerateSourceTexts([&Callback](TSharedRef<FManifestEntry> Entry) -> bool
+	{
+		const FString Namespace = Entry->Namespace.GetString();
+		if (!Namespace.StartsWith(TEXT("KzDialogue.")) && !Namespace.StartsWith(TEXT("KzSpeaker.")))
+		{
+			for (const FManifestContext& Context : Entry->Contexts)
+			{
+				if (!Context.bIsOptional)
+				{
+					Callback(Namespace, Context.Key.GetString(), Entry->Source.Text);
+				}
+			}
+		}
+		return true;   // continue enumeration
+	}, true);
+}
+
+TArray<FString> FKzLocQuery::GetSourceLocations(const FString& Namespace, const FString& Key) const
+{
+	TArray<FString> Locations;
+	if (!LocHelper.IsValid()) { return Locations; }
+
+	if (const TSharedPtr<FManifestEntry> Entry = LocHelper->FindSourceText(FLocKey(Namespace), FLocKey(Key)))
+	{
+		for (const FManifestContext& Context : Entry->Contexts)
+		{
+			Locations.Add(Context.SourceLocation);
+		}
+	}
+	return Locations;
 }
 
 bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError)
@@ -795,6 +840,52 @@ namespace
 		Entry.Key = Key.GetValue();
 		Entry.Source = *SourceString;
 	}
+
+	/** One .po per foreign culture (<Directory>/<Culture>/<Target><FileNameSuffix>.po): existing translations fill msgstr, stale ones get the standard fuzzy flag. */
+	bool WriteKzPoFiles(const TArray<FKzPoEntry>& Entries, const FKzLocQuery& Query, const FString& Directory, const FString& FileNameSuffix, FText& OutError)
+	{
+		for (const FString& Culture : Query.GetTarget().ForeignCultures)
+		{
+			FString Po;
+			Po += TEXT("msgid \"\"") LINE_TERMINATOR;
+			Po += TEXT("msgstr \"\"") LINE_TERMINATOR;
+			Po += FString::Printf(TEXT("\"Project-Id-Version: %s\\n\"") LINE_TERMINATOR, *Query.GetTarget().TargetName);
+			Po += FString::Printf(TEXT("\"Language: %s\\n\"") LINE_TERMINATOR, *Culture);
+			Po += TEXT("\"MIME-Version: 1.0\\n\"") LINE_TERMINATOR;
+			Po += TEXT("\"Content-Type: text/plain; charset=UTF-8\\n\"") LINE_TERMINATOR;
+			Po += TEXT("\"Content-Transfer-Encoding: 8bit\\n\"") LINE_TERMINATOR;
+
+			for (const FKzPoEntry& Entry : Entries)
+			{
+				Po += LINE_TERMINATOR;
+				for (const FString& Comment : Entry.Comments)
+				{
+					Po += FString::Printf(TEXT("#. %s") LINE_TERMINATOR, *Comment);
+				}
+
+				FString ArchiveSource;
+				FString Translation;
+				Query.GetArchiveEntry(Entry.Namespace, Entry.Key, Culture, ArchiveSource, Translation);
+				if (Query.GetTextState(Entry.Namespace, Entry.Key, Entry.Source, Culture) == EKzTranslationState::Stale)
+				{
+					Po += TEXT("#, fuzzy") LINE_TERMINATOR;
+				}
+
+				Po += FString::Printf(TEXT("msgctxt \"%s,%s\"") LINE_TERMINATOR, *PoEscape(Entry.Namespace), *PoEscape(Entry.Key));
+				Po += FString::Printf(TEXT("msgid \"%s\"") LINE_TERMINATOR, *PoEscape(Entry.Source));
+				Po += FString::Printf(TEXT("msgstr \"%s\"") LINE_TERMINATOR, *PoEscape(Translation));
+			}
+
+			const FString FilePath = Directory / Culture / (Query.GetTarget().TargetName + FileNameSuffix + TEXT(".po"));
+			if (!FFileHelper::SaveStringToFile(Po, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+			{
+				OutError = FText::Format(LOCTEXT("PoWriteFailed", "Could not write {0}."), FText::FromString(FilePath));
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter)
@@ -846,49 +937,52 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 		return false;
 	}
 
-	// One file per foreign culture, UE layout: <Directory>/<Culture>/<Target>.po. Existing
-	// translations fill msgstr; stale ones get the standard fuzzy flag.
-	for (const FString& Culture : Query.GetTarget().ForeignCultures)
+	return WriteKzPoFiles(Entries, Query, Directory, TEXT(""), OutError);
+}
+
+bool FKzDialogueTranslationCsv::ExportOtherTextsPoFiles(const FString& Directory, FText& OutError)
+{
+	FKzLocQuery Query;
+	if (!Query.Load(OutError)) { return false; }
+
+	// Everything the target gathered outside the dialogue namespaces: UI, menus, etc.
+	// The msgctxt already carries namespace/key, so no extra comments are needed.
+	TArray<FKzPoEntry> Entries;
+	Query.EnumerateOtherTexts([&Entries](const FString& Namespace, const FString& Key, const FString& Source)
 	{
-		FString Po;
-		Po += TEXT("msgid \"\"") LINE_TERMINATOR;
-		Po += TEXT("msgstr \"\"") LINE_TERMINATOR;
-		Po += FString::Printf(TEXT("\"Project-Id-Version: %s\\n\"") LINE_TERMINATOR, *Query.GetTarget().TargetName);
-		Po += FString::Printf(TEXT("\"Language: %s\\n\"") LINE_TERMINATOR, *Culture);
-		Po += TEXT("\"MIME-Version: 1.0\\n\"") LINE_TERMINATOR;
-		Po += TEXT("\"Content-Type: text/plain; charset=UTF-8\\n\"") LINE_TERMINATOR;
-		Po += TEXT("\"Content-Transfer-Encoding: 8bit\\n\"") LINE_TERMINATOR;
+		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Namespace = Namespace;
+		Entry.Key = Key;
+		Entry.Source = Source;
+	});
 
-		for (const FKzPoEntry& Entry : Entries)
-		{
-			Po += LINE_TERMINATOR;
-			for (const FString& Comment : Entry.Comments)
-			{
-				Po += FString::Printf(TEXT("#. %s") LINE_TERMINATOR, *Comment);
-			}
-
-			FString ArchiveSource;
-			FString Translation;
-			Query.GetArchiveEntry(Entry.Namespace, Entry.Key, Culture, ArchiveSource, Translation);
-			if (Query.GetTextState(Entry.Namespace, Entry.Key, Entry.Source, Culture) == EKzTranslationState::Stale)
-			{
-				Po += TEXT("#, fuzzy") LINE_TERMINATOR;
-			}
-
-			Po += FString::Printf(TEXT("msgctxt \"%s,%s\"") LINE_TERMINATOR, *PoEscape(Entry.Namespace), *PoEscape(Entry.Key));
-			Po += FString::Printf(TEXT("msgid \"%s\"") LINE_TERMINATOR, *PoEscape(Entry.Source));
-			Po += FString::Printf(TEXT("msgstr \"%s\"") LINE_TERMINATOR, *PoEscape(Translation));
-		}
-
-		const FString FilePath = Directory / Culture / (Query.GetTarget().TargetName + TEXT(".po"));
-		if (!FFileHelper::SaveStringToFile(Po, *FilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-		{
-			OutError = FText::Format(LOCTEXT("PoWriteFailed", "Could not write {0}."), FText::FromString(FilePath));
-			return false;
-		}
+	if (Entries.IsEmpty())
+	{
+		OutError = LOCTEXT("PoNoOtherTexts", "Nothing to export: the target has no gathered texts outside the dialogue namespaces.");
+		return false;
 	}
 
-	return true;
+	return WriteKzPoFiles(Entries, Query, Directory, TEXT("_Other"), OutError);
+}
+
+void FKzDialogueTranslationCsv::ExportOtherTextsPoInteractive()
+{
+	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	FString OutDirectory;
+	if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(ParentWindow, LOCTEXT("ExportOtherPoDialogTitle", "Export project texts PO files to...").ToString(), FPaths::ProjectSavedDir(), OutDirectory))
+	{
+		return;
+	}
+
+	FText Error;
+	if (ExportOtherTextsPoFiles(OutDirectory, Error))
+	{
+		ShowNotification(FText::Format(LOCTEXT("OtherPoExportDone", "Project texts PO files exported to {0}."), FText::FromString(OutDirectory)), true);
+	}
+	else
+	{
+		ShowNotification(Error, false);
+	}
 }
 
 void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
@@ -1061,6 +1155,179 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
 		*Culture, *PoPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
+	return true;
+}
+
+bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped)
+{
+	OutRewritten = 0;
+	OutSkipped = 0;
+
+	if (Identities.Num() < 2)
+	{
+		OutError = LOCTEXT("MergeNothing", "Nothing to merge: fewer than two identities.");
+		return false;
+	}
+
+	FKzLocQuery Query;
+	if (!Query.Load(OutError)) { return false; }
+
+	// Canonical = the identity with the most existing translations, so the merge keeps the
+	// best already-done work; ties resolve to the first.
+	int32 CanonicalIndex = 0;
+	int32 BestScore = -1;
+	for (int32 i = 0; i < Identities.Num(); ++i)
+	{
+		int32 Score = 0;
+		for (const FString& Culture : Query.GetTarget().ForeignCultures)
+		{
+			if (Query.GetTextState(Identities[i].Key, Identities[i].Value, SourceText, Culture) == EKzTranslationState::Translated)
+			{
+				++Score;
+			}
+		}
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			CanonicalIndex = i;
+		}
+	}
+	const FString& CanonicalNamespace = Identities[CanonicalIndex].Key;
+	const FString& CanonicalKey = Identities[CanonicalIndex].Value;
+
+	for (int32 i = 0; i < Identities.Num(); ++i)
+	{
+		if (i == CanonicalIndex) { continue; }
+		const FString& Namespace = Identities[i].Key;
+		const FString& Key = Identities[i].Value;
+
+		const TArray<FString> Locations = Query.GetSourceLocations(Namespace, Key);
+		if (Locations.IsEmpty())
+		{
+			++OutSkipped;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' has no manifest source location; re-run Gather and retry."), *Namespace, *Key);
+			continue;
+		}
+
+		for (const FString& Location : Locations)
+		{
+			// Asset-authored texts carry object paths; anything else (C++ code sites) cannot
+			// be rewritten from here.
+			if (!Location.StartsWith(TEXT("/")))
+			{
+				++OutSkipped;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' is authored in code (%s); change its NSLOCTEXT/LOCTEXT to namespace '%s', key '%s' by hand."), *Namespace, *Key, *Location, *CanonicalNamespace, *CanonicalKey);
+				continue;
+			}
+
+			FString PackageName = Location;
+			int32 DotIndex = INDEX_NONE;
+			if (PackageName.FindChar(TEXT('.'), DotIndex))
+			{
+				PackageName.LeftInline(DotIndex);
+			}
+
+			UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+			if (!Package)
+			{
+				++OutSkipped;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: could not load package '%s' for '%s,%s'."), *PackageName, *Namespace, *Key);
+				continue;
+			}
+
+			// Find the authored FText by its identity anywhere in the package and re-key it.
+			// Rows of data tables are raw struct memory, invisible to the object property
+			// walk, so they get their own per-row pass.
+			bool bRewrote = false;
+			int32 NearMisses = 0;
+
+			auto TryRewriteText = [&](UObject* Owner, const FText* TextPtr)
+			{
+				if (!TextPtr) { return; }
+
+				const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(*TextPtr);
+				const TOptional<FString> TextKey = FTextInspector::GetKey(*TextPtr);
+				const FString* TextSource = FTextInspector::GetSourceString(*TextPtr);
+				if (!TextNamespace.IsSet() || !TextKey.IsSet() || !TextSource) { return; }
+				if (TextKey.GetValue() != Key) { return; }
+
+				// The live text's namespace carries the editor-only package localization id
+				// suffix ("" becomes " [ABCD...]"); the manifest stores it stripped.
+				const FString CleanNamespace = TextNamespaceUtil::StripPackageNamespace(TextNamespace.GetValue());
+				if (CleanNamespace != Namespace || *TextSource != SourceText)
+				{
+					++NearMisses;
+					UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge near-miss in '%s': key matched but namespace '%s' (expected '%s') / source '%s' (expected '%s')."), *Owner->GetPathName(), *CleanNamespace, *Namespace, **TextSource, *SourceText);
+					return;
+				}
+
+				Owner->Modify();
+				FText* MutableText = const_cast<FText*>(TextPtr);
+				*MutableText = FText::ChangeKey(CanonicalNamespace, CanonicalKey, *MutableText);
+				bRewrote = true;
+			};
+
+			TArray<UObject*> Objects;
+			GetObjectsWithPackage(Package, Objects, /*bIncludeNestedObjects=*/true);
+			for (UObject* Object : Objects)
+			{
+				for (TPropertyValueIterator<FTextProperty> It(Object->GetClass(), Object); It; ++It)
+				{
+					TryRewriteText(Object, static_cast<const FText*>(It.Value()));
+				}
+
+				if (const UDataTable* Table = Cast<UDataTable>(Object))
+				{
+					if (const UScriptStruct* RowStruct = Table->GetRowStruct())
+					{
+						for (const TPair<FName, uint8*>& Row : Table->GetRowMap())
+						{
+							for (TPropertyValueIterator<FTextProperty> It(RowStruct, Row.Value); It; ++It)
+							{
+								TryRewriteText(Object, static_cast<const FText*>(It.Value()));
+							}
+						}
+					}
+				}
+
+				// Blueprint graph literals (a Set Text node's input, a pin default) live on
+				// EdGraph pins, which are not reflected properties; the compiled bytecode
+				// copy regenerates from them when the blueprint recompiles on save.
+				if (UEdGraphNode* Node = Cast<UEdGraphNode>(Object))
+				{
+					for (UEdGraphPin* Pin : Node->Pins)
+					{
+						if (Pin)
+						{
+							TryRewriteText(Node, &Pin->DefaultTextValue);
+						}
+					}
+				}
+			}
+
+			if (bRewrote)
+			{
+				// Re-keyed graph literals only reach the gathered bytecode after a recompile;
+				// marking the blueprint modified makes the save do it.
+				for (UObject* Object : Objects)
+				{
+					if (UBlueprint* Blueprint = Cast<UBlueprint>(Object))
+					{
+						FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+					}
+				}
+				Package->MarkPackageDirty();
+				++OutRewritten;
+			}
+			else
+			{
+				++OutSkipped;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' not found inside '%s' (%d near-miss(es) logged above; stale manifest needing a re-gather, or storage this walk cannot reach)."), *Namespace, *Key, *PackageName, NearMisses);
+			}
+		}
+	}
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge to '%s,%s': %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), *CanonicalNamespace, *CanonicalKey, OutRewritten, OutSkipped);
 	return true;
 }
 
