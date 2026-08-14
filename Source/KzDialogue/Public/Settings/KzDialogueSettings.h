@@ -59,9 +59,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Localization")
 	FString LocalizationTargetName = TEXT("Game");
 
-	/** FText::Format named-arg pattern composing structured speaker names. Available args: {Honorific}, {Given}, {Family}. Default for cultures without an override. Plain FString on purpose: it is per-culture by construction and must not enter the localization gather. */
+	/** FText::Format named-arg pattern composing structured speaker names. Available args: {Qualifier}, {Honorific}, {Given}, {Family}. Default for cultures without an override. Plain FString on purpose: it is per-culture by construction and must not enter the localization gather. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
-	FString DefaultSpeakerNameFormat = TEXT("{Honorific} {Given} {Family}");
+	FString DefaultSpeakerNameFormat = TEXT("{Qualifier} {Honorific} {Given} {Family}");
 
 	/** Per-culture format overrides ("ja" -> "{Family} {Given}{Honorific}"), resolved via the culture priority chain (es-MX falls back to es before the default). */
 	UPROPERTY(Config, EditAnywhere, Category = "Speakers")

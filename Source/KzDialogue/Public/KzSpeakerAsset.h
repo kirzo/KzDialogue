@@ -43,6 +43,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FText Honorific;
 
+	/** Optional qualifier describing the character variant ("Teen", "Young", "Ghost of"). Not a form of address; placement is decided by the per-culture name format. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
+	FText Qualifier;
+
 	/** CRC32 of DisplayName's source string. Updated automatically; used to detect translation drift. */
 	UPROPERTY()
 	uint32 SourceDisplayNameHash = 0;
@@ -58,6 +62,10 @@ public:
 	/** CRC32 of Honorific's source string. Same role as SourceDisplayNameHash. */
 	UPROPERTY()
 	uint32 SourceHonorificHash = 0;
+
+	/** CRC32 of Qualifier's source string. Same role as SourceDisplayNameHash. */
+	UPROPERTY()
+	uint32 SourceQualifierHash = 0;
 
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Speaker")

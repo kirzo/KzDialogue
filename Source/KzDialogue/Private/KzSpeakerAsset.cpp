@@ -13,7 +13,7 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 		return DisplayName;
 	}
 
-	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && Honorific.IsEmpty())
+	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty())
 	{
 		return FText::GetEmpty();
 	}
@@ -26,6 +26,7 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 	Args.Add(TEXT("Given"), GivenName);
 	Args.Add(TEXT("Family"), FamilyName);
 	Args.Add(TEXT("Honorific"), Honorific);
+	Args.Add(TEXT("Qualifier"), Qualifier);
 	FString Composed = FText::Format(FTextFormat::FromString(Format), Args).ToString();
 
 	// Collapse the gaps empty parts leave behind: runs of spaces inside, stray spaces at
@@ -106,6 +107,7 @@ void UKzSpeakerAsset::RefreshMetadata()
 	RefreshHash(GivenName, SourceGivenNameHash);
 	RefreshHash(FamilyName, SourceFamilyNameHash);
 	RefreshHash(Honorific, SourceHonorificHash);
+	RefreshHash(Qualifier, SourceQualifierHash);
 
 	if (bDirty)
 	{
@@ -132,6 +134,7 @@ void UKzSpeakerAsset::RebindFTextKeys()
 	Rebind(GivenName, TEXT("GivenName"));
 	Rebind(FamilyName, TEXT("FamilyName"));
 	Rebind(Honorific, TEXT("Honorific"));
+	Rebind(Qualifier, TEXT("Qualifier"));
 }
 
 #endif

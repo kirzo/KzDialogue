@@ -190,6 +190,7 @@ bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& A
 		AddSpeakerText(Speaker->GivenName);
 		AddSpeakerText(Speaker->FamilyName);
 		AddSpeakerText(Speaker->Honorific);
+		AddSpeakerText(Speaker->Qualifier);
 	}
 
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
@@ -546,6 +547,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		AddSpeakerRow(Speaker->GivenName, Speaker->SourceGivenNameHash);
 		AddSpeakerRow(Speaker->FamilyName, Speaker->SourceFamilyNameHash);
 		AddSpeakerRow(Speaker->Honorific, Speaker->SourceHonorificHash);
+		AddSpeakerRow(Speaker->Qualifier, Speaker->SourceQualifierHash);
 	}
 
 	if (NumRows == 0)
@@ -670,6 +672,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			else if (Key == TEXT("GivenName")) { SourceText = &SpeakerAsset->GivenName; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
 			else if (Key == TEXT("FamilyName")) { SourceText = &SpeakerAsset->FamilyName; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
 			else if (Key == TEXT("Honorific")) { SourceText = &SpeakerAsset->Honorific; CurrentHash = SpeakerAsset->SourceHonorificHash; }
+			else if (Key == TEXT("Qualifier")) { SourceText = &SpeakerAsset->Qualifier; CurrentHash = SpeakerAsset->SourceQualifierHash; }
 		}
 
 		if (!SourceText)
@@ -834,6 +837,7 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 		AppendPoText(Entries, Speaker->GivenName, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->FamilyName, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->Honorific, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->Qualifier, CopyTemp(Comments));
 	}
 
 	if (Entries.IsEmpty())
