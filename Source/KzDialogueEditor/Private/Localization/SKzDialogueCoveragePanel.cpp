@@ -16,6 +16,7 @@
 #include "IContentBrowserSingleton.h"
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Misc/PackageName.h"
+#include "ScopedTransaction.h"
 #include "Sound/SoundBase.h"
 #include "Styling/AppStyle.h"
 #include "Subsystems/AssetEditorSubsystem.h"
@@ -256,6 +257,7 @@ void SKzDialogueCoveragePanel::Refresh()
 					++PendingCount;
 					Row.bPending = true;
 					Row.bAudioWork = true;
+					Row.bAcknowledgeable = bVoiced;
 					Row.State = bVoiced ? LOCTEXT("PendingStaleAudio", "stale audio") : LOCTEXT("PendingNoAudio", "no audio");
 					Row.StateColor = bVoiced ? KzStaleColor : KzMissingColor;
 				}
@@ -616,6 +618,36 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			];
 	}
 
+	// The state chip content. Stale takes on the native card append an accept icon INSIDE the
+	// chip's fixed-width box (nothing shifts, labels stay column-aligned): the take is declared
+	// valid for the current text without re-recording.
+	TSharedRef<SWidget> ChipContent = SNew(STextBlock)
+		.Text(Entry.State)
+		.ColorAndOpacity(FSlateColor(Entry.StateColor))
+		.ToolTipText(Entry.Tooltip);
+	if (Entry.bAcknowledgeable)
+	{
+		ChipContent = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				ChipContent
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(1.0f))
+					.ToolTipText(LOCTEXT("AcknowledgeTakeTip", "Accept the current text for this take: the recording is still valid, clear the stale state without re-recording."))
+					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId]() { AcknowledgeRecordedText(InAsset, LineId); return FReply::Handled(); })
+					[
+						SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
+						[
+							SNew(SImage).Image(FAppStyle::GetBrush("Icons.SuccessWithColor"))
+						]
+					]
+			];
+	}
+
 	return SNew(SBorder)
 		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
 		.Padding(FMargin(4.0f, 2.0f))
@@ -623,12 +655,9 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 			[
-				SNew(SBox).WidthOverride(112.0f)
+				SNew(SBox).WidthOverride(112.0f).VAlign(VAlign_Center)
 				[
-					SNew(STextBlock)
-						.Text(Entry.State)
-						.ColorAndOpacity(FSlateColor(Entry.StateColor))
-						.ToolTipText(Entry.Tooltip)
+					ChipContent
 				]
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -718,6 +747,21 @@ void SKzDialogueCoveragePanel::NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> I
 	{
 		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(LineId);
 	}
+}
+
+void SKzDialogueCoveragePanel::AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
+{
+	UKzDialogueAsset* Asset = InAsset.Get();
+	if (!Asset) { return; }
+	const int32 LineIndex = Asset->IndexOfLine(LineId);
+	if (LineIndex == INDEX_NONE) { return; }
+
+	const FScopedTransaction Transaction(LOCTEXT("AcknowledgeTakeTrans", "Accept Recorded Audio"));
+	Asset->Modify();
+	Asset->Lines[LineIndex].RecordedTextHash = Asset->Lines[LineIndex].SourceTextHash;
+	Asset->MarkPackageDirty();
+
+	Refresh();
 }
 
 TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()

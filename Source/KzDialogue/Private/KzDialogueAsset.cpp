@@ -245,23 +245,10 @@ void UKzDialogueAsset::PostEditChangeChainProperty(FPropertyChangedChainEvent& P
 		const int32 LineIndex = PropertyChangedEvent.GetArrayIndex(GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, Lines).ToString());
 		if (Lines.IsValidIndex(LineIndex))
 		{
-			FKzDialogueLine& Line = Lines[LineIndex];
-
-			if (bAudioChanged)
-			{
-				// (Re)assigning a line's audio acknowledges the current text as the recorded
-				// take, even when a previous take had already stamped the hash (re-record).
-				Line.RecordedTextHash = Line.Audio.IsNull() ? 0 : ComputeSourceHash(Line.Text);
-
-				// The playback range is meaningless without its wave.
-				if (Line.Audio.IsNull())
-				{
-					Line.AudioStartTime = 0.0f;
-					Line.AudioEndTime = 0.0f;
-				}
-			}
-
-			ClampAudioRange(Line, /*bEndEdited=*/ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime));
+			// Hash stamping and range resets live in RefreshLineMetadata (path-tracked), which
+			// unlike this chain hook also covers external-structure detail rows. Here only the
+			// polite clamp remains, moving the side the user actually edited.
+			ClampAudioRange(Lines[LineIndex], /*bEndEdited=*/ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, AudioEndTime));
 		}
 	}
 
@@ -384,21 +371,41 @@ void UKzDialogueAsset::RefreshLineMetadata()
 			bDirty = true;
 		}
 
-		// Keep RecordedTextHash coherent with the audio slot: baseline newly-voiced lines to
-		// the current text (covers first assignment through any edit path, and legacy assets
-		// on load without false positives) and clear it when the audio is removed.
+		// Keep RecordedTextHash coherent with the audio slot. Tracking the take's PATH makes
+		// re-record detection work through every edit path (the external-structure details
+		// rows never reach the property-chain hook): a different take re-baselines the hash
+		// to the current text; the same take keeps its stale state until explicitly accepted.
 		if (Line.Audio.IsNull())
 		{
-			if (Line.RecordedTextHash != 0)
+			if (Line.RecordedTextHash != 0 || Line.RecordedAudioPath.IsValid())
 			{
 				Line.RecordedTextHash = 0;
+				Line.RecordedAudioPath.Reset();
 				bDirty = true;
 			}
 		}
-		else if (Line.RecordedTextHash == 0)
+		else
 		{
-			Line.RecordedTextHash = NewTextHash;
-			bDirty = true;
+			const FSoftObjectPath CurrentAudioPath = Line.Audio.ToSoftObjectPath();
+			if (Line.RecordedTextHash == 0)
+			{
+				Line.RecordedTextHash = NewTextHash;
+				Line.RecordedAudioPath = CurrentAudioPath;
+				bDirty = true;
+			}
+			else if (!Line.RecordedAudioPath.IsValid())
+			{
+				// Legacy data from before the path was tracked: adopt the current take
+				// without touching the stale state.
+				Line.RecordedAudioPath = CurrentAudioPath;
+				bDirty = true;
+			}
+			else if (Line.RecordedAudioPath != CurrentAudioPath)
+			{
+				Line.RecordedTextHash = NewTextHash;
+				Line.RecordedAudioPath = CurrentAudioPath;
+				bDirty = true;
+			}
 		}
 
 		// Playback-range invariant, as a net for edit paths that bypass the interactive clamp

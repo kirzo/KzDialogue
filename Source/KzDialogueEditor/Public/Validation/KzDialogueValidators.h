@@ -44,8 +44,8 @@ public:
 
 /**
  * Reports voiced lines whose text changed after their audio was assigned: the recording no
- * longer matches the script and needs a re-record. Re-assigning the audio (even the same
- * asset) acknowledges the current text and clears the warning.
+ * longer matches the script and needs a re-record. Assigning a different take re-baselines
+ * automatically; the Localization tab's Accept action clears the state for the same take.
  */
 UCLASS()
 class KZDIALOGUEEDITOR_API UKzDialogueValidator_StaleAudio : public UKzAssetValidator
