@@ -59,6 +59,8 @@ private:
 		bool bPending = false;
 		/** The pending work involves audio; the Missing voice filter keeps only these. */
 		bool bAudioWork = false;
+		/** Stale take on the native card: shows the Accept button (take valid despite the text change). */
+		bool bAcknowledgeable = false;
 		/** This culture's playable take (localized variant on foreign cards, source take on the native one). */
 		FSoftObjectPath AudioPath;
 	};
@@ -81,6 +83,9 @@ private:
 
 	/** Opens the asset's editor (or focuses it) and selects the line, same navigation as validation issues. */
 	void NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
+
+	/** Accepts the current text for a stale take: re-stamps RecordedTextHash without re-recording. */
+	void AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
 
 	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);

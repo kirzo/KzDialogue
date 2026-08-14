@@ -215,6 +215,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** Uncheck when this line's audio is deliberately NOT localized: it stops counting as pending audio work per culture and exports flag it so the studio knows. The source take's recording state is still tracked. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio != nullptr"))
 	bool bLocalizeAudio = true;
+
+	/** Audio asset RecordedTextHash was stamped against. Assigning a DIFFERENT take re-baselines the hash to the current text automatically; accepting the text for the same take is the explicit action in the Localization tab. */
+	UPROPERTY()
+	FSoftObjectPath RecordedAudioPath;
 #endif
 
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */

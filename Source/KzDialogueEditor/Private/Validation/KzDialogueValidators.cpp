@@ -169,7 +169,7 @@ void UKzDialogueValidator_StaleAudio::Validate_Implementation(const UObject* Ass
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Warning,
 				FText::Format(
-					LOCTEXT("StaleAudio", "Line {0}: text changed after its audio was recorded. Re-record it, or re-assign the audio to accept the current text."),
+					LOCTEXT("StaleAudio", "Line {0}: text changed after its audio was recorded. Assign the new take, or accept the current text from the Localization tab."),
 					FText::AsNumber(i + 1)),
 				Id,
 				Line.LineId);
