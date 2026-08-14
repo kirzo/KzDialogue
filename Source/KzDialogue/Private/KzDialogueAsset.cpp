@@ -8,8 +8,6 @@
 #include "Internationalization/Text.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
-UE_DISABLE_OPTIMIZATION
-
 #if WITH_EDITOR
 namespace
 {
@@ -440,5 +438,3 @@ void UKzDialogueAsset::RebindFTextKeys()
 }
 
 #endif
-
-UE_ENABLE_OPTIMIZATION
