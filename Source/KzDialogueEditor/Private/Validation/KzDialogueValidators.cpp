@@ -533,7 +533,8 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
 		auto CheckKey = [&](const FText& Source, const TCHAR* Suffix)
 		{
-			if (Source.IsEmpty()) { return; }
+			// Culture-invariant = deliberately non-localizable; it carries no key on purpose.
+			if (Source.IsEmpty() || Source.IsCultureInvariant()) { return; }
 			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
 			const TOptional<FString> Key = FTextInspector::GetKey(Source);
 			const FString ExpectedKey = Line.LineId.ToString(EGuidFormats::Digits) + Suffix;
@@ -635,10 +636,11 @@ void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAss
 		{ TEXT("Honorific"), Speaker->Honorific },
 	};
 
-	// Key anchoring. Self-heals on resave.
+	// Key anchoring. Self-heals on resave. Culture-invariant fields are deliberately
+	// non-localizable and carry no key on purpose.
 	for (const FKzNamedField& Field : Fields)
 	{
-		if (Field.Text.IsEmpty()) { continue; }
+		if (Field.Text.IsEmpty() || Field.Text.IsCultureInvariant()) { continue; }
 		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Field.Text);
 		const TOptional<FString> Key = FTextInspector::GetKey(Field.Text);
 		if (!Namespace.IsSet() || !Key.IsSet() || Namespace.GetValue() != ExpectedNamespace || Key.GetValue() != Field.Key)

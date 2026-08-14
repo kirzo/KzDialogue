@@ -119,10 +119,19 @@ void UKzSpeakerAsset::RebindFTextKeys()
 
 	const FString Namespace = FString::Printf(TEXT("KzSpeaker.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
-	DisplayName = FText::ChangeKey(Namespace, TEXT("DisplayName"), DisplayName);
-	GivenName = FText::ChangeKey(Namespace, TEXT("GivenName"), GivenName);
-	FamilyName = FText::ChangeKey(Namespace, TEXT("FamilyName"), FamilyName);
-	Honorific = FText::ChangeKey(Namespace, TEXT("Honorific"), Honorific);
+	// A text the user marked as non-localizable (culture invariant) keeps that choice:
+	// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
+	auto Rebind = [&Namespace](FText& Text, const TCHAR* Key)
+	{
+		if (!Text.IsCultureInvariant())
+		{
+			Text = FText::ChangeKey(Namespace, Key, Text);
+		}
+	};
+	Rebind(DisplayName, TEXT("DisplayName"));
+	Rebind(GivenName, TEXT("GivenName"));
+	Rebind(FamilyName, TEXT("FamilyName"));
+	Rebind(Honorific, TEXT("Honorific"));
 }
 
 #endif
