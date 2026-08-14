@@ -13,16 +13,6 @@ UE_DISABLE_OPTIMIZATION
 #if WITH_EDITOR
 namespace
 {
-	uint32 ComputeSourceHash(const FText& Text)
-	{
-		// GetSourceString returns the authored string,
-		// ignoring the active culture's translation.
-		// Text.ToString() would hash the translation,
-		// which defeats the whole point of drift detection.
-		const FString* Source = FTextInspector::GetSourceString(Text);
-		return Source ? FCrc::StrCrc32(**Source) : 0;
-	}
-
 	// Keeps the custom playback range coherent on interactive edits: inside the wave, and
 	// AudioStartTime strictly below AudioEndTime whenever the end is set (both 0 = no range).
 	// bEndEdited picks which side moves when they collide.
@@ -364,7 +354,7 @@ void UKzDialogueAsset::RefreshLineMetadata()
 	// for review when the authored text drifts.
 	for (FKzDialogueLine& Line : Lines)
 	{
-		const uint32 NewTextHash = ComputeSourceHash(Line.Text);
+		const uint32 NewTextHash = KzComputeSourceTextHash(Line.Text);
 		if (NewTextHash != Line.SourceTextHash)
 		{
 			Line.SourceTextHash = NewTextHash;

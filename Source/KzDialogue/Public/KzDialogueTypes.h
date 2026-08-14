@@ -15,6 +15,19 @@ class UKzDialogueAsset;
 class UKzDialogueTimeline;
 class UKzSpeakerAsset;
 
+#if WITH_EDITOR
+/**
+ * CRC32 of a text's AUTHORED source string, ignoring the active culture's translation
+ * (ToString() would hash the translation, defeating drift detection). The hash stored in
+ * the Source*Hash / RecordedTextHash fields.
+ */
+inline uint32 KzComputeSourceTextHash(const FText& Text)
+{
+	const FString* Source = FTextInspector::GetSourceString(Text);
+	return Source ? FCrc::StrCrc32(**Source) : 0;
+}
+#endif
+
 namespace Kz::Tags::Dialogue
 {
 	KZDIALOGUE_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(MainChannel);
