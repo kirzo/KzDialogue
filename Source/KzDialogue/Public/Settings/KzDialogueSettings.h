@@ -51,6 +51,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ValidEnumValues = "TwoD, AttachedToSpeaker"))
 	EKzLineAudioSpatialization DefaultAudioSpatialization = EKzLineAudioSpatialization::AttachedToSpeaker;
 
+	/** What a line WITHOUT audio means by default: pending recording work, or text-only by design (a game with no VO sets TextOnly once here). Lines may override. An Inherit smuggled in via a hand-edited ini resolves as VoiceExpected. */
+	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ValidEnumValues = "VoiceExpected, TextOnly"))
+	EKzLineVoicePolicy DefaultVoicePolicy = EKzLineVoicePolicy::VoiceExpected;
+
 	/** Localization Dashboard target that dialogue translation CSVs are imported into (usually "Game"). Editor-only workflow, harmless at runtime. */
 	UPROPERTY(Config, EditAnywhere, Category = "Localization")
 	FString LocalizationTargetName = TEXT("Game");

@@ -396,6 +396,14 @@ void UKzDialogueAsset::RefreshLineMetadata()
 			}
 		}
 
+		// A voiced line has no use for the no-audio policy; reset stale overrides so removing
+		// the audio later starts from the project default again.
+		if (!Line.Audio.IsNull() && Line.VoicePolicy != EKzLineVoicePolicy::Inherit)
+		{
+			Line.VoicePolicy = EKzLineVoicePolicy::Inherit;
+			bDirty = true;
+		}
+
 		// Playback-range invariant, as a net for edit paths that bypass the interactive clamp
 		// (external-structure details rows do not carry the array chain): a set end always
 		// stays above the start (0 keeps meaning "natural end"), and no audio = no range.
