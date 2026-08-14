@@ -91,6 +91,23 @@ enum class EKzLineAudioSpatialization : uint8
 	AttachedToSpeaker
 };
 
+/**
+ * What a line WITHOUT audio means for the recording pipeline.
+ * Resolves in cascade: line override -> project settings.
+ */
+UENUM(BlueprintType)
+enum class EKzLineVoicePolicy : uint8
+{
+	/** Use the project settings default. Only valid as the per-line value. */
+	Inherit,
+
+	/** The line should end up voiced: while it has no audio it counts as pending recording work. */
+	VoiceExpected,
+
+	/** The line is text-only by design: having no audio is complete. */
+	TextOnly
+};
+
 /** How a line's playback length is derived from its Duration field and its audio. */
 UENUM(BlueprintType)
 enum class EKzLineDurationMode : uint8
@@ -232,6 +249,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** Audio asset RecordedTextHash was stamped against. Assigning a DIFFERENT take re-baselines the hash to the current text automatically; accepting the text for the same take is the explicit action in the Localization tab. */
 	UPROPERTY()
 	FSoftObjectPath RecordedAudioPath;
+
+	/** What having NO audio means for this line: pending recording work, or text-only by design. Inherit = the project settings default; a text-only game sets it once there. */
+	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio == nullptr"))
+	EKzLineVoicePolicy VoicePolicy = EKzLineVoicePolicy::Inherit;
 #endif
 
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */

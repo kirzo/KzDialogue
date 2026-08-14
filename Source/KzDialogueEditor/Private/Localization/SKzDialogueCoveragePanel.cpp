@@ -7,6 +7,7 @@
 #include "KzLibEditorStyle.h"
 #include "Editors/KzArrayAssetEditor.h"
 #include "Localization/KzDialogueTranslationCsv.h"
+#include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetData.h"
 #include "Components/AudioComponent.h"
@@ -219,9 +220,14 @@ void SKzDialogueCoveragePanel::Refresh()
 	};
 
 	// Native card first: recording state of the source audio (missing takes, takes whose
-	// text drifted after recording). Every line counts; text has nothing to translate.
+	// text drifted after recording). Lines that are text-only by design (VoicePolicy, line
+	// over project settings) are not recording work; text has nothing to translate.
 	if (CultureFilter.IsEmpty() || CultureFilter == Query.GetTarget().NativeCulture)
 	{
+		const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+		const EKzLineVoicePolicy DefaultVoicePolicy = Settings && Settings->DefaultVoicePolicy != EKzLineVoicePolicy::Inherit
+			? Settings->DefaultVoicePolicy : EKzLineVoicePolicy::VoiceExpected;
+
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
 		int32 PendingCount = 0;
@@ -234,10 +240,10 @@ void SKzDialogueCoveragePanel::Refresh()
 			for (const FKzDialogueLine& Line : AssetPtr->Lines)
 			{
 				if (!PassesSpeaker(Line)) { continue; }
-				++AudioTotal;
 
 				const bool bVoiced = !Line.Audio.IsNull();
 				const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+				const EKzLineVoicePolicy VoicePolicy = Line.VoicePolicy != EKzLineVoicePolicy::Inherit ? Line.VoicePolicy : DefaultVoicePolicy;
 
 				FLineRow Row;
 				Row.LineId = Line.LineId;
@@ -246,14 +252,22 @@ void SKzDialogueCoveragePanel::Refresh()
 				{
 					Row.AudioPath = Line.Audio.ToSoftObjectPath();
 				}
-				if (bVoiced && !bStale)
+				if (!bVoiced && VoicePolicy == EKzLineVoicePolicy::TextOnly)
 				{
+					// Deliberately unvoiced: informative row, no work and outside the totals.
+					Row.State = LOCTEXT("RowTextOnly", "text only");
+					Row.StateColor = FLinearColor(0.5f, 0.5f, 0.5f);
+				}
+				else if (bVoiced && !bStale)
+				{
+					++AudioTotal;
 					++AudioDone;
 					Row.State = LOCTEXT("RowOk", "ok");
 					Row.StateColor = KzDoneColor;
 				}
 				else
 				{
+					++AudioTotal;
 					++PendingCount;
 					Row.bPending = true;
 					Row.bAudioWork = true;
