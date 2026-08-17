@@ -93,10 +93,12 @@ void UKzSpeakerAsset::RefreshMetadata()
 	}
 
 	// A referenced shared word wins: the inline text empties so the localization gather
-	// only ever sees one of the two.
+	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not
+	// FText::IsEmpty: a keyed empty text can display a stale translation and lie.
 	auto EnforceWordWins = [&bDirty](FKzWordText& Field)
 	{
-		if (Field.Word && !Field.Text.IsEmpty())
+		const FString* Source = FTextInspector::GetSourceString(Field.Text);
+		if (Field.Word && ((Source && !Source->IsEmpty()) || FTextInspector::GetNamespace(Field.Text).IsSet()))
 		{
 			Field.Text = FText::GetEmpty();
 			bDirty = true;
@@ -137,10 +139,13 @@ void UKzSpeakerAsset::RebindFTextKeys()
 	const FString Namespace = FString::Printf(TEXT("KzSpeaker.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
 	// A text the user marked as non-localizable (culture invariant) keeps that choice:
-	// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
+	// ChangeKey would rebuild it as localizable, silently reverting the checkbox. Empty
+	// texts stay keyless: a keyed empty can pick up a stale translation as its display
+	// string and read as non-empty everywhere downstream.
 	auto Rebind = [&Namespace](FText& Text, const TCHAR* Key)
 	{
-		if (!Text.IsCultureInvariant())
+		const FString* Source = FTextInspector::GetSourceString(Text);
+		if (Source && !Source->IsEmpty() && !Text.IsCultureInvariant())
 		{
 			Text = FText::ChangeKey(Namespace, Key, Text);
 		}

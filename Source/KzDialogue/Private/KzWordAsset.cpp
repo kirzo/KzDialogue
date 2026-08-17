@@ -72,10 +72,13 @@ void UKzWordAsset::RebindFTextKeys()
 	const FString Namespace = FString::Printf(TEXT("KzWord.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
 	// A text the user marked as non-localizable (culture invariant) keeps that choice:
-	// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
+	// ChangeKey would rebuild it as localizable, silently reverting the checkbox. Empty
+	// texts stay keyless: a keyed empty can pick up a stale translation as its display
+	// string and read as non-empty everywhere downstream.
 	auto Rebind = [&Namespace](FText& InText, const FString& Key)
 	{
-		if (!InText.IsCultureInvariant())
+		const FString* Source = FTextInspector::GetSourceString(InText);
+		if (Source && !Source->IsEmpty() && !InText.IsCultureInvariant())
 		{
 			InText = FText::ChangeKey(Namespace, Key, InText);
 		}
