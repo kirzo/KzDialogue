@@ -60,6 +60,9 @@ private:
 	/** Other texts show only collapsed identical-source groups: the Merge candidates. */
 	bool bOnlyMergeableTexts = false;
 
+	/** Export menu check: the scope exports also carry the project texts (asset-less CSV rows, _Other.po files). */
+	bool bExportProjectTexts = true;
+
 	/** "Namespace,Key" identities merged away or made non-localizable from this panel: the manifest still lists them until the next Gather, so Refresh hides them optimistically. */
 	TSet<FString> HandledIdentities;
 
