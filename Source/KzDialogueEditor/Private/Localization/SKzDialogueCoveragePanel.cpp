@@ -819,34 +819,58 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 			NamespaceOrder.Sort();
 			const bool bNamespaceHeaders = NamespaceOrder.Num() > 1;
 
+			// Namespace buckets are collapsible sub-sections like the per-asset ones; the
+			// area's shift-click cascades into them the same way.
 			TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
+			TSharedPtr<TArray<TWeakPtr<SExpandableArea>>> NamespaceAreas = MakeShared<TArray<TWeakPtr<SExpandableArea>>>();
 			int32 RowsAdded = 0;
 			for (const FString& Namespace : NamespaceOrder)
 			{
-				if (bNamespaceHeaders)
-				{
-					OtherBox->AddSlot().AutoHeight().Padding(0.0f, RowsAdded > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
-					[
-						SNew(SBorder)
-							.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
-							.Padding(FMargin(6.0f, 3.0f))
-							[
-								SNew(STextBlock)
-									.Text(Namespace.IsEmpty() ? LOCTEXT("NoNamespaceHeader", "(no namespace)") : FText::FromString(Namespace))
-									.Font(FAppStyle::GetFontStyle("BoldFont"))
-							]
-					];
-				}
+				TSharedRef<SVerticalBox> NamespaceBox = SNew(SVerticalBox);
 				for (const FLineRow* RowPtr : RowsByNamespace[Namespace])
 				{
-					OtherBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+					NamespaceBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
 					[
 						MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
 					];
-					++RowsAdded;
 				}
+
+				if (bNamespaceHeaders)
+				{
+					TSharedPtr<SExpandableArea> NamespaceArea;
+					OtherBox->AddSlot().AutoHeight().Padding(0.0f, RowsAdded > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
+					[
+						SAssignNew(NamespaceArea, SExpandableArea)
+							.InitiallyCollapsed(false)
+							.BorderImage(FAppStyle::GetBrush("NoBorder"))
+							.HeaderContent()
+							[
+								SNew(SBorder)
+									.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
+									.Padding(FMargin(6.0f, 3.0f))
+									[
+										SNew(STextBlock)
+											.Text(Namespace.IsEmpty() ? LOCTEXT("NoNamespaceHeader", "(no namespace)") : FText::FromString(Namespace))
+											.Font(FAppStyle::GetFontStyle("BoldFont"))
+									]
+							]
+							.BodyContent()
+							[
+								NamespaceBox
+							]
+					];
+					NamespaceAreas->Add(NamespaceArea);
+				}
+				else
+				{
+					OtherBox->AddSlot().AutoHeight()
+					[
+						NamespaceBox
+					];
+				}
+				RowsAdded += RowsByNamespace[Namespace].Num();
 			}
-			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox, nullptr);
+			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox, NamespaceAreas);
 		}
 	}
 
