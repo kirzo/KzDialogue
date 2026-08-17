@@ -20,6 +20,7 @@
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Internationalization/TextNamespaceUtil.h"
 #include "Misc/PackageName.h"
+#include "ScopedTransaction.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Logging/MessageLog.h"
@@ -161,6 +162,24 @@ void FKzLocQuery::EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace
 		}
 		return true;   // continue enumeration
 	}, true);
+}
+
+bool FKzLocQuery::GetManifestSource(const FString& Namespace, const FString& Key, FString& OutSource) const
+{
+	if (!LocHelper.IsValid()) { return false; }
+
+	if (const TSharedPtr<FManifestEntry> Entry = LocHelper->FindSourceText(FLocKey(Namespace), FLocKey(Key)))
+	{
+		for (const FManifestContext& Context : Entry->Contexts)
+		{
+			if (Context.Key == FLocKey(Key))
+			{
+				OutSource = Entry->Source.Text;
+				return true;
+			}
+		}
+	}
+	return false;
 }
 
 TArray<FString> FKzLocQuery::GetSourceLocations(const FString& Namespace, const FString& Key) const
@@ -799,9 +818,15 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		const uint32 CsvHash = static_cast<uint32>(FCString::Strtoui64(*Cell(HashCol), nullptr, 10));
 		if (CsvHash != CurrentHash)
 		{
-			++OutStats.Drifted;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: asset '%s', key '%s'. The source text changed after this CSV was exported; needs retranslation."), RowIdx + 1, *AssetPath, *Key);
-			continue;
+			// A source-fix import may have rewritten the asset after this CSV was exported;
+			// the translation is still valid when the row's SourceText matches the current one.
+			const FString* CurrentSource = FTextInspector::GetSourceString(*SourceText);
+			if (!SourceTextCol || !CurrentSource || !CurrentSource->Equals(Cell(SourceTextCol), ESearchCase::CaseSensitive))
+			{
+				++OutStats.Drifted;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: asset '%s', key '%s'. The source text changed after this CSV was exported; needs retranslation."), RowIdx + 1, *AssetPath, *Key);
+				continue;
+			}
 		}
 
 		// Hash matched, so the asset's current source string equals the one this row was translated against.
@@ -1494,6 +1519,216 @@ bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceTex
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Non-localizable: %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), OutRewritten, OutSkipped);
 	return true;
+}
+
+bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError)
+{
+	FString CsvContent;
+	if (!FFileHelper::LoadFileToString(CsvContent, *CsvPath))
+	{
+		OutError = FText::Format(LOCTEXT("ImportReadFailed", "Could not read {0}."), FText::FromString(CsvPath));
+		return false;
+	}
+
+	const FCsvParser Parser(CsvContent);
+	const FCsvParser::FRows& Rows = Parser.GetRows();
+	if (Rows.Num() < 2)
+	{
+		OutError = LOCTEXT("ImportEmpty", "The CSV has no data rows.");
+		return false;
+	}
+
+	TMap<FString, int32> Columns;
+	for (int32 i = 0; i < Rows[0].Num(); ++i)
+	{
+		Columns.Add(FString(Rows[0][i]), i);
+	}
+	const int32* AssetCol = Columns.Find(TEXT("Asset"));
+	const int32* NamespaceCol = Columns.Find(TEXT("Namespace"));
+	const int32* KeyCol = Columns.Find(TEXT("Key"));
+	const int32* SourceTextCol = Columns.Find(TEXT("SourceText"));
+	const int32* HashCol = Columns.Find(TEXT("SourceHash"));
+	if (!AssetCol || !NamespaceCol || !KeyCol || !SourceTextCol || !HashCol)
+	{
+		OutError = LOCTEXT("SourceFixBadHeader", "The CSV is missing one of the required columns: Asset, Namespace, Key, SourceText, SourceHash.");
+		return false;
+	}
+
+	// Project-text rows rewrite their authored occurrences through the manifest.
+	FKzLocQuery Query;
+	FText QueryError;
+	const bool bQueryLoaded = Query.Load(QueryError);
+
+	const FScopedTransaction Transaction(LOCTEXT("SourceFixTrans", "Import Source Fixes"));
+
+	TMap<FString, UObject*> LoadedAssets;
+	for (int32 RowIdx = 1; RowIdx < Rows.Num(); ++RowIdx)
+	{
+		const TArray<const TCHAR*>& Cells = Rows[RowIdx];
+		auto Cell = [&Cells](const int32* Col) { return Cells.IsValidIndex(*Col) ? FString(Cells[*Col]) : FString(); };
+
+		const FString CsvSource = Cell(SourceTextCol);
+		const FString AssetPath = Cell(AssetCol);
+		const FString Namespace = Cell(NamespaceCol);
+		const FString Key = Cell(KeyCol);
+
+		if (CsvSource.IsEmpty())
+		{
+			++OutStats.Unresolved;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: empty SourceText for '%s,%s'; emptying a text is an editor decision, not a CSV one."), RowIdx + 1, *Namespace, *Key);
+			continue;
+		}
+
+		// Asset-less rows are project texts: the manifest holds the exported source and the
+		// rewrite machinery updates the authored occurrences in place.
+		if (AssetPath.IsEmpty())
+		{
+			FString ManifestSource;
+			if (!bQueryLoaded || !Query.GetManifestSource(Namespace, Key, ManifestSource))
+			{
+				++OutStats.Unresolved;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: project text '%s,%s' is not in the manifest anymore."), RowIdx + 1, *Namespace, *Key);
+				continue;
+			}
+			if (ManifestSource.Equals(CsvSource, ESearchCase::CaseSensitive))
+			{
+				++OutStats.Unchanged;
+				continue;
+			}
+
+			int32 Rewritten = 0;
+			int32 Skipped = 0;
+			TArray<TPair<FString, FString>> Handled;
+			const TArray<TPair<FString, FString>> Identity = { TPair<FString, FString>(Namespace, Key) };
+			RewriteAuthoredTextOccurrences(Query, Identity, ManifestSource,
+				[&Namespace, &Key, &CsvSource](const FText&) { return FText::ChangeKey(Namespace, Key, FText::FromString(CsvSource)); },
+				[&Namespace, &Key, &CsvSource](const FText& Text)
+				{
+					const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(Text);
+					const TOptional<FString> TextKey = FTextInspector::GetKey(Text);
+					const FString* TextSource = FTextInspector::GetSourceString(Text);
+					return TextNamespace.IsSet() && TextKey.IsSet() && TextSource && TextKey.GetValue() == Key && TextNamespaceUtil::StripPackageNamespace(TextNamespace.GetValue()) == Namespace && *TextSource == CsvSource;
+				},
+				FString(TEXT("update the source text in code by hand")),
+				Rewritten, Skipped, &Handled);
+
+			if (Handled.IsEmpty())
+			{
+				// The authored text no longer matches the exported source (edited on both
+				// sides) or lives where the rewrite cannot reach; details logged above.
+				++OutStats.Conflicted;
+			}
+			else if (Rewritten > 0)
+			{
+				++OutStats.Fixed;
+			}
+			else
+			{
+				++OutStats.Unchanged;
+			}
+			continue;
+		}
+
+		UObject*& Asset = LoadedAssets.FindOrAdd(AssetPath);
+		if (!Asset)
+		{
+			Asset = LoadObject<UObject>(nullptr, *AssetPath);
+		}
+
+		// Same row resolution as the translation import: dialogue lines by "<LineIdDigits>-Text"
+		// keys, speaker-asset fields by name; here the resolved text is the WRITE target.
+		FText* TargetText = nullptr;
+		uint32 CurrentHash = 0;
+
+		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
+		{
+			FString GuidPart, FieldPart;
+			FGuid LineId;
+			const bool bKeyParsed = Key.Split(TEXT("-"), &GuidPart, &FieldPart, ESearchCase::CaseSensitive, ESearchDir::FromEnd)
+				&& FGuid::ParseExact(GuidPart, EGuidFormats::Digits, LineId)
+				&& FieldPart == TEXT("Text");
+			const int32 LineIdx = bKeyParsed ? Dialogue->IndexOfLine(LineId) : INDEX_NONE;
+			if (LineIdx != INDEX_NONE)
+			{
+				TargetText = &Dialogue->Lines[LineIdx].Text;
+				CurrentHash = Dialogue->Lines[LineIdx].SourceTextHash;
+			}
+		}
+		else if (UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
+		{
+			if (Key == TEXT("DisplayName")) { TargetText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
+			else if (Key == TEXT("GivenName")) { TargetText = &SpeakerAsset->GivenName; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
+			else if (Key == TEXT("FamilyName")) { TargetText = &SpeakerAsset->FamilyName; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
+			else if (Key == TEXT("Honorific")) { TargetText = &SpeakerAsset->Honorific; CurrentHash = SpeakerAsset->SourceHonorificHash; }
+			else if (Key == TEXT("Qualifier")) { TargetText = &SpeakerAsset->Qualifier; CurrentHash = SpeakerAsset->SourceQualifierHash; }
+		}
+
+		if (!TargetText)
+		{
+			++OutStats.Unresolved;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: asset '%s', key '%s'. The asset, line or field no longer exists."), RowIdx + 1, *AssetPath, *Key);
+			continue;
+		}
+
+		const FString* CurrentSource = FTextInspector::GetSourceString(*TargetText);
+		if (CurrentSource && CurrentSource->Equals(CsvSource, ESearchCase::CaseSensitive))
+		{
+			++OutStats.Unchanged;
+			continue;
+		}
+
+		// The hash proves the asset kept the exported wording: the CSV edit is the only side.
+		const uint32 CsvHash = static_cast<uint32>(FCString::Strtoui64(*Cell(HashCol), nullptr, 10));
+		if (CsvHash != CurrentHash)
+		{
+			++OutStats.Conflicted;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' changed after this CSV was exported; fix it in the editor instead."), RowIdx + 1, *AssetPath, *Key);
+			continue;
+		}
+
+		const TOptional<FString> CurrentNamespace = FTextInspector::GetNamespace(*TargetText);
+		const TOptional<FString> CurrentKey = FTextInspector::GetKey(*TargetText);
+		if (!CurrentNamespace.IsSet() || !CurrentKey.IsSet())
+		{
+			++OutStats.Conflicted;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is no longer localizable."), RowIdx + 1, *AssetPath, *Key);
+			continue;
+		}
+
+		Asset->Modify();
+		*TargetText = FText::ChangeKey(CurrentNamespace.GetValue(), CurrentKey.GetValue(), FText::FromString(CsvSource));
+		Asset->PostEditChange();
+		Asset->MarkPackageDirty();
+		++OutStats.Fixed;
+	}
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Source fixes from %s: %d fixed, %d conflicted, %d unchanged, %d unresolved. Save the dirty assets and re-run Gather."),
+		*CsvPath, OutStats.Fixed, OutStats.Conflicted, OutStats.Unchanged, OutStats.Unresolved);
+	return true;
+}
+
+void FKzDialogueTranslationCsv::ImportSourceFixesInteractive()
+{
+	TArray<FString> OutFiles;
+	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	if (!FDesktopPlatformModule::Get()->OpenFileDialog(ParentWindow, LOCTEXT("SourceFixDialogTitle", "Import source fixes from CSV").ToString(),
+		FPaths::ProjectSavedDir(), FString(), TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
+	{
+		return;
+	}
+
+	FKzSourceFixStats Stats;
+	FText Error;
+	if (!ImportSourceFixes(OutFiles[0], Stats, Error))
+	{
+		ShowNotification(Error, false);
+		return;
+	}
+
+	const FText Summary = FText::Format(
+		LOCTEXT("SourceFixSummary", "Source fixes: {0} fixed, {1} conflicted (skipped, see Output Log), {2} unchanged, {3} unresolved. Save the dirty assets and run Gather; translations against the old wording turn stale."),
+		Stats.Fixed, Stats.Conflicted, Stats.Unchanged, Stats.Unresolved);
+	ShowNotification(Summary, Stats.Conflicted == 0 && Stats.Unresolved == 0);
 }
 
 void FKzDialogueTranslationCsv::ImportPoInteractive(const FString& Culture)

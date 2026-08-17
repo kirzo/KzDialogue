@@ -50,6 +50,9 @@ public:
 	/** The archive entry for (Namespace, Key) in Culture: the source it was translated against and the translation itself. False when the archive has no entry. */
 	bool GetArchiveEntry(const FString& Namespace, const FString& Key, const FString& Culture, FString& OutSource, FString& OutTranslation) const;
 
+	/** The manifest's source string for (Namespace, Key). False when the identity is not in the manifest. */
+	bool GetManifestSource(const FString& Namespace, const FString& Key, FString& OutSource) const;
+
 	/** Every gathered text whose namespace is OUTSIDE the dialogue pipeline (KzDialogue.* / KzSpeaker.*): the project's other texts (UI, menus, whatever the target gathers). */
 	void EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace, const FString& Key, const FString& Source)> Callback) const;
 
@@ -102,6 +105,22 @@ struct FKzStaleTranslation
 	FString Culture;
 };
 
+/** Result counters for a source-fix import (ImportSourceFixes). */
+struct FKzSourceFixStats
+{
+	/** Rows whose authored source text was rewritten. */
+	int32 Fixed = 0;
+
+	/** Rows edited on both sides (the asset changed after the export) or authored where the rewrite cannot reach; the asset wins. */
+	int32 Conflicted = 0;
+
+	/** Rows already matching the authored text. */
+	int32 Unchanged = 0;
+
+	/** Rows whose asset / line / field / manifest identity could not be resolved. */
+	int32 Unresolved = 0;
+};
+
 /** Result counters for a translation CSV import. */
 struct FKzTranslationImportStats
 {
@@ -140,6 +159,12 @@ public:
 
 	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed in the output log. */
 	static bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+
+	/** Culture-less import of SourceText edits made in an exported CSV: rewrites the AUTHORED texts (dialogue lines, speaker fields, project-text occurrences) keeping their namespace/key. A row applies only when the asset did not change after the export (hash still matches); both-sides edits count as conflicted and the asset wins. Transacted; dirty assets must be saved and Gather re-run. */
+	static bool ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError);
+
+	/** Interactive flow for ImportSourceFixes: open-file dialog + stats notification. */
+	static void ImportSourceFixesInteractive();
 
 	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
 	static bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
