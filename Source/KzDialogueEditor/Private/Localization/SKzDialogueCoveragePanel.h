@@ -78,6 +78,8 @@ private:
 		FLinearColor StateColor;
 		/** Optional detail (e.g. the stale diff); replaces the default row tooltip when set. */
 		FText Tooltip;
+		/** This culture's current translation (foreign cards), shown dimmed at the row's right edge. */
+		FText Translation;
 		bool bPending = false;
 		/** The pending work involves audio; the Missing voice filter keeps only these. */
 		bool bAudioWork = false;
