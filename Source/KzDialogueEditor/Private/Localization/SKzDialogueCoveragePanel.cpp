@@ -719,13 +719,47 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		TArray<const FLineRow*> Visible = FilterVisible(*OtherGroup);
 		if (!Visible.IsEmpty())
 		{
-			TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
+			// Grouped under namespace headers, like the lines group under asset headers. A
+			// collapsed row spanning several namespaces (cross-namespace merge candidate)
+			// sits under its first identity's namespace; the tooltip lists them all.
+			TMap<FString, TArray<const FLineRow*>> RowsByNamespace;
+			TArray<FString> NamespaceOrder;
 			for (const FLineRow* RowPtr : Visible)
 			{
-				OtherBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-				[
-					MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
-				];
+				const FString Namespace = RowPtr->GroupIdentities.Num() > 0 ? RowPtr->GroupIdentities[0].Key : FString();
+				TArray<const FLineRow*>& Bucket = RowsByNamespace.FindOrAdd(Namespace);
+				if (Bucket.IsEmpty()) { NamespaceOrder.Add(Namespace); }
+				Bucket.Add(RowPtr);
+			}
+			NamespaceOrder.Sort();
+			const bool bNamespaceHeaders = NamespaceOrder.Num() > 1;
+
+			TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
+			int32 RowsAdded = 0;
+			for (const FString& Namespace : NamespaceOrder)
+			{
+				if (bNamespaceHeaders)
+				{
+					OtherBox->AddSlot().AutoHeight().Padding(0.0f, RowsAdded > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
+					[
+						SNew(SBorder)
+							.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
+							.Padding(FMargin(6.0f, 3.0f))
+							[
+								SNew(STextBlock)
+									.Text(Namespace.IsEmpty() ? LOCTEXT("NoNamespaceHeader", "(no namespace)") : FText::FromString(Namespace))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+							]
+					];
+				}
+				for (const FLineRow* RowPtr : RowsByNamespace[Namespace])
+				{
+					OtherBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+					[
+						MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
+					];
+					++RowsAdded;
+				}
 			}
 			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox);
 		}
