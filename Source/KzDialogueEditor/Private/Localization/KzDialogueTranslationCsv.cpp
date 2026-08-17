@@ -167,9 +167,14 @@ TArray<FString> FKzLocQuery::GetSourceLocations(const FString& Namespace, const 
 
 	if (const TSharedPtr<FManifestEntry> Entry = LocHelper->FindSourceText(FLocKey(Namespace), FLocKey(Key)))
 	{
+		// The entry spans every identical-source sibling in the namespace (one context per
+		// key), so only this key's contexts belong to the asked identity.
 		for (const FManifestContext& Context : Entry->Contexts)
 		{
-			Locations.Add(Context.SourceLocation);
+			if (Context.Key == FLocKey(Key))
+			{
+				Locations.Add(Context.SourceLocation);
+			}
 		}
 	}
 	return Locations;
