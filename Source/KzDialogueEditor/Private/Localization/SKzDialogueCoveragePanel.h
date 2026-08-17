@@ -74,6 +74,9 @@ private:
 		/** Identical-source project texts collapsed behind this row (namespace/key each); more than one enables Merge. */
 		TArray<TPair<FString, FString>> GroupIdentities;
 		FString GroupSource;
+
+		/** Where the project text is authored (manifest source locations: asset object paths or code sites); clicking the row navigates there. */
+		TArray<FString> SourceLocations;
 	};
 
 	/** One asset's rows inside a culture card; multi-asset hosts render a header row per group. */
@@ -100,6 +103,9 @@ private:
 
 	/** Rewrites the identical-source occurrences to one shared namespace/key (MergeIdenticalTexts) and reports the result. */
 	void MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities);
+
+	/** Opens where a project text is authored: its asset editor (one asset), the content browser (several), or the code site in the IDE. */
+	void NavigateToTextSource(const TArray<FString>& Locations);
 
 	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);

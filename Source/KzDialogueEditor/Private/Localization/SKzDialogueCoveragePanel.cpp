@@ -10,6 +10,9 @@
 #include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetData.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/Paths.h"
+#include "SourceCodeNavigation.h"
 #include "Components/AudioComponent.h"
 #include "ContentBrowserModule.h"
 #include "Editor.h"
@@ -513,7 +516,7 @@ void SKzDialogueCoveragePanel::Refresh()
 					: FText::FromString(Preview);
 				Row.Tooltip = !SingleStaleTooltip.IsEmpty()
 					? SingleStaleTooltip
-					: FText::Format(LOCTEXT("OtherTextTip", "{0}\n{1}"), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
+					: FText::Format(LOCTEXT("OtherTextTip", "{0}\n{1}\n\nClick: opens where this text is authored."), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
 
 				if (GroupMissing > 0 || GroupStale > 0)
 				{
@@ -536,6 +539,10 @@ void SKzDialogueCoveragePanel::Refresh()
 					{
 						Row.GroupIdentities.Emplace(OtherTexts[Index].Namespace, OtherTexts[Index].Key);
 					}
+				}
+				for (const int32 Index : Indices)
+				{
+					Row.SourceLocations.Append(Query.GetSourceLocations(OtherTexts[Index].Namespace, OtherTexts[Index].Key));
 				}
 				OtherGroup.Lines.Add(MoveTemp(Row));
 			}
@@ -862,7 +869,13 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 					.ContentPadding(FMargin(2.0f, 1.0f))
 					.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
-					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId]() { NavigateToLine(InAsset, LineId); return FReply::Handled(); })
+					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId, Locations = Entry.SourceLocations]()
+					{
+						// Project texts navigate to where they are authored; dialogue rows to their line.
+						if (Locations.Num() > 0) { NavigateToTextSource(Locations); }
+						else { NavigateToLine(InAsset, LineId); }
+						return FReply::Handled();
+					})
 					[
 						SNew(STextBlock)
 							.Text(Entry.Label)
@@ -935,6 +948,69 @@ void SKzDialogueCoveragePanel::NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> I
 	if (Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
 	{
 		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(LineId);
+	}
+}
+
+void SKzDialogueCoveragePanel::NavigateToTextSource(const TArray<FString>& Locations)
+{
+	// Split asset locations (object paths) from code sites.
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+	TArray<FAssetData> OwnerAssets;
+	FString CodeSite;
+	for (const FString& Location : Locations)
+	{
+		if (Location.StartsWith(TEXT("/")))
+		{
+			FString PackageName = Location;
+			int32 DotIndex = INDEX_NONE;
+			if (PackageName.FindChar(TEXT('.'), DotIndex)) { PackageName.LeftInline(DotIndex); }
+
+			TArray<FAssetData> PackageAssets;
+			Registry.GetAssetsByPackageName(FName(*PackageName), PackageAssets);
+			if (PackageAssets.Num() > 0)
+			{
+				OwnerAssets.AddUnique(PackageAssets[0]);
+			}
+		}
+		else if (CodeSite.IsEmpty())
+		{
+			CodeSite = Location;
+		}
+	}
+
+	if (OwnerAssets.Num() == 1 && GEditor)
+	{
+		GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(OwnerAssets[0].GetSoftObjectPath());
+		return;
+	}
+	if (OwnerAssets.Num() > 1)
+	{
+		// Several owners (collapsed duplicates): show them all instead of opening N editors.
+		FContentBrowserModule& ContentBrowser = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
+		ContentBrowser.Get().SyncBrowserToAssets(OwnerAssets, /*bAllowLockedBrowsers=*/true);
+		return;
+	}
+
+	// Code-authored text: best-effort jump to the source site ("<path> - line N" or "<path>(N)").
+	if (!CodeSite.IsEmpty())
+	{
+		FString FilePath = CodeSite;
+		int32 LineNumber = 1;
+		FString LineText;
+		if (CodeSite.Split(TEXT(" - line "), &FilePath, &LineText))
+		{
+			LineNumber = FCString::Atoi(*LineText);
+		}
+		else
+		{
+			int32 ParenIndex = INDEX_NONE;
+			if (CodeSite.FindLastChar(TEXT('('), ParenIndex))
+			{
+				FilePath = CodeSite.Left(ParenIndex);
+				LineNumber = FCString::Atoi(*CodeSite.Mid(ParenIndex + 1));
+			}
+		}
+		FSourceCodeNavigation::OpenSourceFile(FPaths::ConvertRelativePathToFull(FilePath), LineNumber);
 	}
 }
 
