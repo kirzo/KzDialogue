@@ -849,11 +849,12 @@ namespace
 		Entry.Source = *SourceString;
 	}
 
-	/** One .po per foreign culture (<Directory>/<Culture>/<Target><FileNameSuffix>.po): existing translations fill msgstr, stale ones get the standard fuzzy flag. */
-	bool WriteKzPoFiles(const TArray<FKzPoEntry>& Entries, const FKzLocQuery& Query, const FString& Directory, const FString& FileNameSuffix, FText& OutError)
+	/** One .po per foreign culture (<Directory>/<Culture>/<Target><FileNameSuffix>.po): existing translations fill msgstr, stale ones get the standard fuzzy flag. OnlyCulture narrows the set to that culture. */
+	bool WriteKzPoFiles(const TArray<FKzPoEntry>& Entries, const FKzLocQuery& Query, const FString& Directory, const FString& FileNameSuffix, const FString& OnlyCulture, FText& OutError)
 	{
 		for (const FString& Culture : Query.GetTarget().ForeignCultures)
 		{
+			if (!OnlyCulture.IsEmpty() && Culture != OnlyCulture) { continue; }
 			FString Po;
 			Po += TEXT("msgid \"\"") LINE_TERMINATOR;
 			Po += TEXT("msgstr \"\"") LINE_TERMINATOR;
@@ -896,7 +897,7 @@ namespace
 	}
 }
 
-bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter)
+bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter, const FString& OnlyCulture)
 {
 	FKzLocQuery Query;
 	if (!Query.Load(OutError)) { return false; }
@@ -945,10 +946,10 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 		return false;
 	}
 
-	return WriteKzPoFiles(Entries, Query, Directory, TEXT(""), OutError);
+	return WriteKzPoFiles(Entries, Query, Directory, TEXT(""), OnlyCulture, OutError);
 }
 
-bool FKzDialogueTranslationCsv::ExportOtherTextsPoFiles(const FString& Directory, FText& OutError)
+bool FKzDialogueTranslationCsv::ExportOtherTextsPoFiles(const FString& Directory, FText& OutError, const TSet<FString>* OnlyIdentities, const FString& OnlyCulture)
 {
 	FKzLocQuery Query;
 	if (!Query.Load(OutError)) { return false; }
@@ -956,8 +957,10 @@ bool FKzDialogueTranslationCsv::ExportOtherTextsPoFiles(const FString& Directory
 	// Everything the target gathered outside the dialogue namespaces: UI, menus, etc.
 	// The msgctxt already carries namespace/key, so no extra comments are needed.
 	TArray<FKzPoEntry> Entries;
-	Query.EnumerateOtherTexts([&Entries](const FString& Namespace, const FString& Key, const FString& Source)
+	Query.EnumerateOtherTexts([&Entries, OnlyIdentities](const FString& Namespace, const FString& Key, const FString& Source)
 	{
+		if (OnlyIdentities && !OnlyIdentities->Contains(Namespace + TEXT(",") + Key)) { return; }
+
 		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
 		Entry.Namespace = Namespace;
 		Entry.Key = Key;
@@ -970,37 +973,17 @@ bool FKzDialogueTranslationCsv::ExportOtherTextsPoFiles(const FString& Directory
 		return false;
 	}
 
-	return WriteKzPoFiles(Entries, Query, Directory, TEXT("_Other"), OutError);
+	return WriteKzPoFiles(Entries, Query, Directory, TEXT("_Other"), OnlyCulture, OutError);
 }
 
-void FKzDialogueTranslationCsv::ExportOtherTextsPoInteractive()
-{
-	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-	FString OutDirectory;
-	if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(ParentWindow, LOCTEXT("ExportOtherPoDialogTitle", "Export project texts PO files to...").ToString(), FPaths::ProjectSavedDir(), OutDirectory))
-	{
-		return;
-	}
-
-	FText Error;
-	if (ExportOtherTextsPoFiles(OutDirectory, Error))
-	{
-		ShowNotification(FText::Format(LOCTEXT("OtherPoExportDone", "Project texts PO files exported to {0}."), FText::FromString(OutDirectory)), true);
-	}
-	else
-	{
-		ShowNotification(Error, false);
-	}
-}
-
-void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
+void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter, bool bWithOtherTexts, TSharedPtr<TSet<FString>> OtherIdentities, const FString& OnlyCulture)
 {
 	TArray<UKzDialogueAsset*> Assets;
 	for (const FAssetData& Data : SelectedAssets)
 	{
 		if (UKzDialogueAsset* Asset = Cast<UKzDialogueAsset>(Data.GetAsset())) { Assets.Add(Asset); }
 	}
-	if (Assets.IsEmpty()) { return; }
+	if (Assets.IsEmpty() && !bWithOtherTexts) { return; }
 
 	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 	FString OutDirectory;
@@ -1009,8 +992,23 @@ void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedA
 		return;
 	}
 
+	// Dialogue and Other files land in the same per-culture folders; either half alone is a
+	// valid export, so success means at least one of them wrote.
 	FText Error;
-	if (ExportPoFiles(Assets, OutDirectory, Error, LineFilter))
+	bool bWroteLines = false;
+	bool bWroteOthers = false;
+	if (!Assets.IsEmpty())
+	{
+		bWroteLines = ExportPoFiles(Assets, OutDirectory, Error, LineFilter, OnlyCulture);
+	}
+	if (bWithOtherTexts)
+	{
+		FText OtherError;
+		bWroteOthers = ExportOtherTextsPoFiles(OutDirectory, OtherError, OtherIdentities.Get(), OnlyCulture);
+		if (!bWroteOthers && Error.IsEmpty()) { Error = OtherError; }
+	}
+
+	if (bWroteLines || bWroteOthers)
 	{
 		ShowNotification(FText::Format(LOCTEXT("PoExportDone", "PO files exported to {0}."), FText::FromString(OutDirectory)), true);
 	}

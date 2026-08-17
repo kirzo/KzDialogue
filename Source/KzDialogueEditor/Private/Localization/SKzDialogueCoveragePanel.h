@@ -53,6 +53,8 @@ private:
 	/** Show the target's non-dialogue texts as an extra per-culture section (dashboard host). */
 	bool bIncludeProjectTexts = false;
 
+	/** Eye toggle over the dialogue line areas and their bars; off leaves only the Other texts (dashboard host). */
+	bool bShowDialogueLines = true;
 	/** Eye toggle over the Other texts area and its progress bar. */
 	bool bShowOtherTexts = true;
 	/** Other texts show only collapsed identical-source groups: the Merge candidates. */
