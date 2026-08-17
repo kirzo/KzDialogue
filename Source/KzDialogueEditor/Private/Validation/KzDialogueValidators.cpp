@@ -631,10 +631,10 @@ void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAss
 	struct FKzNamedField { const TCHAR* Key; const FText& Text; };
 	const FKzNamedField Fields[] = {
 		{ TEXT("DisplayName"), Speaker->DisplayName },
-		{ TEXT("GivenName"), Speaker->GivenName },
-		{ TEXT("FamilyName"), Speaker->FamilyName },
-		{ TEXT("Honorific"), Speaker->Honorific },
-		{ TEXT("Qualifier"), Speaker->Qualifier },
+		{ TEXT("GivenName"), Speaker->GivenName.Text },
+		{ TEXT("FamilyName"), Speaker->FamilyName.Text },
+		{ TEXT("Honorific"), Speaker->Honorific.Text },
+		{ TEXT("Qualifier"), Speaker->Qualifier.Text },
 	};
 
 	// Key anchoring. Self-heals on resave. Culture-invariant fields are deliberately
