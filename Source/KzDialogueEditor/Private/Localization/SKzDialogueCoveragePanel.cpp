@@ -599,10 +599,10 @@ void SKzDialogueCoveragePanel::Refresh()
 				};
 
 				AddSpeakerRow(TEXT("DisplayName"), Speaker->DisplayName);
-				AddSpeakerRow(TEXT("GivenName"), Speaker->GivenName);
-				AddSpeakerRow(TEXT("FamilyName"), Speaker->FamilyName);
-				AddSpeakerRow(TEXT("Honorific"), Speaker->Honorific);
-				AddSpeakerRow(TEXT("Qualifier"), Speaker->Qualifier);
+				AddSpeakerRow(TEXT("GivenName"), Speaker->GivenName.Text);
+				AddSpeakerRow(TEXT("FamilyName"), Speaker->FamilyName.Text);
+				AddSpeakerRow(TEXT("Honorific"), Speaker->Honorific.Text);
+				AddSpeakerRow(TEXT("Qualifier"), Speaker->Qualifier.Text);
 			}
 		}
 

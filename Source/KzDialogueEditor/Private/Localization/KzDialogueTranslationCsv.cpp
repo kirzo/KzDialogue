@@ -261,10 +261,10 @@ bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& A
 			Texts.Add({ Speaker, INDEX_NONE, Namespace.GetValue(), Key.GetValue(), *SourceString });
 		};
 		AddSpeakerText(Speaker->DisplayName);
-		AddSpeakerText(Speaker->GivenName);
-		AddSpeakerText(Speaker->FamilyName);
-		AddSpeakerText(Speaker->Honorific);
-		AddSpeakerText(Speaker->Qualifier);
+		AddSpeakerText(Speaker->GivenName.Text);
+		AddSpeakerText(Speaker->FamilyName.Text);
+		AddSpeakerText(Speaker->Honorific.Text);
+		AddSpeakerText(Speaker->Qualifier.Text);
 	}
 
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
@@ -690,10 +690,10 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		};
 
 		AddSpeakerRow(Speaker->DisplayName, Speaker->SourceDisplayNameHash);
-		AddSpeakerRow(Speaker->GivenName, Speaker->SourceGivenNameHash);
-		AddSpeakerRow(Speaker->FamilyName, Speaker->SourceFamilyNameHash);
-		AddSpeakerRow(Speaker->Honorific, Speaker->SourceHonorificHash);
-		AddSpeakerRow(Speaker->Qualifier, Speaker->SourceQualifierHash);
+		AddSpeakerRow(Speaker->GivenName.Text, Speaker->SourceGivenNameHash);
+		AddSpeakerRow(Speaker->FamilyName.Text, Speaker->SourceFamilyNameHash);
+		AddSpeakerRow(Speaker->Honorific.Text, Speaker->SourceHonorificHash);
+		AddSpeakerRow(Speaker->Qualifier.Text, Speaker->SourceQualifierHash);
 	}
 
 	// Project texts ride along as asset-less rows (empty Asset column marks them): the
@@ -877,10 +877,10 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		else if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
 		{
 			if (Key == TEXT("DisplayName")) { SourceText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
-			else if (Key == TEXT("GivenName")) { SourceText = &SpeakerAsset->GivenName; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
-			else if (Key == TEXT("FamilyName")) { SourceText = &SpeakerAsset->FamilyName; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
-			else if (Key == TEXT("Honorific")) { SourceText = &SpeakerAsset->Honorific; CurrentHash = SpeakerAsset->SourceHonorificHash; }
-			else if (Key == TEXT("Qualifier")) { SourceText = &SpeakerAsset->Qualifier; CurrentHash = SpeakerAsset->SourceQualifierHash; }
+			else if (Key == TEXT("GivenName")) { SourceText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
+			else if (Key == TEXT("FamilyName")) { SourceText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
+			else if (Key == TEXT("Honorific")) { SourceText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
+			else if (Key == TEXT("Qualifier")) { SourceText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
 		}
 
 		if (!SourceText)
@@ -1130,10 +1130,10 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 	{
 		const TArray<FString> Comments = { FString::Printf(TEXT("Speaker asset: %s"), *Speaker->GetName()) };
 		AppendPoText(Entries, Speaker->DisplayName, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->GivenName, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->FamilyName, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->Honorific, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->Qualifier, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->GivenName.Text, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->FamilyName.Text, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->Honorific.Text, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->Qualifier.Text, CopyTemp(Comments));
 	}
 
 	if (Entries.IsEmpty())
@@ -1781,10 +1781,10 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		else if (UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
 		{
 			if (Key == TEXT("DisplayName")) { TargetText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
-			else if (Key == TEXT("GivenName")) { TargetText = &SpeakerAsset->GivenName; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
-			else if (Key == TEXT("FamilyName")) { TargetText = &SpeakerAsset->FamilyName; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
-			else if (Key == TEXT("Honorific")) { TargetText = &SpeakerAsset->Honorific; CurrentHash = SpeakerAsset->SourceHonorificHash; }
-			else if (Key == TEXT("Qualifier")) { TargetText = &SpeakerAsset->Qualifier; CurrentHash = SpeakerAsset->SourceQualifierHash; }
+			else if (Key == TEXT("GivenName")) { TargetText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
+			else if (Key == TEXT("FamilyName")) { TargetText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
+			else if (Key == TEXT("Honorific")) { TargetText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
+			else if (Key == TEXT("Qualifier")) { TargetText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
 		}
 
 		if (!TargetText)

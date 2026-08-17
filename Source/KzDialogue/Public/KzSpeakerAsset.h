@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "KzWordAsset.h"
 #include "KzSpeakerAsset.generated.h"
 
 /**
@@ -14,8 +15,10 @@
  *
  * Naming: DisplayName wins when set. Otherwise the structured parts are composed with
  * the per-culture format from UKzDialogueSettings (surname-first cultures, honorifics).
- * Every name field is a localizable FText anchored to a stable GUID-derived key, so a
- * character's name is translated once here instead of per line.
+ * Every name field is a localizable text anchored to a stable GUID-derived key, so a
+ * character's name is translated once here instead of per line. Structured parts may
+ * also reference a shared UKzWordAsset (family names, honorifics: common vocabulary),
+ * which then resolves through the speaker's Gender and localizes once for everyone.
  */
 UCLASS(BlueprintType, Const)
 class KZDIALOGUE_API UKzSpeakerAsset : public UPrimaryDataAsset
@@ -27,25 +30,29 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Speaker")
 	FGuid AssetId;
 
-	/** Simple display name. When set it is used as-is and the structured parts are ignored. */
+	/** Simple display name. When set it is used as-is and the structured parts are ignored. Always direct text: a character's name is its own. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker")
 	FText DisplayName;
 
+	/** Grammatical gender, used to pick the matching form of referenced shared words ("Dr." resolves to Dr./Dra. in declining languages). */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker")
+	EKzGender Gender = EKzGender::Unspecified;
+
 	/** Given (first) name, composed per culture when DisplayName is empty. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
-	FText GivenName;
+	FKzWordText GivenName;
 
-	/** Family name (surname). Cultures like ja/zh/hu order it first via the settings' name format. */
+	/** Family name (surname). Cultures like ja/zh/hu order it first via the settings' name format. A shared word asset lets siblings localize the surname once. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
-	FText FamilyName;
+	FKzWordText FamilyName;
 
-	/** Optional honorific ("Dr.", "-san"). Placement is decided by the per-culture name format. */
+	/** Optional honorific ("Dr.", "-san"). Placement is decided by the per-culture name format. Common vocabulary: prefer a shared word asset. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
-	FText Honorific;
+	FKzWordText Honorific;
 
-	/** Optional qualifier describing the character variant ("Teen", "Young", "Ghost of"). Not a form of address; placement is decided by the per-culture name format. */
+	/** Optional qualifier describing the character variant ("Teen", "Young", "Ghost of"). Not a form of address; placement is decided by the per-culture name format. Common vocabulary: prefer a shared word asset. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
-	FText Qualifier;
+	FKzWordText Qualifier;
 
 	/** CRC32 of DisplayName's source string. Updated automatically; used to detect translation drift. */
 	UPROPERTY()

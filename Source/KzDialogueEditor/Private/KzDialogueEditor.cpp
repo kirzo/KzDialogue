@@ -7,6 +7,7 @@
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
+#include "KzWordAsset.h"
 
 #include "Customizations/KzDialogueLineRowCustomizer.h"
 #include "Customizations/KzDialogueAliasRowCustomizer.h"
@@ -88,6 +89,13 @@ void FKzDialogueEditorModule::OnStartupModule()
 	RegisterAssetTypeAction<UKzSpeakerAsset>(
 		KzAssetCategoryBit,
 		INVTEXT("Dialogue Speaker"),
+		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
+		{ INVTEXT("Dialogues") });
+
+	// Shared vocabulary words (family names, honorifics): plain data assets as well.
+	RegisterAssetTypeAction<UKzWordAsset>(
+		KzAssetCategoryBit,
+		INVTEXT("Word"),
 		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
 		{ INVTEXT("Dialogues") });
 

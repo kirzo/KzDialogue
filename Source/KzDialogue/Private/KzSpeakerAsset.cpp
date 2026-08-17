@@ -23,10 +23,10 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 	const FString& Format = Settings ? Settings->GetActiveSpeakerNameFormat() : FallbackFormat;
 
 	FFormatNamedArguments Args;
-	Args.Add(TEXT("Given"), GivenName);
-	Args.Add(TEXT("Family"), FamilyName);
-	Args.Add(TEXT("Honorific"), Honorific);
-	Args.Add(TEXT("Qualifier"), Qualifier);
+	Args.Add(TEXT("Given"), GivenName.Resolve(Gender));
+	Args.Add(TEXT("Family"), FamilyName.Resolve(Gender));
+	Args.Add(TEXT("Honorific"), Honorific.Resolve(Gender));
+	Args.Add(TEXT("Qualifier"), Qualifier.Resolve(Gender));
 	FString Composed = FText::Format(FTextFormat::FromString(Format), Args).ToString();
 
 	// Collapse the gaps empty parts leave behind: runs of spaces inside, stray spaces at
@@ -92,6 +92,21 @@ void UKzSpeakerAsset::RefreshMetadata()
 		bDirty = true;
 	}
 
+	// A referenced shared word wins: the inline text empties so the localization gather
+	// only ever sees one of the two.
+	auto EnforceWordWins = [&bDirty](FKzWordText& Field)
+	{
+		if (Field.Word && !Field.Text.IsEmpty())
+		{
+			Field.Text = FText::GetEmpty();
+			bDirty = true;
+		}
+	};
+	EnforceWordWins(GivenName);
+	EnforceWordWins(FamilyName);
+	EnforceWordWins(Honorific);
+	EnforceWordWins(Qualifier);
+
 	RebindFTextKeys();
 
 	auto RefreshHash = [&bDirty](const FText& Text, uint32& Hash)
@@ -104,10 +119,10 @@ void UKzSpeakerAsset::RefreshMetadata()
 		}
 	};
 	RefreshHash(DisplayName, SourceDisplayNameHash);
-	RefreshHash(GivenName, SourceGivenNameHash);
-	RefreshHash(FamilyName, SourceFamilyNameHash);
-	RefreshHash(Honorific, SourceHonorificHash);
-	RefreshHash(Qualifier, SourceQualifierHash);
+	RefreshHash(GivenName.Text, SourceGivenNameHash);
+	RefreshHash(FamilyName.Text, SourceFamilyNameHash);
+	RefreshHash(Honorific.Text, SourceHonorificHash);
+	RefreshHash(Qualifier.Text, SourceQualifierHash);
 
 	if (bDirty)
 	{
@@ -131,10 +146,10 @@ void UKzSpeakerAsset::RebindFTextKeys()
 		}
 	};
 	Rebind(DisplayName, TEXT("DisplayName"));
-	Rebind(GivenName, TEXT("GivenName"));
-	Rebind(FamilyName, TEXT("FamilyName"));
-	Rebind(Honorific, TEXT("Honorific"));
-	Rebind(Qualifier, TEXT("Qualifier"));
+	Rebind(GivenName.Text, TEXT("GivenName"));
+	Rebind(FamilyName.Text, TEXT("FamilyName"));
+	Rebind(Honorific.Text, TEXT("Honorific"));
+	Rebind(Qualifier.Text, TEXT("Qualifier"));
 }
 
 #endif
