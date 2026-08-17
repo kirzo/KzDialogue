@@ -57,6 +57,15 @@ namespace
 		Text.ParseIntoArrayWS(Words);
 		return Words.Num();
 	}
+
+	/** Row labels are single-line: the full text flows to the divider and the widget's ellipsis cuts it there, so multi-line sources flatten to spaces. */
+	FString FlattenLabel(FString Value)
+	{
+		Value.ReplaceInline(TEXT("\r\n"), TEXT(" "));
+		Value.ReplaceInline(TEXT("\n"), TEXT(" "));
+		Value.ReplaceInline(TEXT("\r"), TEXT(" "));
+		return Value;
+	}
 }
 
 void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets)
@@ -280,7 +289,7 @@ void SKzDialogueCoveragePanel::Refresh()
 
 				FLineRow Row;
 				Row.LineId = Line.LineId;
-				Row.Label = Line.GetDisplayLabel(60);
+				Row.Label = FText::FromString(FlattenLabel(Line.GetDisplayLabel(0).ToString()));
 				if (bVoiced)
 				{
 					Row.AudioPath = Line.Audio.ToSoftObjectPath();
@@ -457,7 +466,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				// One row per line; the state chip says what exactly is pending, or "ok".
 				FLineRow Row;
 				Row.LineId = Line.LineId;
-				Row.Label = Line.GetDisplayLabel(60);
+				Row.Label = FText::FromString(FlattenLabel(Line.GetDisplayLabel(0).ToString()));
 				Row.Tooltip = PendingTooltip;
 				Row.Translation = FText::FromString(RowTranslation);
 				if (Namespace.IsSet() && Key.IsSet() && Source)
@@ -566,11 +575,12 @@ void SKzDialogueCoveragePanel::Refresh()
 					continue;
 				}
 
-				const FString Preview = Source.Len() > 60 ? Source.Left(60) + TEXT("...") : Source;
+				const FString Preview = FlattenLabel(Source);
 
 				FLineRow Row;
+				// Count in front: the ellipsis cuts the tail of long labels, never the marker.
 				Row.Label = Indices.Num() > 1
-					? FText::Format(LOCTEXT("OtherTextCollapsed", "{0}   (x{1})"), FText::FromString(Preview), Indices.Num())
+					? FText::Format(LOCTEXT("OtherTextCollapsed", "(x{1})  {0}"), FText::FromString(Preview), Indices.Num())
 					: FText::FromString(Preview);
 
 				Row.GroupSource = Source;
@@ -1072,7 +1082,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 				SNew(SButton)
 					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 					.ContentPadding(FMargin(2.0f, 1.0f))
-					.ToolTipText(Entry.Tooltip.IsEmpty() ? LOCTEXT("PendingEntryTip", "Select this line in the Lines tab.") : Entry.Tooltip)
+					.ToolTipText(Entry.Tooltip.IsEmpty() ? FText::Format(LOCTEXT("RowLabelTip", "{0}\n\nClick: select this line in the Lines tab."), Entry.Label) : Entry.Tooltip)
 					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId, Locations = Entry.SourceLocations]()
 					{
 						// Project texts navigate to where they are authored; dialogue rows to their line.
