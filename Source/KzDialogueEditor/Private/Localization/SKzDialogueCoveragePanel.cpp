@@ -1253,6 +1253,15 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		return MenuBuilder.MakeWidget();
 	}
 
+	// Culture-less: SourceText edits made in the sheet go back into the AUTHORED assets.
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("ImportSourceFixes", "Source fixes (CSV)..."),
+		LOCTEXT("ImportSourceFixesTip", "Apply SourceText edits made in an exported CSV back to the authored assets (dialogue lines, speaker fields, project texts). Rows whose asset changed after the export are skipped as conflicted; save the dirty assets and re-run Gather afterwards."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); Refresh(); })));
+
+	MenuBuilder.AddMenuSeparator();
+
 	// Same culture list under each format; entries run the matching interactive import.
 	auto AddCultureEntries = [this](FMenuBuilder& Sub, const TArray<FString>& Cultures, TFunction<void(const FString&)> Run)
 	{
