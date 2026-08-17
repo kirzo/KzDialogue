@@ -334,7 +334,7 @@ namespace
 		}
 	}
 
-	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr)
+	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& TranslationCulture = FString())
 	{
 		TArray<UKzDialogueAsset*> Assets;
 		for (const FAssetData& Data : SelectedAssets)
@@ -350,7 +350,9 @@ namespace
 		}
 		if (Assets.IsEmpty()) { return; }
 
-		const FString DefaultName = (Assets.Num() == 1 ? Assets[0]->GetName() : FString(TEXT("KzDialogue"))) + TEXT("_Translation.csv");
+		// The culture suffix names the round-trip file and feeds the import's wrong-file guard.
+		const FString CultureSuffix = TranslationCulture.IsEmpty() ? FString() : TEXT("_") + TranslationCulture;
+		const FString DefaultName = (Assets.Num() == 1 ? Assets[0]->GetName() : FString(TEXT("KzDialogue"))) + TEXT("_Translation") + CultureSuffix + TEXT(".csv");
 		TArray<FString> OutFiles;
 		const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 		if (!FDesktopPlatformModule::Get()->SaveFileDialog(ParentWindow, LOCTEXT("ExportDialogTitle", "Export translation CSV").ToString(),
@@ -360,7 +362,7 @@ namespace
 		}
 
 		FText Error;
-		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter, OtherIdentities.Get()))
+		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter, OtherIdentities.Get(), TranslationCulture))
 		{
 			ShowNotification(FText::Format(LOCTEXT("ExportDone", "Translation CSV exported to {0}."), FText::FromString(OutFiles[0])), true);
 		}
@@ -535,10 +537,45 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 	}));
 }
 
-bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities)
+bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities, const FString& TranslationCulture)
 {
-	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash");
+	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation");
 	Csv += LINE_TERMINATOR;
+
+	// Archives feed the per-culture translation columns and the project-text rows.
+	FKzLocQuery Query;
+	bool bQueryLoaded = false;
+	if (!TranslationCulture.IsEmpty() || (OtherIdentities && !OtherIdentities->IsEmpty()))
+	{
+		FText QueryError;
+		bQueryLoaded = Query.Load(QueryError);
+		if (!TranslationCulture.IsEmpty() && !bQueryLoaded)
+		{
+			OutError = QueryError;
+			return false;
+		}
+	}
+
+	// Current translations pre-fill the Translation column so the file round-trips per culture.
+	// Stale ones land in StaleTranslation instead: visible as reference, but a re-import cannot
+	// mistake them for confirmed work (only the Translation column imports).
+	auto FillCultureCells = [&Query, &bQueryLoaded, &TranslationCulture](const FString& Namespace, const FString& Key, const FString& Source, FString& OutTranslation, FString& OutStale)
+	{
+		if (TranslationCulture.IsEmpty() || !bQueryLoaded) { return; }
+
+		FString ArchiveSource;
+		FString ArchiveTranslation;
+		if (!Query.GetArchiveEntry(Namespace, Key, TranslationCulture, ArchiveSource, ArchiveTranslation)) { return; }
+
+		if (Query.GetTextState(Namespace, Key, Source, TranslationCulture) == EKzTranslationState::Stale)
+		{
+			OutStale = ArchiveTranslation;
+		}
+		else
+		{
+			OutTranslation = ArchiveTranslation;
+		}
+	};
 
 	int32 NumRows = 0;
 	for (const UKzDialogueAsset* Asset : Assets)
@@ -562,17 +599,22 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 				const FString* SourceString = FTextInspector::GetSourceString(Source);
 				if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
 
+				FString Translation;
+				FString StaleTranslation;
+				FillCultureCells(Namespace.GetValue(), Key.GetValue(), *SourceString, Translation, StaleTranslation);
+
 				Csv += CsvEscape(AssetPath) + TEXT(",");
 				Csv += CsvEscape(Namespace.GetValue()) + TEXT(",");
 				Csv += CsvEscape(Key.GetValue()) + TEXT(",");
 				Csv += CsvEscape(Speaker) + TEXT(",");
 				Csv += CsvEscape(*SourceString) + TEXT(",");
-				Csv += TEXT(",");
+				Csv += CsvEscape(Translation) + TEXT(",");
 				Csv += CsvEscape(Notes) + TEXT(",");
 				Csv += FString::FromInt(MaxChars) + TEXT(",");
 				Csv += CsvEscape(Audio) + TEXT(",");
 				Csv += LocalizeAudio + TEXT(",");
-				Csv += FString::Printf(TEXT("%u"), SourceHash);
+				Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
+				Csv += CsvEscape(StaleTranslation);
 				Csv += LINE_TERMINATOR;
 				++NumRows;
 			};
@@ -614,17 +656,22 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 			const FString* SourceString = FTextInspector::GetSourceString(Source);
 			if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
 
+			FString Translation;
+			FString StaleTranslation;
+			FillCultureCells(Namespace.GetValue(), Key.GetValue(), *SourceString, Translation, StaleTranslation);
+
 			Csv += CsvEscape(SpeakerPath) + TEXT(",");
 			Csv += CsvEscape(Namespace.GetValue()) + TEXT(",");
 			Csv += CsvEscape(Key.GetValue()) + TEXT(",");
 			Csv += CsvEscape(SpeakerLabel) + TEXT(",");
 			Csv += CsvEscape(*SourceString) + TEXT(",");
-			Csv += TEXT(",");
+			Csv += CsvEscape(Translation) + TEXT(",");
 			Csv += TEXT(",");
 			Csv += TEXT("0,");
 			Csv += TEXT(",");
 			Csv += TEXT(",");
-			Csv += FString::Printf(TEXT("%u"), SourceHash);
+			Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
+			Csv += CsvEscape(StaleTranslation);
 			Csv += LINE_TERMINATOR;
 			++NumRows;
 		};
@@ -638,31 +685,31 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 
 	// Project texts ride along as asset-less rows (empty Asset column marks them): the
 	// manifest validates them at import instead of an asset hash.
-	if (OtherIdentities && !OtherIdentities->IsEmpty())
+	if (OtherIdentities && !OtherIdentities->IsEmpty() && bQueryLoaded)
 	{
-		FKzLocQuery Query;
-		FText QueryError;
-		if (Query.Load(QueryError))
+		Query.EnumerateOtherTexts([&Csv, &NumRows, &FillCultureCells, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
 		{
-			Query.EnumerateOtherTexts([&Csv, &NumRows, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
-			{
-				if (!OtherIdentities->Contains(Namespace + TEXT(",") + Key)) { return; }
+			if (!OtherIdentities->Contains(Namespace + TEXT(",") + Key)) { return; }
 
-				Csv += TEXT(",");
-				Csv += CsvEscape(Namespace) + TEXT(",");
-				Csv += CsvEscape(Key) + TEXT(",");
-				Csv += TEXT(",");
-				Csv += CsvEscape(Source) + TEXT(",");
-				Csv += TEXT(",");
-				Csv += TEXT(",");
-				Csv += TEXT("0,");
-				Csv += TEXT(",");
-				Csv += TEXT(",");
-				Csv += TEXT("0");
-				Csv += LINE_TERMINATOR;
-				++NumRows;
-			});
-		}
+			FString Translation;
+			FString StaleTranslation;
+			FillCultureCells(Namespace, Key, Source, Translation, StaleTranslation);
+
+			Csv += TEXT(",");
+			Csv += CsvEscape(Namespace) + TEXT(",");
+			Csv += CsvEscape(Key) + TEXT(",");
+			Csv += TEXT(",");
+			Csv += CsvEscape(Source) + TEXT(",");
+			Csv += CsvEscape(Translation) + TEXT(",");
+			Csv += TEXT(",");
+			Csv += TEXT("0,");
+			Csv += TEXT(",");
+			Csv += TEXT(",");
+			Csv += TEXT("0,");
+			Csv += CsvEscape(StaleTranslation);
+			Csv += LINE_TERMINATOR;
+			++NumRows;
+		});
 	}
 
 	if (NumRows == 0)
@@ -871,9 +918,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 	return true;
 }
 
-void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter, TSharedPtr<TSet<FString>> OtherIdentities)
+void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter, TSharedPtr<TSet<FString>> OtherIdentities, const FString& TranslationCulture)
 {
-	OnExportClicked(MoveTemp(SelectedAssets), LineFilter, OtherIdentities);
+	OnExportClicked(MoveTemp(SelectedAssets), LineFilter, OtherIdentities, TranslationCulture);
 }
 
 FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
@@ -1152,8 +1199,10 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 	}
 
 	// Entries validate against the MANIFEST: an entry whose msgid no longer matches the
-	// gathered source was translated against old text and is skipped as drifted.
-	auto ProcessEntry = [&LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr)
+	// gathered source was translated against old text and is skipped as drifted. Fuzzy
+	// entries (our stale exports) are unconfirmed work and skip too; translators clear the
+	// flag when they revise the translation.
+	auto ProcessEntry = [&LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
 	{
 		const FString Ctxt = PoUnescape(RawCtxt);
 		const FString Id = PoUnescape(RawId);
@@ -1161,7 +1210,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 
 		if (Ctxt.IsEmpty() && Id.IsEmpty()) { return; }   // .po header block
 
-		if (Str.IsEmpty())
+		if (Str.IsEmpty() || bFuzzy)
 		{
 			++OutStats.Untranslated;
 			return;
@@ -1207,6 +1256,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 	FString Str;
 	FString* Continuation = nullptr;
 	bool bSeenStr = false;
+	bool bFuzzy = false;
 
 	auto Quoted = [](const FString& In) -> FString
 	{
@@ -1222,9 +1272,10 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		{
 			if (bSeenStr)
 			{
-				ProcessEntry(Ctxt, Id, Str);
+				ProcessEntry(Ctxt, Id, Str, bFuzzy);
 				Ctxt.Reset(); Id.Reset(); Str.Reset();
 				bSeenStr = false;
+				bFuzzy = false;
 			}
 			if (Line.StartsWith(TEXT("msgctxt ")))
 			{
@@ -1249,13 +1300,17 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		}
 		else
 		{
-			// Comments and blank lines end any string continuation.
+			// Flag comments precede their entry; anything else just ends a string continuation.
+			if (Line.StartsWith(TEXT("#,")) && Line.Contains(TEXT("fuzzy")))
+			{
+				bFuzzy = true;
+			}
 			Continuation = nullptr;
 		}
 	}
 	if (bSeenStr)
 	{
-		ProcessEntry(Ctxt, Id, Str);
+		ProcessEntry(Ctxt, Id, Str, bFuzzy);
 	}
 
 	if (OutStats.Imported > 0)
