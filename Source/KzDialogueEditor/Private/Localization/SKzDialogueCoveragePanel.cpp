@@ -17,6 +17,7 @@
 #include "Components/AudioComponent.h"
 #include "ContentBrowserModule.h"
 #include "Editor.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -30,7 +31,9 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
+#include "Widgets/Input/SEditableText.h"
 #include "Widgets/Input/SSearchBox.h"
+#include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
@@ -457,6 +460,12 @@ void SKzDialogueCoveragePanel::Refresh()
 				Row.Label = Line.GetDisplayLabel(60);
 				Row.Tooltip = PendingTooltip;
 				Row.Translation = FText::FromString(RowTranslation);
+				if (Namespace.IsSet() && Key.IsSet() && Source)
+				{
+					Row.TranslationCulture = Culture;
+					Row.TranslationIdentities.Emplace(Namespace.GetValue(), Key.GetValue());
+					Row.TranslationSource = *Source;
+				}
 				Row.AudioPath = LocalizedAudioPath;
 				Row.bCanMakeNonLocalizable = !Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet();
 				if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
@@ -570,6 +579,19 @@ void SKzDialogueCoveragePanel::Refresh()
 				{
 					Row.GroupIdentities.Emplace(OtherTexts[Index].Namespace, OtherTexts[Index].Key);
 					Row.SourceLocations.Append(Query.GetSourceLocations(OtherTexts[Index].Namespace, OtherTexts[Index].Key));
+				}
+
+				// Editable like the line rows: a commit writes every identity of the group, which
+				// keeps collapsed identical sources sharing one translation. Shown value = the
+				// first identity's current translation.
+				Row.TranslationCulture = Culture;
+				Row.TranslationIdentities = Row.GroupIdentities;
+				Row.TranslationSource = Source;
+				{
+					FString ArchiveSource;
+					FString GroupTranslation;
+					Query.GetArchiveEntry(OtherTexts[Indices[0]].Namespace, OtherTexts[Indices[0]].Key, Culture, ArchiveSource, GroupTranslation);
+					Row.Translation = FText::FromString(GroupTranslation);
 				}
 
 				// Owners visible without clicking: asset package paths (deduped) and code sites.
@@ -693,13 +715,24 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		return Visible;
 	};
 
-	auto AddArea = [this, &Content](const FText& Title, TSharedRef<SVerticalBox> Box)
+	auto AddArea = [this, &Content](const FText& Title, TSharedRef<SVerticalBox> Box, TSharedPtr<TArray<TWeakPtr<SExpandableArea>>> ChildAreas)
 	{
 		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(SExpandableArea)
 				.InitiallyCollapsed(true)
 				.AreaTitle(Title)
+				// Shift-click mirrors the engine: the area's new state cascades to every sub-section inside.
+				.OnAreaExpansionChanged_Lambda([ChildAreas](bool bExpanded)
+				{
+					if (ChildAreas.IsValid() && FSlateApplication::Get().GetModifierKeys().IsShiftDown())
+					{
+						for (const TWeakPtr<SExpandableArea>& Weak : *ChildAreas)
+						{
+							if (TSharedPtr<SExpandableArea> Area = Weak.Pin()) { Area->SetExpanded(bExpanded); }
+						}
+					}
+				})
 				.BodyContent()
 				[
 					// Recessed inset behind the row cells, so the list reads as its own region.
@@ -718,6 +751,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	const bool bAssetHeaders = AssetGroups.Num() > 1;
 	int32 VisibleCount = 0;
 	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+	TSharedPtr<TArray<TWeakPtr<SExpandableArea>>> AssetAreas = MakeShared<TArray<TWeakPtr<SExpandableArea>>>();
 	for (const FAssetLines* Group : AssetGroups)
 	{
 		TArray<const FLineRow*> Visible = FilterVisible(*Group);
@@ -734,9 +768,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 
 		if (bAssetHeaders)
 		{
+			TSharedPtr<SExpandableArea> AssetArea;
 			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
 			[
-				SNew(SExpandableArea)
+				SAssignNew(AssetArea, SExpandableArea)
 					.InitiallyCollapsed(false)
 					.BorderImage(FAppStyle::GetBrush("NoBorder"))
 					.HeaderContent()
@@ -748,6 +783,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 						GroupBox
 					]
 			];
+			AssetAreas->Add(AssetArea);
 		}
 		else
 		{
@@ -760,7 +796,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	}
 	if (VisibleCount > 0)
 	{
-		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), ListBox);
+		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), ListBox, AssetAreas);
 	}
 
 	if (OtherGroup)
@@ -810,7 +846,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 					++RowsAdded;
 				}
 			}
-			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox);
+			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), OtherBox, nullptr);
 		}
 	}
 
@@ -1026,16 +1062,35 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 					]
 			]
-			// The culture's current translation, dimmed on the right; rows without one give the label the full width.
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 4.0f, 0.0f)
+			// Divider at the row's half, then this culture's translation, editable in place:
+			// committing (Enter or focus loss) writes straight into the culture's archive.
+			// Esc reverts; empty commits are ignored. Native-card rows have no column.
+			+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f)
 			[
-				SNew(STextBlock)
+				SNew(SSeparator)
+					.Orientation(Orient_Vertical)
+					.Thickness(1.0f)
+					.Visibility(Entry.TranslationCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+			]
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(2.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(SEditableText)
 					.Text(Entry.Translation)
-					.Justification(ETextJustify::Right)
-					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					.HintText(LOCTEXT("TranslationHint", "untranslated"))
+					.ToolTipText(Entry.Translation.IsEmpty()
+						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter: it is written into this culture's archive.")
+						: Entry.Translation)
 					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-					.ToolTipText(Entry.Translation)
-					.Visibility(Entry.Translation.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+					.SelectAllTextWhenFocused(true)
+					.ClearKeyboardFocusOnCommit(true)
+					.OnTextCommitted_Lambda([this, Culture = Entry.TranslationCulture, Identities = Entry.TranslationIdentities, TranslationSource = Entry.TranslationSource, Previous = Entry.Translation](const FText& NewText, ETextCommit::Type CommitType)
+					{
+						if (CommitType == ETextCommit::OnCleared) { return; }
+						const FString NewTranslation = NewText.ToString();
+						if (NewTranslation.IsEmpty() || NewTranslation == Previous.ToString()) { return; }
+						CommitTranslation(Culture, Identities, TranslationSource, NewTranslation);
+					})
+					.Visibility(Entry.TranslationCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 			]
 		];
 }
@@ -1254,6 +1309,31 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	}
 
 	Refresh();
+}
+
+void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation)
+{
+	FText Error;
+	if (!FKzDialogueTranslationCsv::WriteTranslation(Culture, Identities, Source, NewTranslation, Error))
+	{
+		FNotificationInfo Info(Error);
+		Info.ExpireDuration = 6.0f;
+		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+		{
+			Item->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+		return;
+	}
+
+	// The commit runs from inside the row's editable widget; rebuild next tick, not under its feet.
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this))](float)
+	{
+		if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
+		{
+			Panel->Refresh();
+		}
+		return false;
+	}));
 }
 
 void SKzDialogueCoveragePanel::AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
