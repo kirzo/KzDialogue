@@ -301,7 +301,7 @@ namespace
 		}
 	}
 
-	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr)
+	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr)
 	{
 		TArray<UKzDialogueAsset*> Assets;
 		for (const FAssetData& Data : SelectedAssets)
@@ -327,7 +327,7 @@ namespace
 		}
 
 		FText Error;
-		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter))
+		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter, OtherIdentities.Get()))
 		{
 			ShowNotification(FText::Format(LOCTEXT("ExportDone", "Translation CSV exported to {0}."), FText::FromString(OutFiles[0])), true);
 		}
@@ -502,7 +502,7 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 	}));
 }
 
-bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter)
+bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities)
 {
 	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash");
 	Csv += LINE_TERMINATOR;
@@ -603,6 +603,35 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		AddSpeakerRow(Speaker->Qualifier, Speaker->SourceQualifierHash);
 	}
 
+	// Project texts ride along as asset-less rows (empty Asset column marks them): the
+	// manifest validates them at import instead of an asset hash.
+	if (OtherIdentities && !OtherIdentities->IsEmpty())
+	{
+		FKzLocQuery Query;
+		FText QueryError;
+		if (Query.Load(QueryError))
+		{
+			Query.EnumerateOtherTexts([&Csv, &NumRows, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
+			{
+				if (!OtherIdentities->Contains(Namespace + TEXT(",") + Key)) { return; }
+
+				Csv += TEXT(",");
+				Csv += CsvEscape(Namespace) + TEXT(",");
+				Csv += CsvEscape(Key) + TEXT(",");
+				Csv += TEXT(",");
+				Csv += CsvEscape(Source) + TEXT(",");
+				Csv += TEXT(",");
+				Csv += TEXT(",");
+				Csv += TEXT("0,");
+				Csv += TEXT(",");
+				Csv += TEXT(",");
+				Csv += TEXT("0");
+				Csv += LINE_TERMINATOR;
+				++NumRows;
+			});
+		}
+	}
+
 	if (NumRows == 0)
 	{
 		OutError = LOCTEXT("ExportNoRows", "The selected assets contain no localizable text.");
@@ -645,6 +674,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 	const int32* AssetCol = Columns.Find(TEXT("Asset"));
 	const int32* NamespaceCol = Columns.Find(TEXT("Namespace"));
 	const int32* KeyCol = Columns.Find(TEXT("Key"));
+	const int32* SourceTextCol = Columns.Find(TEXT("SourceText"));
 	const int32* TranslationCol = Columns.Find(TEXT("Translation"));
 	const int32* HashCol = Columns.Find(TEXT("SourceHash"));
 	if (!AssetCol || !NamespaceCol || !KeyCol || !TranslationCol || !HashCol)
@@ -693,6 +723,37 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 
 		const FString AssetPath = Cell(AssetCol);
 		const FString Key = Cell(KeyCol);
+
+		// Asset-less rows are project texts: the manifest (not an asset hash) validates them,
+		// same as the PO import.
+		if (AssetPath.IsEmpty())
+		{
+			const FString Namespace = Cell(NamespaceCol);
+			const TSharedPtr<FManifestEntry> ManifestEntry = LocHelper.FindSourceText(FLocKey(Namespace), FLocKey(Key));
+			if (!ManifestEntry.IsValid())
+			{
+				++OutStats.Unresolved;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved row %d: project text '%s,%s' is not in the manifest anymore. Re-run Gather Text or drop the row."), RowIdx + 1, *Namespace, *Key);
+				continue;
+			}
+			if (SourceTextCol && !ManifestEntry->Source.Text.Equals(Cell(SourceTextCol), ESearchCase::CaseSensitive))
+			{
+				++OutStats.Drifted;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: project text '%s,%s' changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Namespace, *Key);
+				continue;
+			}
+
+			if (LocHelper.ImportTranslation(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Translation), false))
+			{
+				++OutStats.Imported;
+			}
+			else
+			{
+				++OutStats.Unresolved;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Failed to write row %d into the '%s' archive: project text '%s,%s'."), RowIdx + 1, *Culture, *Namespace, *Key);
+			}
+			continue;
+		}
 
 		UObject*& Asset = LoadedAssets.FindOrAdd(AssetPath);
 		if (!Asset)
@@ -767,9 +828,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 	return true;
 }
 
-void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter)
+void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter, TSharedPtr<TSet<FString>> OtherIdentities)
 {
-	OnExportClicked(MoveTemp(SelectedAssets), LineFilter);
+	OnExportClicked(MoveTemp(SelectedAssets), LineFilter, OtherIdentities);
 }
 
 FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
