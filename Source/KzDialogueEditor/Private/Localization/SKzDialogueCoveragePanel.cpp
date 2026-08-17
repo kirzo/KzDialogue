@@ -30,6 +30,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
+#include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SExpandableArea.h"
@@ -80,6 +81,18 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 						SNew(STextBlock)
 							.Text(LOCTEXT("Title", "Localization"))
 							.Font(FAppStyle::GetFontStyle("BoldFont"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f).VAlign(VAlign_Center)
+					[
+						SNew(SBox)
+							.WidthOverride(200.0f)
+							[
+								SNew(SSearchBox)
+									.HintText(LOCTEXT("SearchHint", "Search text..."))
+									.ToolTipText(LOCTEXT("SearchTip", "Show only the dialogue lines and project texts containing this text."))
+									.DelayChangeNotificationsWhileTyping(true)
+									.OnTextChanged_Lambda([this](const FText& NewText) { TextFilter = NewText.ToString(); Refresh(); })
+							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 					[
@@ -227,6 +240,15 @@ void SKzDialogueCoveragePanel::Refresh()
 		return Name == SpeakerFilter;
 	};
 
+	// The search box narrows every card by source text, counters included (like the speaker
+	// filter, unlike the ok-filters).
+	auto PassesText = [this](const FKzDialogueLine& Line)
+	{
+		if (TextFilter.IsEmpty()) { return true; }
+		const FString* Source = FTextInspector::GetSourceString(Line.Text);
+		return Source && Source->Contains(TextFilter, ESearchCase::IgnoreCase);
+	};
+
 	// Native card first: recording state of the source audio (missing takes, takes whose
 	// text drifted after recording). Lines that are text-only by design (VoicePolicy, line
 	// over project settings) are not recording work; text has nothing to translate.
@@ -247,7 +269,7 @@ void SKzDialogueCoveragePanel::Refresh()
 
 			for (const FKzDialogueLine& Line : AssetPtr->Lines)
 			{
-				if (!PassesSpeaker(Line)) { continue; }
+				if (!PassesSpeaker(Line) || !PassesText(Line)) { continue; }
 
 				const bool bVoiced = !Line.Audio.IsNull();
 				const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
@@ -354,7 +376,7 @@ void SKzDialogueCoveragePanel::Refresh()
 
 			for (const FKzDialogueLine& Line : AssetPtr->Lines)
 			{
-				if (!PassesSpeaker(Line)) { continue; }
+				if (!PassesSpeaker(Line) || !PassesText(Line)) { continue; }
 
 				bool bTextMissing = false;
 				bool bTextStale = false;
@@ -471,6 +493,7 @@ void SKzDialogueCoveragePanel::Refresh()
 		int32 OtherDone = 0;
 		int32 OtherStale = 0;
 		int32 OtherWords = 0;
+		int32 OtherTotal = 0;
 		if (!OtherTexts.IsEmpty())
 		{
 			FAssetLines& OtherGroup = Groups.AddDefaulted_GetRef();   // null asset = the Other texts area
@@ -486,6 +509,8 @@ void SKzDialogueCoveragePanel::Refresh()
 
 			for (const FString& Source : SourceOrder)
 			{
+				if (!TextFilter.IsEmpty() && !Source.Contains(TextFilter, ESearchCase::IgnoreCase)) { continue; }
+
 				const TArray<int32>& Indices = IndicesBySource[Source];
 
 				int32 GroupMissing = 0;
@@ -495,6 +520,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				for (const int32 Index : Indices)
 				{
 					const FOtherText& Text = OtherTexts[Index];
+					++OtherTotal;
 					IdentityList += FString::Printf(TEXT("%s,%s\n"), *Text.Namespace, *Text.Key);
 
 					switch (Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture))
@@ -594,9 +620,9 @@ void SKzDialogueCoveragePanel::Refresh()
 				Bars.Add(MakeProgressRow(LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal, 0));
 			}
 		}
-		if (!OtherTexts.IsEmpty())
+		if (OtherTotal > 0)
 		{
-			Bars.Add(MakeProgressRow(LOCTEXT("BarOtherTexts", "Other"), OtherDone, OtherTexts.Num(), OtherStale, OtherWords));
+			Bars.Add(MakeProgressRow(LOCTEXT("BarOtherTexts", "Other"), OtherDone, OtherTotal, OtherStale, OtherWords));
 		}
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
@@ -1368,6 +1394,13 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		return (Line.Speaker.Asset ? Line.Speaker.Asset->GetName() : FString()) == Name;
 	};
 
+	auto PassesText = [Filter = TextFilter](const FKzDialogueLine& Line)
+	{
+		if (Filter.IsEmpty()) { return true; }
+		const FString* Source = FTextInspector::GetSourceString(Line.Text);
+		return Source && Source->Contains(Filter, ESearchCase::IgnoreCase);
+	};
+
 	// Pending text is evaluated against the filtered culture, or every foreign culture when
 	// the filter is off. The native culture has no text to translate.
 	TSharedRef<FKzLocQuery> Query = MakeShared<FKzLocQuery>();
@@ -1410,7 +1443,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		AllCount += AssetPtr->Lines.Num();
 		for (const FKzDialogueLine& Line : AssetPtr->Lines)
 		{
-			if (!PassesSpeaker(Line)) { continue; }
+			if (!PassesSpeaker(Line) || !PassesText(Line)) { continue; }
 			++FilteredCount;
 			if (!PendingCultures.IsEmpty() && IsTextPending(Line)) { ++PendingCount; }
 		}
@@ -1432,7 +1465,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 	const TSharedPtr<TSet<FString>> RideAlong = bExportProjectTexts && OtherCount > 0 ? OtherIdentities : TSharedPtr<TSet<FString>>();
 
 	// Both formats share the same scopes; each submenu entry runs the matching interactive flow.
-	auto AddScopeEntries = [this, AssetData, PassesSpeaker, IsTextPending, AllCount, FilteredCount, PendingCount](FMenuBuilder& Sub, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&)> Run)
+	auto AddScopeEntries = [this, AssetData, PassesSpeaker, PassesText, IsTextPending, AllCount, FilteredCount, PendingCount](FMenuBuilder& Sub, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&)> Run)
 	{
 		Sub.AddMenuEntry(
 			FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
@@ -1442,25 +1475,25 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 
 		Sub.AddMenuEntry(
 			FText::Format(LOCTEXT("ExportFilteredLines", "Filtered lines ({0})"), FilteredCount),
-			LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker filter."),
+			LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker and search filters."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker]()
+				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, PassesText]()
 				{
-					Run(AssetData, [PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); });
+					Run(AssetData, [PassesSpeaker, PassesText](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line); });
 				}),
-				FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive; })));
+				FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive || !TextFilter.IsEmpty(); })));
 
 		Sub.AddMenuEntry(
 			FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
 			CultureFilter.IsEmpty()
-				? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker filter applies).")
-				: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker filter applies)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
+				? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker and search filters apply).")
+				: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker and search filters apply)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, IsTextPending]()
+				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, PassesText, IsTextPending]()
 				{
-					Run(AssetData, [PassesSpeaker, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && IsTextPending(Line); });
+					Run(AssetData, [PassesSpeaker, PassesText, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line) && IsTextPending(Line); });
 				}),
 				FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
 	};

@@ -38,6 +38,8 @@ private:
 	TSharedPtr<SVerticalBox> Rows;
 
 	// Filters (mirroring both hosts' toolbars).
+	/** Only rows whose source text contains this (lines and project texts; "" = no search). */
+	FString TextFilter;
 	/** Only this culture's card ("" = every culture; may be the native culture). */
 	FString CultureFilter;
 	/** When active, only lines of this speaker asset name count ("" = narration lines). */
