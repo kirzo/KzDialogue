@@ -104,10 +104,11 @@ private:
 		TArray<FString> SourceLocations;
 	};
 
-	/** One asset's rows inside a culture card; multi-asset hosts render a header row per group. */
+	/** One asset's rows inside a culture card; multi-asset hosts render a header row per group. A null asset is the Other-texts group, or the Speakers group when flagged. */
 	struct FAssetLines
 	{
 		TWeakObjectPtr<UKzDialogueAsset> Asset;
+		bool bSpeakerGroup = false;
 		TArray<FLineRow> Lines;
 	};
 
