@@ -152,7 +152,7 @@ void FKzLocQuery::EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace
 	LocHelper->EnumerateSourceTexts([&Callback](TSharedRef<FManifestEntry> Entry) -> bool
 	{
 		const FString Namespace = Entry->Namespace.GetString();
-		if (!Namespace.StartsWith(TEXT("KzDialogue.")) && !Namespace.StartsWith(TEXT("KzSpeaker.")))
+		if (!Namespace.StartsWith(TEXT("KzDialogue.")) && !Namespace.StartsWith(TEXT("KzSpeaker.")) && !Namespace.StartsWith(TEXT("KzWord.")))
 		{
 			for (const FManifestContext& Context : Entry->Contexts)
 			{
