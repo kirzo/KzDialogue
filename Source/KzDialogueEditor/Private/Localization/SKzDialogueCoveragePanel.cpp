@@ -340,6 +340,26 @@ void SKzDialogueCoveragePanel::Refresh()
 		return;
 	}
 
+	// Speaker assets referenced by the hosted assets: their name fields are localizable and
+	// belong to the coverage the same way the CSV export ships them.
+	TArray<UKzSpeakerAsset*> Speakers;
+	{
+		TSet<UKzSpeakerAsset*> SpeakerSet;
+		for (UKzDialogueAsset* AssetPtr : LiveAssets)
+		{
+			for (const FKzDialogueLine& Line : AssetPtr->Lines)
+			{
+				if (Line.Speaker.Asset) { SpeakerSet.Add(Line.Speaker.Asset); }
+			}
+			for (const FKzDialogueAlias& Alias : AssetPtr->Aliases)
+			{
+				if (Alias.Speaker.Asset) { SpeakerSet.Add(Alias.Speaker.Asset); }
+			}
+		}
+		Speakers = SpeakerSet.Array();
+		Speakers.Sort([](const UKzSpeakerAsset& A, const UKzSpeakerAsset& B) { return A.GetName() < B.GetName(); });
+	}
+
 	// Non-dialogue gathered texts (UI, menus...), collected once and evaluated per culture.
 	struct FOtherText
 	{
@@ -504,6 +524,85 @@ void SKzDialogueCoveragePanel::Refresh()
 					Row.StateColor = KzDoneColor;
 				}
 				Group.Lines.Add(MoveTemp(Row));
+			}
+		}
+
+		// Speaker name fields, one row each in their own group: same text pipeline as the
+		// lines (state, stale diff, inline translation), counted into the Text bar like the
+		// CSV export and coverage do. Click opens the speaker asset.
+		if (bShowDialogueLines && !Speakers.IsEmpty())
+		{
+			FAssetLines& SpeakerGroup = Groups.AddDefaulted_GetRef();
+			SpeakerGroup.bSpeakerGroup = true;
+
+			for (UKzSpeakerAsset* Speaker : Speakers)
+			{
+				if (bSpeakerFilterActive && Speaker->GetName() != SpeakerFilter) { continue; }
+
+				auto AddSpeakerRow = [&](const TCHAR* FieldName, const FText& Value)
+				{
+					const TOptional<FString> FieldNamespace = FTextInspector::GetNamespace(Value);
+					const TOptional<FString> FieldKey = FTextInspector::GetKey(Value);
+					const FString* FieldSource = FTextInspector::GetSourceString(Value);
+					if (Value.IsEmpty() || !FieldNamespace.IsSet() || !FieldKey.IsSet() || !FieldSource) { return; }
+					if (!TextFilter.IsEmpty() && !FieldSource->Contains(TextFilter, ESearchCase::IgnoreCase)) { return; }
+
+					++TextTotal;
+
+					FString ArchiveSource;
+					FString ArchiveTranslation;
+					const bool bHasEntry = Query.GetArchiveEntry(FieldNamespace.GetValue(), FieldKey.GetValue(), Culture, ArchiveSource, ArchiveTranslation);
+
+					FLineRow Row;
+					Row.Label = FText::FromString(FlattenLabel(FString::Printf(TEXT("(%s) %s: %s"), *Speaker->GetName(), FieldName, **FieldSource)));
+					Row.Translation = FText::FromString(bHasEntry ? ArchiveTranslation : FString());
+					Row.TranslationCulture = Culture;
+					Row.TranslationIdentities.Emplace(FieldNamespace.GetValue(), FieldKey.GetValue());
+					Row.TranslationSource = *FieldSource;
+					Row.SourceLocations.Add(Speaker->GetPathName());
+
+					switch (Query.GetTextState(FieldNamespace.GetValue(), FieldKey.GetValue(), *FieldSource, Culture))
+					{
+					case EKzTranslationState::Translated:
+						++TextDone;
+						Row.State = LOCTEXT("RowOk", "ok");
+						Row.StateColor = KzDoneColor;
+						break;
+					case EKzTranslationState::Stale:
+						++TextStale;
+						++PendingCount;
+						PendingWords += CountWords(*FieldSource);
+						Row.bPending = true;
+						Row.State = LOCTEXT("PendingStale", "stale");
+						Row.StateColor = KzStaleColor;
+						if (bHasEntry)
+						{
+							Row.Tooltip = FText::Format(
+								LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
+								FText::FromString(ArchiveSource), FText::FromString(*FieldSource), FText::FromString(ArchiveTranslation));
+						}
+						break;
+					default:
+						++PendingCount;
+						PendingWords += CountWords(*FieldSource);
+						Row.bPending = true;
+						Row.State = LOCTEXT("PendingMissing", "text");
+						Row.StateColor = KzMissingColor;
+						break;
+					}
+
+					if (Row.Tooltip.IsEmpty())
+					{
+						Row.Tooltip = FText::Format(LOCTEXT("SpeakerRowTip", "{0}\n\nClick: open the speaker asset."), Row.Label);
+					}
+					SpeakerGroup.Lines.Add(MoveTemp(Row));
+				};
+
+				AddSpeakerRow(TEXT("DisplayName"), Speaker->DisplayName);
+				AddSpeakerRow(TEXT("GivenName"), Speaker->GivenName);
+				AddSpeakerRow(TEXT("FamilyName"), Speaker->FamilyName);
+				AddSpeakerRow(TEXT("Honorific"), Speaker->Honorific);
+				AddSpeakerRow(TEXT("Qualifier"), Speaker->Qualifier);
 			}
 		}
 
@@ -704,12 +803,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	}
 
 	// The ok-filters shape which rows show; the counters above ignore them on purpose.
-	// Dialogue lines and the project-texts group render as SEPARATE areas: they are not lines.
+	// Dialogue lines, speakers and the project-texts group render as SEPARATE areas.
 	const FAssetLines* OtherGroup = nullptr;
+	const FAssetLines* SpeakerGroup = nullptr;
 	TArray<const FAssetLines*> AssetGroups;
 	for (const FAssetLines& Group : Groups)
 	{
 		if (Group.Asset.IsValid()) { AssetGroups.Add(&Group); }
+		else if (Group.bSpeakerGroup) { SpeakerGroup = &Group; }
 		else { OtherGroup = &Group; }
 	}
 
@@ -807,6 +908,23 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	if (VisibleCount > 0)
 	{
 		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), ListBox, AssetAreas);
+	}
+
+	if (SpeakerGroup)
+	{
+		TArray<const FLineRow*> Visible = FilterVisible(*SpeakerGroup);
+		if (!Visible.IsEmpty())
+		{
+			TSharedRef<SVerticalBox> SpeakerBox = SNew(SVerticalBox);
+			for (const FLineRow* RowPtr : Visible)
+			{
+				SpeakerBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+				[
+					MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
+				];
+			}
+			AddArea(FText::Format(LOCTEXT("SpeakersArea", "Speakers ({0})"), Visible.Num()), SpeakerBox, nullptr);
+		}
 	}
 
 	if (OtherGroup)
