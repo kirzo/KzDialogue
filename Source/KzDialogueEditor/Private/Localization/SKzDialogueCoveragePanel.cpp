@@ -316,9 +316,13 @@ void SKzDialogueCoveragePanel::Refresh()
 	TArray<FOtherText> OtherTexts;
 	if (bIncludeProjectTexts)
 	{
-		Query.EnumerateOtherTexts([&OtherTexts](const FString& Namespace, const FString& Key, const FString& Source)
+		Query.EnumerateOtherTexts([this, &OtherTexts](const FString& Namespace, const FString& Key, const FString& Source)
 		{
-			OtherTexts.Add({ Namespace, Key, Source });
+			// Skip identities already handled from this panel; the manifest keeps them until the next Gather.
+			if (!HandledIdentities.Contains(Namespace + TEXT(",") + Key))
+			{
+				OtherTexts.Add({ Namespace, Key, Source });
+			}
 		});
 	}
 
@@ -1094,6 +1098,16 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 	int32 Skipped = 0;
 	const bool bRan = FKzDialogueTranslationCsv::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped);
 
+	// Fully rewritten: hide the identities right away instead of waiting for the next Gather.
+	// Partial rewrites (C++-authored occurrences skipped) stay visible; the manifest still matches them.
+	if (bRan && Skipped == 0)
+	{
+		for (const TPair<FString, FString>& Identity : Identities)
+		{
+			HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
+		}
+	}
+
 	FNotificationInfo Info(bRan
 		? FText::Format(LOCTEXT("NonLocDone", "Non-localizable: {0} occurrence(s) rewritten, {1} skipped (see the output log). Save the dirty assets and run Gather to drop them from the target."), Rewritten, Skipped)
 		: Error);
@@ -1111,7 +1125,21 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	FText Error;
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
-	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped);
+	TPair<FString, FString> Canonical;
+	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped, &Canonical);
+
+	// Fully merged: hide the losing identities right away; the canonical one stays as the single row.
+	// Partial merges (C++-authored occurrences skipped) stay visible; the manifest still matches them.
+	if (bRan && Skipped == 0)
+	{
+		for (const TPair<FString, FString>& Identity : Identities)
+		{
+			if (Identity != Canonical)
+			{
+				HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
+			}
+		}
+	}
 
 	FNotificationInfo Info(bRan
 		? FText::Format(LOCTEXT("MergeDone", "Merge: {0} occurrence(s) re-keyed, {1} skipped (see the output log). Save the dirty assets and run Gather to see them as one text."), Rewritten, Skipped)

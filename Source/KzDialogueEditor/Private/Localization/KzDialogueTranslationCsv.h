@@ -171,7 +171,7 @@ public:
 	 * gather then collapses them into a single localizable entry. C++-authored texts cannot be
 	 * rewritten and count as skipped. Dirty assets must be saved and Gather re-run afterwards.
 	 */
-	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped);
+	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TPair<FString, FString>* OutCanonical = nullptr);
 
 	/**
 	 * Rewrites every ASSET-authored occurrence of the given texts as culture invariant
