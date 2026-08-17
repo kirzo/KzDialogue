@@ -1166,13 +1166,19 @@ namespace
 	 * properties, data table rows (raw struct memory) and Blueprint graph pin defaults; C++
 	 * code sites cannot be rewritten and are logged with ManualFixHint. Rewritten blueprints
 	 * are marked modified so the save recompiles the gathered bytecode.
+	 *
+	 * Occurrences already in the target state (recognised by IsAlreadyTransformed: a previous
+	 * rewrite whose Gather has not run yet) count as done, not skipped. OutHandled collects the
+	 * identities with no skipped location at all: their manifest entries are pure leftovers the
+	 * caller may hide until the next Gather.
 	 */
-	void RewriteAuthoredTextOccurrences(const FKzLocQuery& Query, const TArray<TPair<FString, FString>>& Identities, const FString& SourceText, TFunctionRef<FText(const FText&)> Transform, const FString& ManualFixHint, int32& OutRewritten, int32& OutSkipped)
+	void RewriteAuthoredTextOccurrences(const FKzLocQuery& Query, const TArray<TPair<FString, FString>>& Identities, const FString& SourceText, TFunctionRef<FText(const FText&)> Transform, TFunctionRef<bool(const FText&)> IsAlreadyTransformed, const FString& ManualFixHint, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled)
 	{
 		for (const TPair<FString, FString>& Identity : Identities)
 		{
 			const FString& Namespace = Identity.Key;
 			const FString& Key = Identity.Value;
+			bool bIdentityFullyHandled = true;
 
 			const TArray<FString> Locations = Query.GetSourceLocations(Namespace, Key);
 			if (Locations.IsEmpty())
@@ -1189,6 +1195,7 @@ namespace
 				if (!Location.StartsWith(TEXT("/")))
 				{
 					++OutSkipped;
+					bIdentityFullyHandled = false;
 					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: '%s,%s' is authored in code (%s); %s."), *Namespace, *Key, *Location, *ManualFixHint);
 					continue;
 				}
@@ -1204,16 +1211,26 @@ namespace
 				if (!Package)
 				{
 					++OutSkipped;
+					bIdentityFullyHandled = false;
 					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: could not load package '%s' for '%s,%s'."), *PackageName, *Namespace, *Key);
 					continue;
 				}
 
 				bool bRewrote = false;
+				bool bAlreadyTransformed = false;
 				int32 NearMisses = 0;
 
 				auto TryRewriteText = [&](UObject* Owner, const FText* TextPtr)
 				{
 					if (!TextPtr) { return; }
+
+					// A previous rewrite may already have transformed this occurrence while
+					// the manifest still lists the old identity (Gather pending).
+					if (IsAlreadyTransformed(*TextPtr))
+					{
+						bAlreadyTransformed = true;
+						return;
+					}
 
 					const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(*TextPtr);
 					const TOptional<FString> TextKey = FTextInspector::GetKey(*TextPtr);
@@ -1288,17 +1305,27 @@ namespace
 					Package->MarkPackageDirty();
 					++OutRewritten;
 				}
+				else if (bAlreadyTransformed)
+				{
+					UE_LOG(LogKzDialogueL10N, Log, TEXT("Rewrite: '%s,%s' was already rewritten inside '%s'; the manifest catches up on the next Gather."), *Namespace, *Key, *PackageName);
+				}
 				else
 				{
 					++OutSkipped;
+					bIdentityFullyHandled = false;
 					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: '%s,%s' not found inside '%s' (%d near-miss(es) logged above; stale manifest needing a re-gather, or storage this walk cannot reach)."), *Namespace, *Key, *PackageName, NearMisses);
 				}
+			}
+
+			if (bIdentityFullyHandled && OutHandled)
+			{
+				OutHandled->Add(Identity);
 			}
 		}
 	}
 }
 
-bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TPair<FString, FString>* OutCanonical)
+bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled)
 {
 	OutRewritten = 0;
 	OutSkipped = 0;
@@ -1334,24 +1361,27 @@ bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, c
 	}
 	const FString CanonicalNamespace = Identities[CanonicalIndex].Key;
 	const FString CanonicalKey = Identities[CanonicalIndex].Value;
-	if (OutCanonical)
-	{
-		*OutCanonical = Identities[CanonicalIndex];
-	}
 
 	TArray<TPair<FString, FString>> ToRewrite = Identities;
 	ToRewrite.RemoveAt(CanonicalIndex);
 
 	RewriteAuthoredTextOccurrences(Query, ToRewrite, SourceText,
 		[&CanonicalNamespace, &CanonicalKey](const FText& Text) { return FText::ChangeKey(CanonicalNamespace, CanonicalKey, Text); },
+		[&CanonicalNamespace, &CanonicalKey, &SourceText](const FText& Text)
+		{
+			const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(Text);
+			const TOptional<FString> TextKey = FTextInspector::GetKey(Text);
+			const FString* TextSource = FTextInspector::GetSourceString(Text);
+			return TextNamespace.IsSet() && TextKey.IsSet() && TextSource && TextKey.GetValue() == CanonicalKey && TextNamespaceUtil::StripPackageNamespace(TextNamespace.GetValue()) == CanonicalNamespace && *TextSource == SourceText;
+		},
 		FString::Printf(TEXT("change its NSLOCTEXT/LOCTEXT to namespace '%s', key '%s' by hand"), *CanonicalNamespace, *CanonicalKey),
-		OutRewritten, OutSkipped);
+		OutRewritten, OutSkipped, OutHandled);
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge to '%s,%s': %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), *CanonicalNamespace, *CanonicalKey, OutRewritten, OutSkipped);
 	return true;
 }
 
-bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped)
+bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled)
 {
 	OutRewritten = 0;
 	OutSkipped = 0;
@@ -1371,8 +1401,9 @@ bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceTex
 			const FString* Source = FTextInspector::GetSourceString(Text);
 			return FText::AsCultureInvariant(Source ? *Source : Text.ToString());
 		},
+		[&SourceText](const FText& Text) { return Text.IsCultureInvariant() && Text.ToString() == SourceText; },
 		FString(TEXT("wrap it in FText::AsCultureInvariant / INVTEXT by hand")),
-		OutRewritten, OutSkipped);
+		OutRewritten, OutSkipped, OutHandled);
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Non-localizable: %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), OutRewritten, OutSkipped);
 	return true;

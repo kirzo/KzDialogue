@@ -1096,16 +1096,14 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 	FText Error;
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
-	const bool bRan = FKzDialogueTranslationCsv::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped);
+	TArray<TPair<FString, FString>> Handled;
+	const bool bRan = FKzDialogueTranslationCsv::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped, &Handled);
 
-	// Fully rewritten: hide the identities right away instead of waiting for the next Gather.
-	// Partial rewrites (C++-authored occurrences skipped) stay visible; the manifest still matches them.
-	if (bRan && Skipped == 0)
+	// Fully resolved identities leave the view right away instead of waiting for the next
+	// Gather; ones with skipped occurrences (C++ sites, unreachable storage) stay visible.
+	for (const TPair<FString, FString>& Identity : Handled)
 	{
-		for (const TPair<FString, FString>& Identity : Identities)
-		{
-			HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
-		}
+		HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
 	}
 
 	FNotificationInfo Info(bRan
@@ -1114,7 +1112,7 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 	Info.ExpireDuration = 8.0f;
 	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
 	{
-		Item->SetCompletionState(bRan && Rewritten > 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+		Item->SetCompletionState(bRan && (Rewritten > 0 || Handled.Num() > 0) ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
 	Refresh();
@@ -1125,20 +1123,14 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	FText Error;
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
-	TPair<FString, FString> Canonical;
-	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped, &Canonical);
+	TArray<TPair<FString, FString>> Handled;
+	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped, &Handled);
 
-	// Fully merged: hide the losing identities right away; the canonical one stays as the single row.
-	// Partial merges (C++-authored occurrences skipped) stay visible; the manifest still matches them.
-	if (bRan && Skipped == 0)
+	// Fully merged identities leave the view right away; the canonical one stays as the single
+	// row. Ones with skipped occurrences (C++ sites, unreachable storage) stay visible.
+	for (const TPair<FString, FString>& Identity : Handled)
 	{
-		for (const TPair<FString, FString>& Identity : Identities)
-		{
-			if (Identity != Canonical)
-			{
-				HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
-			}
-		}
+		HandledIdentities.Add(Identity.Key + TEXT(",") + Identity.Value);
 	}
 
 	FNotificationInfo Info(bRan
@@ -1147,7 +1139,7 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	Info.ExpireDuration = 8.0f;
 	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
 	{
-		Item->SetCompletionState(bRan && Rewritten > 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+		Item->SetCompletionState(bRan && (Rewritten > 0 || Handled.Num() > 0) ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
 	Refresh();

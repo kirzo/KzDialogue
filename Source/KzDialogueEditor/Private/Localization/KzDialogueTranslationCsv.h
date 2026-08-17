@@ -170,15 +170,18 @@ public:
 	 * share one canonical namespace/key (the identity with the most existing translations wins):
 	 * gather then collapses them into a single localizable entry. C++-authored texts cannot be
 	 * rewritten and count as skipped. Dirty assets must be saved and Gather re-run afterwards.
+	 * OutHandled collects the non-canonical identities fully resolved (rewritten now or by an
+	 * earlier merge): their manifest entries are leftovers safe to hide until the next Gather.
 	 */
-	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TPair<FString, FString>* OutCanonical = nullptr);
+	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
 
 	/**
 	 * Rewrites every ASSET-authored occurrence of the given texts as culture invariant
 	 * (non-localizable): gather then drops them from the manifest. C++-authored texts cannot
 	 * be rewritten and count as skipped. Dirty assets must be saved and Gather re-run.
+	 * OutHandled collects the identities fully resolved, as in MergeIdenticalTexts.
 	 */
-	static bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped);
+	static bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
 
 	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
 	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
