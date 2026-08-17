@@ -312,6 +312,19 @@ namespace
 		return FString::Printf(TEXT("\"%s\""), *Escaped);
 	}
 
+	FString NormalizeNewlines(FString Value)
+	{
+		Value.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
+		Value.ReplaceInline(TEXT("\r"), TEXT("\n"));
+		return Value;
+	}
+
+	/** Newline-flavor-insensitive source comparison: file round-trips (the PO \n escape, spreadsheet editors) lose the original CRLF/LF flavor, and that must not count as drift. */
+	bool SourceMatches(const FString& A, const FString& B)
+	{
+		return NormalizeNewlines(A).Equals(NormalizeNewlines(B), ESearchCase::CaseSensitive);
+	}
+
 	/** Archives synced from source control are often read-only on disk and the JSON save just fails; imports write them directly, so drop the flag (logged) instead of failing. */
 	void EnsureArchiveWritable(const FKzLocTargetInfo& Target, const FString& Culture)
 	{
@@ -794,7 +807,8 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		const TArray<const TCHAR*>& Cells = Rows[RowIdx];
 		auto Cell = [&Cells](const int32* Col) { return Cells.IsValidIndex(*Col) ? FString(Cells[*Col]) : FString(); };
 
-		const FString Translation = Cell(TranslationCol);
+		// Spreadsheet round-trips rewrite in-cell newlines as CRLF; archives keep plain LF.
+		const FString Translation = NormalizeNewlines(Cell(TranslationCol));
 		if (Translation.IsEmpty())
 		{
 			++OutStats.Untranslated;
@@ -816,7 +830,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved row %d: project text '%s,%s' is not in the manifest anymore. Re-run Gather Text or drop the row."), RowIdx + 1, *Namespace, *Key);
 				continue;
 			}
-			if (SourceTextCol && !ManifestEntry->Source.Text.Equals(Cell(SourceTextCol), ESearchCase::CaseSensitive))
+			if (SourceTextCol && !SourceMatches(ManifestEntry->Source.Text, Cell(SourceTextCol)))
 			{
 				++OutStats.Drifted;
 				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: project text '%s,%s' changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Namespace, *Key);
@@ -882,7 +896,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			// A source-fix import may have rewritten the asset after this CSV was exported;
 			// the translation is still valid when the row's SourceText matches the current one.
 			const FString* CurrentSource = FTextInspector::GetSourceString(*SourceText);
-			if (!SourceTextCol || !CurrentSource || !CurrentSource->Equals(Cell(SourceTextCol), ESearchCase::CaseSensitive))
+			if (!SourceTextCol || !CurrentSource || !SourceMatches(*CurrentSource, Cell(SourceTextCol)))
 			{
 				++OutStats.Drifted;
 				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: asset '%s', key '%s'. The source text changed after this CSV was exported; needs retranslation."), RowIdx + 1, *AssetPath, *Key);
@@ -1263,7 +1277,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved PO entry '%s,%s': not in the manifest anymore. Re-run Gather Text or drop the entry."), *Namespace, *Key);
 			return;
 		}
-		if (!ManifestEntry->Source.Text.Equals(Id, ESearchCase::CaseSensitive))
+		if (!SourceMatches(ManifestEntry->Source.Text, Id))
 		{
 			++OutStats.Drifted;
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted PO entry '%s,%s': the source text changed after this file was exported; needs retranslation."), *Namespace, *Key);
@@ -1675,7 +1689,9 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		const TArray<const TCHAR*>& Cells = Rows[RowIdx];
 		auto Cell = [&Cells](const int32* Col) { return Cells.IsValidIndex(*Col) ? FString(Cells[*Col]) : FString(); };
 
-		const FString CsvSource = Cell(SourceTextCol);
+		// Normalized to LF: spreadsheet round-trips rewrite in-cell newlines as CRLF, and
+		// authored texts should not inherit that.
+		const FString CsvSource = NormalizeNewlines(Cell(SourceTextCol));
 		const FString AssetPath = Cell(AssetCol);
 		const FString Namespace = Cell(NamespaceCol);
 		const FString Key = Cell(KeyCol);
@@ -1698,7 +1714,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: project text '%s,%s' is not in the manifest anymore."), RowIdx + 1, *Namespace, *Key);
 				continue;
 			}
-			if (ManifestSource.Equals(CsvSource, ESearchCase::CaseSensitive))
+			if (SourceMatches(ManifestSource, CsvSource))
 			{
 				++OutStats.Unchanged;
 				continue;
@@ -1779,7 +1795,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		}
 
 		const FString* CurrentSource = FTextInspector::GetSourceString(*TargetText);
-		if (CurrentSource && CurrentSource->Equals(CsvSource, ESearchCase::CaseSensitive))
+		if (CurrentSource && SourceMatches(*CurrentSource, CsvSource))
 		{
 			++OutStats.Unchanged;
 			continue;
