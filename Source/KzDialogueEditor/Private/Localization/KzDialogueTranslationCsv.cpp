@@ -923,6 +923,37 @@ void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAss
 	OnExportClicked(MoveTemp(SelectedAssets), LineFilter, OtherIdentities, TranslationCulture);
 }
 
+bool FKzDialogueTranslationCsv::WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError)
+{
+	FKzLocTargetInfo Target;
+	if (!ReadLocTargetInfo(Target, OutError)) { return false; }
+
+	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
+	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError) ||
+		!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError))
+	{
+		return false;
+	}
+
+	int32 Written = 0;
+	for (const TPair<FString, FString>& Identity : Identities)
+	{
+		if (LocHelper.ImportTranslation(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr, FLocItem(Source), FLocItem(Translation), false))
+		{
+			++Written;
+		}
+	}
+	if (Written == 0)
+	{
+		OutError = LOCTEXT("WriteTranslationFailed", "The translation could not be written into the archive (identity no longer gathered?).");
+		return false;
+	}
+
+	EnsureArchiveWritable(Target, Culture);
+	return LocHelper.SaveArchive(Culture, &OutError);
+}
+
 FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
 {
 	const FCulturePtr CulturePtr = FInternationalization::Get().GetCulture(Culture);

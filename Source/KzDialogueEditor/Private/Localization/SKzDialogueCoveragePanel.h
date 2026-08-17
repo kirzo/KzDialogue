@@ -78,8 +78,13 @@ private:
 		FLinearColor StateColor;
 		/** Optional detail (e.g. the stale diff); replaces the default row tooltip when set. */
 		FText Tooltip;
-		/** This culture's current translation (foreign cards), shown dimmed at the row's right edge. */
+		/** This culture's current translation (foreign cards), shown dimmed in the row's right half. */
 		FText Translation;
+
+		/** Inline translation editing: card culture plus the identities sharing this row's source. Empty culture = the row has no translation column (native card). */
+		FString TranslationCulture;
+		TArray<TPair<FString, FString>> TranslationIdentities;
+		FString TranslationSource;
 		bool bPending = false;
 		/** The pending work involves audio; the Missing voice filter keeps only these. */
 		bool bAudioWork = false;
@@ -120,6 +125,9 @@ private:
 
 	/** Accepts the current text for a stale take: re-stamps RecordedTextHash without re-recording. */
 	void AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
+
+	/** Writes an inline-edited translation into the culture's archive (every identity of the row) and refreshes on the next tick. */
+	void CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation);
 
 	/** Rewrites the identical-source occurrences to one shared namespace/key (MergeIdenticalTexts) and reports the result. */
 	void MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities);
