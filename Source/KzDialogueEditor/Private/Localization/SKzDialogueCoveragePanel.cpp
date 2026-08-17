@@ -1449,8 +1449,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 	TSharedRef<FKzLocQuery> Query = MakeShared<FKzLocQuery>();
 	FText QueryError;
 	TArray<FString> PendingCultures;
+	TArray<FString> ExportCultures;
 	if (Query->Load(QueryError))
 	{
+		ExportCultures = Query->GetTarget().ForeignCultures;
 		if (CultureFilter.IsEmpty())
 		{
 			PendingCultures = Query->GetTarget().ForeignCultures;
@@ -1507,46 +1509,81 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 	const int32 OtherCount = OtherIdentities.IsValid() ? OtherIdentities->Num() : 0;
 	const TSharedPtr<TSet<FString>> RideAlong = bExportProjectTexts && OtherCount > 0 ? OtherIdentities : TSharedPtr<TSet<FString>>();
 
-	// Both formats share the same scopes; each submenu entry runs the matching interactive flow.
-	auto AddScopeEntries = [this, AssetData, PassesSpeaker, PassesText, IsTextPending, AllCount, FilteredCount, PendingCount](FMenuBuilder& Sub, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&)> Run)
+	// Both formats share the same scopes; each scope opens the culture list, like the Import
+	// menu. The chosen culture pre-fills the file with its current translations and names it
+	// (CSV "_es" suffix, PO per-culture folder); PO can also write every culture at once.
+	auto AddScopeEntries = [AssetData, PassesSpeaker, PassesText, IsTextPending, AllCount, FilteredCount, PendingCount, ExportCultures, bFiltersActive = bSpeakerFilterActive || !TextFilter.IsEmpty()](FMenuBuilder& Sub, bool bAllCulturesEntry, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&, const FString&)> Run)
 	{
-		Sub.AddMenuEntry(
+		auto AddCultureLeaves = [AssetData, ExportCultures, Run](FMenuBuilder& CultureSub, bool bWithAllCultures, FKzExportLineFilter Filter, bool bEnabled)
+		{
+			if (bWithAllCultures)
+			{
+				CultureSub.AddMenuEntry(
+					LOCTEXT("ExportEveryCulture", "All cultures"),
+					LOCTEXT("ExportEveryCultureTip", "One file per foreign culture, each pre-filled with its translations."),
+					FSlateIcon(),
+					FUIAction(
+						FExecuteAction::CreateLambda([AssetData, Run, Filter]() { Run(AssetData, Filter, FString()); }),
+						FCanExecuteAction::CreateLambda([bEnabled]() { return bEnabled; })));
+			}
+			else if (ExportCultures.IsEmpty())
+			{
+				CultureSub.AddMenuEntry(
+					LOCTEXT("NoExportCultures", "No localization target cultures found"),
+					FText::GetEmpty(),
+					FSlateIcon(),
+					FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([] { return false; })));
+			}
+			for (const FString& Culture : ExportCultures)
+			{
+				CultureSub.AddMenuEntry(
+					FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+					FText::Format(LOCTEXT("ExportCultureEntryTip", "Pre-fill the file with the current '{0}' translations."), FText::FromString(Culture)),
+					FSlateIcon(),
+					FUIAction(
+						FExecuteAction::CreateLambda([AssetData, Run, Filter, Culture]() { Run(AssetData, Filter, Culture); }),
+						FCanExecuteAction::CreateLambda([bEnabled]() { return bEnabled; })));
+			}
+		};
+
+		Sub.AddSubMenu(
 			FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
 			LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([AssetData, Run]() { Run(AssetData, nullptr); })));
+			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry](FMenuBuilder& CultureSub)
+			{
+				AddCultureLeaves(CultureSub, bAllCulturesEntry, nullptr, true);
+			}));
 
-		Sub.AddMenuEntry(
+		Sub.AddSubMenu(
 			FText::Format(LOCTEXT("ExportFilteredLines", "Filtered lines ({0})"), FilteredCount),
 			LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker and search filters."),
-			FSlateIcon(),
-			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, PassesText]()
-				{
-					Run(AssetData, [PassesSpeaker, PassesText](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line); });
-				}),
-				FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive || !TextFilter.IsEmpty(); })));
+			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry, PassesSpeaker, PassesText, bFiltersActive](FMenuBuilder& CultureSub)
+			{
+				AddCultureLeaves(CultureSub, bAllCulturesEntry,
+					[PassesSpeaker, PassesText](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line); },
+					bFiltersActive);
+			}));
 
-		Sub.AddMenuEntry(
+		Sub.AddSubMenu(
 			FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
-			CultureFilter.IsEmpty()
-				? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker and search filters apply).")
-				: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker and search filters apply)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
-			FSlateIcon(),
-			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, PassesText, IsTextPending]()
-				{
-					Run(AssetData, [PassesSpeaker, PassesText, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line) && IsTextPending(Line); });
-				}),
-				FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
+			LOCTEXT("ExportPendingLinesTip", "Export only the lines whose text is missing or stale in the cultures in scope (speaker and search filters apply)."),
+			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry, PassesSpeaker, PassesText, IsTextPending, PendingCount](FMenuBuilder& CultureSub)
+			{
+				AddCultureLeaves(CultureSub, bAllCulturesEntry,
+					[PassesSpeaker, PassesText, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line) && IsTextPending(Line); },
+					PendingCount > 0);
+			}));
 	};
 
 	MenuBuilder.AddSubMenu(
 		LOCTEXT("ExportCsvSub", "Translation CSV"),
-		LOCTEXT("ExportCsvSubTip", "One CSV with the source texts and context columns (speaker, notes, max characters, audio, drift hash). Project texts join as asset-less rows while the check below is on."),
+		LOCTEXT("ExportCsvSubTip", "One CSV per chosen culture with the source texts, its current translations (stale ones as reference in the StaleTranslation column) and context columns (speaker, notes, max characters, audio, drift hash). Project texts join as asset-less rows while the check below is on."),
 		FNewMenuDelegate::CreateLambda([AddScopeEntries, RideAlong](FMenuBuilder& Sub)
 		{
-			AddScopeEntries(Sub, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportInteractive(MoveTemp(Data), Filter, RideAlong); });
+			AddScopeEntries(Sub, /*bAllCulturesEntry=*/false, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter, const FString& Culture)
+			{
+				FKzDialogueTranslationCsv::ExportInteractive(MoveTemp(Data), Filter, RideAlong, Culture);
+			});
 		}));
 
 	MenuBuilder.AddSubMenu(
@@ -1554,7 +1591,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		LOCTEXT("ExportPoSubTip", "One .po per culture (the standard translation-tool format): context travels as comments, existing translations fill msgstr, stale ones are flagged fuzzy. Project texts join as <Target>_Other.po files while the check below is on."),
 		FNewMenuDelegate::CreateLambda([AddScopeEntries, RideAlong](FMenuBuilder& Sub)
 		{
-			AddScopeEntries(Sub, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter, RideAlong.IsValid(), RideAlong); });
+			AddScopeEntries(Sub, /*bAllCulturesEntry=*/true, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter, const FString& Culture)
+			{
+				FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter, RideAlong.IsValid(), RideAlong, Culture);
+			});
 		}));
 
 	// Everything the target gathers OUTSIDE the dialogue pipeline; project-scope hosts only.
