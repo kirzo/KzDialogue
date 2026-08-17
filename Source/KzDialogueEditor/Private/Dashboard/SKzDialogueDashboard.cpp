@@ -7,10 +7,13 @@
 #include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "FileHelpers.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "LocalizationCommandletTasks.h"
 #include "LocalizationModule.h"
+#include "LocalizationTargetTypes.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBox.h"
@@ -125,12 +128,28 @@ FReply SKzDialogueDashboard::OnGatherClicked()
 		return FReply::Handled();
 	}
 
+	// Same flow as the engine Localization Dashboard button: gather reads SAVED packages,
+	// so dirty ones get the save prompt first, with a bail-out warning when declined.
+	bool bPackagesNeededSaving = false;
+	const bool bPackagesSaved = FEditorFileUtils::SaveDirtyPackages(/*bPromptUserToSave=*/true, /*bSaveMapPackages=*/true, /*bSaveContentPackages=*/true, /*bFastSave=*/false, /*bNotifyNoPackagesSaved=*/false, /*bCanBeDeclined=*/true, &bPackagesNeededSaving);
+	if (bPackagesNeededSaving && !bPackagesSaved)
+	{
+		if (FMessageDialog::Open(EAppMsgType::OkCancel, LOCTEXT("UnsavedBeforeGatherMsg", "There are unsaved changes. These changes may not be gathered from correctly."), LOCTEXT("UnsavedBeforeGatherTitle", "Unsaved Changes Before Gather")) == EAppReturnType::Cancel)
+		{
+			return FReply::Handled();
+		}
+	}
+
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
 	if (!Window.IsValid()) { Window = FSlateApplication::Get().GetActiveTopLevelWindow(); }
 	if (!Window.IsValid()) { return FReply::Handled(); }
 
 	if (LocalizationCommandletTasks::GatherTextForTarget(Window.ToSharedRef(), Target))
 	{
+		// Keep the engine dashboard's word counts / conflict status in sync, like its own button does.
+		Target->UpdateWordCountsFromCSV();
+		Target->UpdateStatusFromConflictReport();
+
 		// The manifest/archives changed: a fresh panel re-reads them.
 		RebuildPanel();
 	}
