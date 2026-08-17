@@ -12,6 +12,9 @@
 #include "EdGraph/EdGraphPin.h"
 #include "Engine/Blueprint.h"
 #include "Engine/DataTable.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/PackageLocalizationUtil.h"
@@ -1263,6 +1266,25 @@ namespace
 				// properties, so both get their own passes next to the object property walk.
 				TArray<UObject*> Objects;
 				GetObjectsWithPackage(Package, Objects, /*bIncludeNestedObjects=*/true);
+
+				// Levels saved as one file per actor keep each actor in its own package, so
+				// the package walk cannot see them. Loading a non-partitioned level pulls its
+				// external actors into memory, so they join the walk here; world-partition
+				// actors left unloaded by streaming still count as skipped below.
+				if (const UWorld* World = UWorld::FindWorldInPackage(Package))
+				{
+					if (const ULevel* Level = World->PersistentLevel)
+					{
+						for (AActor* Actor : Level->Actors)
+						{
+							if (Actor && Actor->IsPackageExternal())
+							{
+								Objects.Add(Actor);
+								GetObjectsWithOuter(Actor, Objects, /*bIncludeNestedObjects=*/true);
+							}
+						}
+					}
+				}
 				for (UObject* Object : Objects)
 				{
 					for (TPropertyValueIterator<FTextProperty> It(Object->GetClass(), Object); It; ++It)
@@ -1300,6 +1322,8 @@ namespace
 				{
 					// Rewritten graph literals only reach the gathered bytecode after a
 					// recompile; marking the blueprint modified makes the save do it.
+					// Dirtying rides on each owner's Modify(): for external actors that is
+					// the actor's own package, not the level's.
 					for (UObject* Object : Objects)
 					{
 						if (UBlueprint* Blueprint = Cast<UBlueprint>(Object))
@@ -1307,7 +1331,6 @@ namespace
 							FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
 						}
 					}
-					Package->MarkPackageDirty();
 					++OutRewritten;
 				}
 				else if (bAlreadyTransformed)
