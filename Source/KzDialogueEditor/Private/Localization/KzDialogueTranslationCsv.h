@@ -153,17 +153,14 @@ public:
 	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
 	static void ImportInteractive(const FString& Culture);
 
-	/** Writes one .po per foreign culture into Directory (<Culture>/<Target>.po), scoped to the assets' lines passing LineFilter. Context (speaker, notes, max characters) travels as "#." comments; existing translations fill msgstr, stale ones flagged "#, fuzzy". */
-	static bool ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr);
+	/** Writes one .po per foreign culture into Directory (<Culture>/<Target>.po), scoped to the assets' lines passing LineFilter. Context (speaker, notes, max characters) travels as "#." comments; existing translations fill msgstr, stale ones flagged "#, fuzzy". OnlyCulture narrows the file set to that culture. */
+	static bool ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const FString& OnlyCulture = FString());
 
-	/** Interactive PO export: directory dialog + ExportPoFiles + notification. */
-	static void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr);
+	/** Interactive PO export: directory dialog + ExportPoFiles + notification. With bWithOtherTexts the same directory also receives the _Other files (OtherIdentities narrows them to those "Namespace,Key" texts); assets may then be empty for an Other-texts-only export. */
+	static void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, bool bWithOtherTexts = false, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& OnlyCulture = FString());
 
-	/** Writes one <Culture>/<Target>_Other.po per foreign culture with every gathered text outside the dialogue namespaces. Complements the dialogue exports without overlap. */
-	static bool ExportOtherTextsPoFiles(const FString& Directory, FText& OutError);
-
-	/** Interactive flow for ExportOtherTextsPoFiles: directory dialog + notification. */
-	static void ExportOtherTextsPoInteractive();
+	/** Writes one <Culture>/<Target>_Other.po per foreign culture with the gathered texts outside the dialogue namespaces (all of them, or just the "Namespace,Key" identities in OnlyIdentities). Complements the dialogue exports without overlap. */
+	static bool ExportOtherTextsPoFiles(const FString& Directory, FText& OutError, const TSet<FString>* OnlyIdentities = nullptr, const FString& OnlyCulture = FString());
 
 	/**
 	 * Rewrites every ASSET-authored occurrence of the given identical-source texts so they all

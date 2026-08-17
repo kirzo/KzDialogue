@@ -230,7 +230,7 @@ void SKzDialogueCoveragePanel::Refresh()
 	// Native card first: recording state of the source audio (missing takes, takes whose
 	// text drifted after recording). Lines that are text-only by design (VoicePolicy, line
 	// over project settings) are not recording work; text has nothing to translate.
-	if (CultureFilter.IsEmpty() || CultureFilter == Query.GetTarget().NativeCulture)
+	if (bShowDialogueLines && (CultureFilter.IsEmpty() || CultureFilter == Query.GetTarget().NativeCulture))
 	{
 		const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
 		const EKzLineVoicePolicy DefaultVoicePolicy = Settings && Settings->DefaultVoicePolicy != EKzLineVoicePolicy::Inherit
@@ -326,6 +326,12 @@ void SKzDialogueCoveragePanel::Refresh()
 		});
 	}
 
+	// With the lines eye off and nothing else to show, the foreign cards have no content.
+	if (!bShowDialogueLines && OtherTexts.IsEmpty())
+	{
+		return;
+	}
+
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
 	{
 		if (!CultureFilter.IsEmpty() && Culture != CultureFilter) { continue; }
@@ -341,6 +347,8 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		for (UKzDialogueAsset* AssetPtr : LiveAssets)
 		{
+			if (!bShowDialogueLines) { break; }
+
 			FAssetLines& Group = Groups.AddDefaulted_GetRef();
 			Group.Asset = AssetPtr;
 
@@ -578,10 +586,13 @@ void SKzDialogueCoveragePanel::Refresh()
 		}
 
 		TArray<TSharedRef<SWidget>> Bars;
-		Bars.Add(MakeProgressRow(LOCTEXT("BarText", "Text"), TextDone, TextTotal, TextStale, PendingWords));
-		if (AudioTotal > 0)
+		if (bShowDialogueLines)
 		{
-			Bars.Add(MakeProgressRow(LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal, 0));
+			Bars.Add(MakeProgressRow(LOCTEXT("BarText", "Text"), TextDone, TextTotal, TextStale, PendingWords));
+			if (AudioTotal > 0)
+			{
+				Bars.Add(MakeProgressRow(LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal, 0));
+			}
 		}
 		if (!OtherTexts.IsEmpty())
 		{
@@ -1261,6 +1272,17 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 	if (bIncludeProjectTexts)
 	{
 		MenuBuilder.AddMenuEntry(
+			LOCTEXT("ShowDialogueLines", "Dialogue lines"),
+			LOCTEXT("ShowDialogueLinesTip", "Show the dialogue line areas and their bars. Turn off to focus on (and export) only the project texts."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([this]() { bShowDialogueLines = !bShowDialogueLines; Refresh(); }),
+				FCanExecuteAction(),
+				FIsActionChecked::CreateLambda([this]() { return bShowDialogueLines; })),
+			NAME_None,
+			EUserInterfaceActionType::ToggleButton);
+
+		MenuBuilder.AddMenuEntry(
 			LOCTEXT("ShowOtherTexts", "Other texts"),
 			LOCTEXT("ShowOtherTextsTip", "Show the target's non-dialogue gathered texts (UI, menus...) as their own area and progress bar on each culture card."),
 			FSlateIcon(),
@@ -1305,38 +1327,36 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		return MenuBuilder.MakeWidget();
 	}
 
-	// Self-contained copies of the panel filters, so the export lambdas outlive the menu.
+	// Self-contained snapshot of the panel filters: the export is what-you-see, so hidden
+	// content (culture, speaker, funnel and eye filters) stays out of the files.
+	TSharedRef<FKzLocQuery> Query = MakeShared<FKzLocQuery>();
+	FText QueryError;
+	const bool bQueryLoaded = Query->Load(QueryError);
+
+	// Which cards are visible under the culture filter.
+	const FString NativeCulture = bQueryLoaded ? Query->GetTarget().NativeCulture : FString();
+	const bool bNativeVisible = CultureFilter.IsEmpty() || CultureFilter == NativeCulture;
+	TArray<FString> ForeignScope;
+	if (bQueryLoaded)
+	{
+		if (CultureFilter.IsEmpty()) { ForeignScope = Query->GetTarget().ForeignCultures; }
+		else if (CultureFilter != NativeCulture) { ForeignScope.Add(CultureFilter); }
+	}
+
 	auto PassesSpeaker = [bActive = bSpeakerFilterActive, Name = SpeakerFilter](const FKzDialogueLine& Line)
 	{
 		if (!bActive) { return true; }
 		return (Line.Speaker.Asset ? Line.Speaker.Asset->GetName() : FString()) == Name;
 	};
 
-	// Pending text is evaluated against the filtered culture, or every foreign culture when
-	// the filter is off. The native culture has no text to translate.
-	TSharedRef<FKzLocQuery> Query = MakeShared<FKzLocQuery>();
-	FText QueryError;
-	TArray<FString> PendingCultures;
-	if (Query->Load(QueryError))
-	{
-		if (CultureFilter.IsEmpty())
-		{
-			PendingCultures = Query->GetTarget().ForeignCultures;
-		}
-		else if (CultureFilter != Query->GetTarget().NativeCulture)
-		{
-			PendingCultures.Add(CultureFilter);
-		}
-	}
-
-	auto IsTextPending = [Query, PendingCultures](const FKzDialogueLine& Line)
+	auto IsTextPending = [Query, ForeignScope](const FKzDialogueLine& Line)
 	{
 		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
 		const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
 		const FString* Source = FTextInspector::GetSourceString(Line.Text);
 		if (Line.Text.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !Source) { return false; }
 
-		for (const FString& Culture : PendingCultures)
+		for (const FString& Culture : ForeignScope)
 		{
 			if (Query->GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture) != EKzTranslationState::Translated)
 			{
@@ -1346,84 +1366,113 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		return false;
 	};
 
-	int32 AllCount = 0;
-	int32 FilteredCount = 0;
-	int32 PendingCount = 0;
-	for (const UKzDialogueAsset* AssetPtr : LiveAssets)
+	// Audio work mirrors the cards: a missing or stale take on the native one, a missing
+	// localized variant on the foreign ones (unless the localized-audio eye is off).
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	const EKzLineVoicePolicy DefaultVoicePolicy = Settings && Settings->DefaultVoicePolicy != EKzLineVoicePolicy::Inherit ? Settings->DefaultVoicePolicy : EKzLineVoicePolicy::VoiceExpected;
+	auto HasAudioWork = [Query, ForeignScope, bNativeVisible, bLocalized = bShowLocalizedAudio, DefaultVoicePolicy](const FKzDialogueLine& Line)
 	{
-		AllCount += AssetPtr->Lines.Num();
-		for (const FKzDialogueLine& Line : AssetPtr->Lines)
+		const bool bVoiced = !Line.Audio.IsNull();
+		if (bNativeVisible)
 		{
-			if (!PassesSpeaker(Line)) { continue; }
-			++FilteredCount;
-			if (!PendingCultures.IsEmpty() && IsTextPending(Line)) { ++PendingCount; }
+			const EKzLineVoicePolicy VoicePolicy = Line.VoicePolicy != EKzLineVoicePolicy::Inherit ? Line.VoicePolicy : DefaultVoicePolicy;
+			const bool bStale = bVoiced && Line.RecordedTextHash != 0 && Line.RecordedTextHash != Line.SourceTextHash;
+			if (bStale || (!bVoiced && VoicePolicy != EKzLineVoicePolicy::TextOnly)) { return true; }
+		}
+		if (bLocalized && bVoiced && Line.bLocalizeAudio)
+		{
+			const FString SourcePackage = Line.Audio.ToSoftObjectPath().GetLongPackageName();
+			for (const FString& Culture : ForeignScope)
+			{
+				if (!Query->IsAudioLocalized(SourcePackage, Culture)) { return true; }
+			}
+		}
+		return false;
+	};
+
+	FKzExportLineFilter LineVisible = [PassesSpeaker, IsTextPending, HasAudioWork, bMissingVoice = bOnlyMissingVoice, bIncomplete = bOnlyIncomplete](const UKzDialogueAsset&, const FKzDialogueLine& Line)
+	{
+		if (!PassesSpeaker(Line)) { return false; }
+		if (bMissingVoice && !HasAudioWork(Line)) { return false; }
+		if (bIncomplete && !IsTextPending(Line) && !HasAudioWork(Line)) { return false; }
+		return true;
+	};
+
+	int32 LineCount = 0;
+	if (bShowDialogueLines)
+	{
+		for (const UKzDialogueAsset* AssetPtr : LiveAssets)
+		{
+			for (const FKzDialogueLine& Line : AssetPtr->Lines)
+			{
+				if (LineVisible(*AssetPtr, Line)) { ++LineCount; }
+			}
 		}
 	}
 
-	// Both formats share the same scopes; each submenu entry runs the matching interactive flow.
-	auto AddScopeEntries = [this, AssetData, PassesSpeaker, IsTextPending, AllCount, FilteredCount, PendingCount](FMenuBuilder& Sub, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&)> Run)
+	// Visible Other texts, mirroring the cards: handled identities out, the mergeable filter
+	// applies, the missing-voice funnel hides them all, only-incomplete keeps pending groups.
+	TSharedPtr<TSet<FString>> OtherIdentities;
+	int32 OtherCount = 0;
+	if (bIncludeProjectTexts && bShowOtherTexts && !bOnlyMissingVoice && bQueryLoaded && !ForeignScope.IsEmpty())
 	{
-		Sub.AddMenuEntry(
-			FText::Format(LOCTEXT("ExportAllLines", "All lines ({0})"), AllCount),
-			LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([AssetData, Run]() { Run(AssetData, nullptr); })));
-
-		Sub.AddMenuEntry(
-			FText::Format(LOCTEXT("ExportFilteredLines", "Filtered lines ({0})"), FilteredCount),
-			LOCTEXT("ExportFilteredLinesTip", "Export only the lines passing the speaker filter."),
-			FSlateIcon(),
-			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker]()
-				{
-					Run(AssetData, [PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); });
-				}),
-				FCanExecuteAction::CreateLambda([this]() { return bSpeakerFilterActive; })));
-
-		Sub.AddMenuEntry(
-			FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
-			CultureFilter.IsEmpty()
-				? LOCTEXT("ExportPendingAnyTip", "Export only the lines whose text is missing or stale in some culture (speaker filter applies).")
-				: FText::Format(LOCTEXT("ExportPendingCultureTip", "Export only the lines whose text is missing or stale in {0} (speaker filter applies)."), FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter)),
-			FSlateIcon(),
-			FUIAction(
-				FExecuteAction::CreateLambda([AssetData, Run, PassesSpeaker, IsTextPending]()
-				{
-					Run(AssetData, [PassesSpeaker, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && IsTextPending(Line); });
-				}),
-				FCanExecuteAction::CreateLambda([PendingCount]() { return PendingCount > 0; })));
-	};
-
-	MenuBuilder.AddSubMenu(
-		LOCTEXT("ExportCsvSub", "Translation CSV"),
-		LOCTEXT("ExportCsvSubTip", "One CSV with the source texts and context columns (speaker, notes, max characters, audio, drift hash)."),
-		FNewMenuDelegate::CreateLambda([AddScopeEntries](FMenuBuilder& Sub)
+		struct FOtherEntry { FString Namespace; FString Key; FString Source; };
+		TArray<FOtherEntry> Entries;
+		Query->EnumerateOtherTexts([this, &Entries](const FString& Namespace, const FString& Key, const FString& Source)
 		{
-			AddScopeEntries(Sub, [](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportInteractive(MoveTemp(Data), Filter); });
-		}));
+			if (!HandledIdentities.Contains(Namespace + TEXT(",") + Key)) { Entries.Add({ Namespace, Key, Source }); }
+		});
 
-	MenuBuilder.AddSubMenu(
-		LOCTEXT("ExportPoSub", "Portable Object (.po)"),
-		LOCTEXT("ExportPoSubTip", "One .po per culture (the standard translation-tool format): context travels as comments, existing translations fill msgstr, stale ones are flagged fuzzy."),
-		FNewMenuDelegate::CreateLambda([AddScopeEntries](FMenuBuilder& Sub)
+		TMap<FString, TArray<int32>> IndicesBySource;
+		for (int32 i = 0; i < Entries.Num(); ++i) { IndicesBySource.FindOrAdd(Entries[i].Source).Add(i); }
+
+		OtherIdentities = MakeShared<TSet<FString>>();
+		for (const TPair<FString, TArray<int32>>& Pair : IndicesBySource)
 		{
-			AddScopeEntries(Sub, [](TArray<FAssetData> Data, const FKzExportLineFilter& Filter) { FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter); });
-		}));
-
-	// Everything the target gathers OUTSIDE the dialogue pipeline; project-scope hosts only.
-	if (bIncludeProjectTexts)
-	{
-		int32 OtherCount = 0;
-		Query->EnumerateOtherTexts([&OtherCount](const FString&, const FString&, const FString&) { ++OtherCount; });
-
-		MenuBuilder.AddMenuEntry(
-			FText::Format(LOCTEXT("ExportOtherTexts", "Project texts (.po) ({0})"), OtherCount),
-			LOCTEXT("ExportOtherTextsTip", "Every gathered text outside the dialogue assets (UI, menus...), one <Target>_Other.po per culture. The speaker and pending filters do not apply."),
-			FSlateIcon(),
-			FUIAction(
-				FExecuteAction::CreateLambda([]() { FKzDialogueTranslationCsv::ExportOtherTextsPoInteractive(); }),
-				FCanExecuteAction::CreateLambda([OtherCount]() { return OtherCount > 0; })));
+			if (bOnlyMergeableTexts && Pair.Value.Num() < 2) { continue; }
+			if (bOnlyIncomplete)
+			{
+				bool bPending = false;
+				for (const int32 Index : Pair.Value)
+				{
+					for (const FString& Culture : ForeignScope)
+					{
+						bPending |= Query->GetTextState(Entries[Index].Namespace, Entries[Index].Key, Entries[Index].Source, Culture) != EKzTranslationState::Translated;
+					}
+				}
+				if (!bPending) { continue; }
+			}
+			for (const int32 Index : Pair.Value)
+			{
+				OtherIdentities->Add(Entries[Index].Namespace + TEXT(",") + Entries[Index].Key);
+			}
+			++OtherCount;
+		}
 	}
+
+	const FString OnlyCulture = (!CultureFilter.IsEmpty() && CultureFilter != NativeCulture) ? CultureFilter : FString();
+
+	MenuBuilder.AddMenuEntry(
+		FText::Format(LOCTEXT("ExportCsvEntry", "Translation CSV ({0} lines)"), LineCount),
+		LOCTEXT("ExportCsvEntryTip", "One CSV with the visible dialogue lines: source texts plus context columns (speaker, notes, max characters, audio, drift hash). Project texts export as .po only."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([AssetData, LineVisible]() { FKzDialogueTranslationCsv::ExportInteractive(AssetData, LineVisible); }),
+			FCanExecuteAction::CreateLambda([LineCount]() { return LineCount > 0; })));
+
+	const FText PoLabel = bIncludeProjectTexts
+		? FText::Format(LOCTEXT("ExportPoEntryFull", "Portable Object (.po) ({0} lines + {1} texts)"), LineCount, OtherCount)
+		: FText::Format(LOCTEXT("ExportPoEntry", "Portable Object (.po) ({0} lines)"), LineCount);
+	MenuBuilder.AddMenuEntry(
+		PoLabel,
+		LOCTEXT("ExportPoEntryTip", "One .po per foreign culture (the standard translation-tool format) with the visible content: dialogue lines in <Target>.po, project texts in <Target>_Other.po. The culture filter narrows the files to that culture."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([AssetData, LineVisible, bLines = bShowDialogueLines, OtherIdentities, OtherCount, OnlyCulture]()
+			{
+				FKzDialogueTranslationCsv::ExportPoInteractive(bLines ? AssetData : TArray<FAssetData>(), LineVisible, OtherIdentities.IsValid() && OtherCount > 0, OtherIdentities, OnlyCulture);
+			}),
+			FCanExecuteAction::CreateLambda([LineCount, OtherCount]() { return LineCount > 0 || OtherCount > 0; })));
 
 	return MenuBuilder.MakeWidget();
 }
