@@ -20,6 +20,8 @@
 #include "Internationalization/PackageLocalizationUtil.h"
 #include "Internationalization/TextNamespaceUtil.h"
 #include "Misc/PackageName.h"
+#include "GenericPlatform/GenericPlatformFile.h"
+#include "HAL/PlatformFileManager.h"
 #include "ScopedTransaction.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -308,6 +310,18 @@ namespace
 		FString Escaped = Value;
 		Escaped.ReplaceInline(TEXT("\""), TEXT("\"\""));
 		return FString::Printf(TEXT("\"%s\""), *Escaped);
+	}
+
+	/** Archives synced from source control are often read-only on disk and the JSON save just fails; imports write them directly, so drop the flag (logged) instead of failing. */
+	void EnsureArchiveWritable(const FKzLocTargetInfo& Target, const FString& Culture)
+	{
+		const FString ArchivePath = Target.TargetPath / Culture / Target.ArchiveName;
+		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
+		if (PlatformFile.FileExists(*ArchivePath) && PlatformFile.IsReadOnly(*ArchivePath))
+		{
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Archive '%s' was read-only; clearing the flag to write the import (check it out in source control if applicable)."), *ArchivePath);
+			PlatformFile.SetReadOnly(*ArchivePath, false);
+		}
 	}
 
 	void ShowNotification(const FText& Message, bool bSuccess)
@@ -843,9 +857,13 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		}
 	}
 
-	if (OutStats.Imported > 0 && !LocHelper.SaveArchive(Culture, &OutError))
+	if (OutStats.Imported > 0)
 	{
-		return false;
+		EnsureArchiveWritable(Target, Culture);
+		if (!LocHelper.SaveArchive(Culture, &OutError))
+		{
+			return false;
+		}
 	}
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
@@ -1240,9 +1258,13 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		ProcessEntry(Ctxt, Id, Str);
 	}
 
-	if (OutStats.Imported > 0 && !LocHelper.SaveArchive(Culture, &OutError))
+	if (OutStats.Imported > 0)
 	{
-		return false;
+		EnsureArchiveWritable(Target, Culture);
+		if (!LocHelper.SaveArchive(Culture, &OutError))
+		{
+			return false;
+		}
 	}
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
