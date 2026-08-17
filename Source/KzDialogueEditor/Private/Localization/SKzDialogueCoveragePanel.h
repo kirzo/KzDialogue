@@ -53,6 +53,11 @@ private:
 	/** Show the target's non-dialogue texts as an extra per-culture section (dashboard host). */
 	bool bIncludeProjectTexts = false;
 
+	/** Eye toggle over the Other texts area and its progress bar. */
+	bool bShowOtherTexts = true;
+	/** Other texts show only collapsed identical-source groups: the Merge candidates. */
+	bool bOnlyMergeableTexts = false;
+
 	/** "Namespace,Key" identities merged away or made non-localizable from this panel: the manifest still lists them until the next Gather, so Refresh hides them optimistically. */
 	TSet<FString> HandledIdentities;
 

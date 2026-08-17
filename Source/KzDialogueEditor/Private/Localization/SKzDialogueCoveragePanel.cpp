@@ -314,7 +314,7 @@ void SKzDialogueCoveragePanel::Refresh()
 		FString Source;
 	};
 	TArray<FOtherText> OtherTexts;
-	if (bIncludeProjectTexts)
+	if (bIncludeProjectTexts && bShowOtherTexts)
 	{
 		Query.EnumerateOtherTexts([this, &OtherTexts](const FString& Namespace, const FString& Key, const FString& Source)
 		{
@@ -512,6 +512,12 @@ void SKzDialogueCoveragePanel::Refresh()
 						++GroupMissing;
 						break;
 					}
+				}
+
+				// The mergeable filter keeps only collapsed groups; singles still count in the bar.
+				if (bOnlyMergeableTexts && Indices.Num() < 2)
+				{
+					continue;
 				}
 
 				const FString Preview = Source.Len() > 60 ? Source.Left(60) + TEXT("...") : Source;
@@ -1251,6 +1257,31 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			FIsActionChecked::CreateLambda([this]() { return bShowLocalizedAudio; })),
 		NAME_None,
 		EUserInterfaceActionType::ToggleButton);
+
+	if (bIncludeProjectTexts)
+	{
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("ShowOtherTexts", "Other texts"),
+			LOCTEXT("ShowOtherTextsTip", "Show the target's non-dialogue gathered texts (UI, menus...) as their own area and progress bar on each culture card."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([this]() { bShowOtherTexts = !bShowOtherTexts; Refresh(); }),
+				FCanExecuteAction(),
+				FIsActionChecked::CreateLambda([this]() { return bShowOtherTexts; })),
+			NAME_None,
+			EUserInterfaceActionType::ToggleButton);
+
+		MenuBuilder.AddMenuEntry(
+			LOCTEXT("OnlyMergeableTexts", "Only mergeable texts"),
+			LOCTEXT("OnlyMergeableTextsTip", "Other texts show only identical-source groups (x2 and up): the Merge candidates."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([this]() { bOnlyMergeableTexts = !bOnlyMergeableTexts; Refresh(); }),
+				FCanExecuteAction::CreateLambda([this]() { return bShowOtherTexts; }),
+				FIsActionChecked::CreateLambda([this]() { return bOnlyMergeableTexts; })),
+			NAME_None,
+			EUserInterfaceActionType::ToggleButton);
+	}
 
 	return MenuBuilder.MakeWidget();
 }
