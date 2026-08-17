@@ -383,6 +383,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				bool bTextTooLong = false;
 				bool bAudioMissing = false;
 				FText PendingTooltip;
+				FString RowTranslation;
 				FSoftObjectPath LocalizedAudioPath;
 
 				// Text state, anchored to the line's stable namespace/key.
@@ -396,6 +397,7 @@ void SKzDialogueCoveragePanel::Refresh()
 					FString ArchiveSource;
 					FString ArchiveTranslation;
 					const bool bHasEntry = Query.GetArchiveEntry(Namespace.GetValue(), Key.GetValue(), Culture, ArchiveSource, ArchiveTranslation);
+					if (bHasEntry) { RowTranslation = ArchiveTranslation; }
 
 					switch (Query.GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture))
 					{
@@ -454,6 +456,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				Row.LineId = Line.LineId;
 				Row.Label = Line.GetDisplayLabel(60);
 				Row.Tooltip = PendingTooltip;
+				Row.Translation = FText::FromString(RowTranslation);
 				Row.AudioPath = LocalizedAudioPath;
 				Row.bCanMakeNonLocalizable = !Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet();
 				if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
@@ -710,7 +713,8 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		];
 	};
 
-	// Asset header rows only when several assets share the list.
+	// Asset header rows only when several assets share the list; each asset is then its own
+	// collapsible sub-section, open by default (the header still opens the asset on double-click).
 	const bool bAssetHeaders = AssetGroups.Num() > 1;
 	int32 VisibleCount = 0;
 	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
@@ -719,18 +723,37 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		TArray<const FLineRow*> Visible = FilterVisible(*Group);
 		if (Visible.IsEmpty()) { continue; }
 
+		TSharedRef<SVerticalBox> GroupBox = SNew(SVerticalBox);
+		for (const FLineRow* RowPtr : Visible)
+		{
+			GroupBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			[
+				MakeLineRowWidget(*RowPtr, Group->Asset, AudioKeyPrefix)
+			];
+		}
+
 		if (bAssetHeaders)
 		{
 			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
 			[
-				MakeAssetHeaderRow(Group->Asset)
+				SNew(SExpandableArea)
+					.InitiallyCollapsed(false)
+					.BorderImage(FAppStyle::GetBrush("NoBorder"))
+					.HeaderContent()
+					[
+						MakeAssetHeaderRow(Group->Asset)
+					]
+					.BodyContent()
+					[
+						GroupBox
+					]
 			];
 		}
-		for (const FLineRow* RowPtr : Visible)
+		else
 		{
-			ListBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+			ListBox->AddSlot().AutoHeight()
 			[
-				MakeLineRowWidget(*RowPtr, Group->Asset, AudioKeyPrefix)
+				GroupBox
 			];
 		}
 		VisibleCount += Visible.Num();
@@ -1002,6 +1025,17 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 							.Text(Entry.Label)
 							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 					]
+			]
+			// The culture's current translation, dimmed on the right; rows without one give the label the full width.
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 0.0f, 4.0f, 0.0f)
+			[
+				SNew(STextBlock)
+					.Text(Entry.Translation)
+					.Justification(ETextJustify::Right)
+					.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.ToolTipText(Entry.Translation)
+					.Visibility(Entry.Translation.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 			]
 		];
 }
