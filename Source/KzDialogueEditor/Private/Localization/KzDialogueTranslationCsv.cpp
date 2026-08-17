@@ -1158,6 +1158,146 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 	return true;
 }
 
+namespace
+{
+	/**
+	 * Rewrites every asset-authored occurrence of the given (namespace, key) identities whose
+	 * source is SourceText, applying Transform to the matched FText. Walks reflected object
+	 * properties, data table rows (raw struct memory) and Blueprint graph pin defaults; C++
+	 * code sites cannot be rewritten and are logged with ManualFixHint. Rewritten blueprints
+	 * are marked modified so the save recompiles the gathered bytecode.
+	 */
+	void RewriteAuthoredTextOccurrences(const FKzLocQuery& Query, const TArray<TPair<FString, FString>>& Identities, const FString& SourceText, TFunctionRef<FText(const FText&)> Transform, const FString& ManualFixHint, int32& OutRewritten, int32& OutSkipped)
+	{
+		for (const TPair<FString, FString>& Identity : Identities)
+		{
+			const FString& Namespace = Identity.Key;
+			const FString& Key = Identity.Value;
+
+			const TArray<FString> Locations = Query.GetSourceLocations(Namespace, Key);
+			if (Locations.IsEmpty())
+			{
+				++OutSkipped;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: '%s,%s' has no manifest source location; re-run Gather and retry."), *Namespace, *Key);
+				continue;
+			}
+
+			for (const FString& Location : Locations)
+			{
+				// Asset-authored texts carry object paths; anything else (C++ code sites)
+				// cannot be rewritten from here.
+				if (!Location.StartsWith(TEXT("/")))
+				{
+					++OutSkipped;
+					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: '%s,%s' is authored in code (%s); %s."), *Namespace, *Key, *Location, *ManualFixHint);
+					continue;
+				}
+
+				FString PackageName = Location;
+				int32 DotIndex = INDEX_NONE;
+				if (PackageName.FindChar(TEXT('.'), DotIndex))
+				{
+					PackageName.LeftInline(DotIndex);
+				}
+
+				UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_None);
+				if (!Package)
+				{
+					++OutSkipped;
+					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: could not load package '%s' for '%s,%s'."), *PackageName, *Namespace, *Key);
+					continue;
+				}
+
+				bool bRewrote = false;
+				int32 NearMisses = 0;
+
+				auto TryRewriteText = [&](UObject* Owner, const FText* TextPtr)
+				{
+					if (!TextPtr) { return; }
+
+					const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(*TextPtr);
+					const TOptional<FString> TextKey = FTextInspector::GetKey(*TextPtr);
+					const FString* TextSource = FTextInspector::GetSourceString(*TextPtr);
+					if (!TextNamespace.IsSet() || !TextKey.IsSet() || !TextSource) { return; }
+					if (TextKey.GetValue() != Key) { return; }
+
+					// The live text's namespace carries the editor-only package localization
+					// id suffix ("" becomes " [ABCD...]"); the manifest stores it stripped.
+					const FString CleanNamespace = TextNamespaceUtil::StripPackageNamespace(TextNamespace.GetValue());
+					if (CleanNamespace != Namespace || *TextSource != SourceText)
+					{
+						++NearMisses;
+						UE_LOG(LogKzDialogueL10N, Log, TEXT("Rewrite near-miss in '%s': key matched but namespace '%s' (expected '%s') / source '%s' (expected '%s')."), *Owner->GetPathName(), *CleanNamespace, *Namespace, **TextSource, *SourceText);
+						return;
+					}
+
+					Owner->Modify();
+					FText* MutableText = const_cast<FText*>(TextPtr);
+					*MutableText = Transform(*MutableText);
+					bRewrote = true;
+				};
+
+				// Rows of data tables are raw struct memory and graph pins are not reflected
+				// properties, so both get their own passes next to the object property walk.
+				TArray<UObject*> Objects;
+				GetObjectsWithPackage(Package, Objects, /*bIncludeNestedObjects=*/true);
+				for (UObject* Object : Objects)
+				{
+					for (TPropertyValueIterator<FTextProperty> It(Object->GetClass(), Object); It; ++It)
+					{
+						TryRewriteText(Object, static_cast<const FText*>(It.Value()));
+					}
+
+					if (const UDataTable* Table = Cast<UDataTable>(Object))
+					{
+						if (const UScriptStruct* RowStruct = Table->GetRowStruct())
+						{
+							for (const TPair<FName, uint8*>& Row : Table->GetRowMap())
+							{
+								for (TPropertyValueIterator<FTextProperty> It(RowStruct, Row.Value); It; ++It)
+								{
+									TryRewriteText(Object, static_cast<const FText*>(It.Value()));
+								}
+							}
+						}
+					}
+
+					if (UEdGraphNode* Node = Cast<UEdGraphNode>(Object))
+					{
+						for (UEdGraphPin* Pin : Node->Pins)
+						{
+							if (Pin)
+							{
+								TryRewriteText(Node, &Pin->DefaultTextValue);
+							}
+						}
+					}
+				}
+
+				if (bRewrote)
+				{
+					// Rewritten graph literals only reach the gathered bytecode after a
+					// recompile; marking the blueprint modified makes the save do it.
+					for (UObject* Object : Objects)
+					{
+						if (UBlueprint* Blueprint = Cast<UBlueprint>(Object))
+						{
+							FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
+						}
+					}
+					Package->MarkPackageDirty();
+					++OutRewritten;
+				}
+				else
+				{
+					++OutSkipped;
+					UE_LOG(LogKzDialogueL10N, Warning, TEXT("Rewrite: '%s,%s' not found inside '%s' (%d near-miss(es) logged above; stale manifest needing a re-gather, or storage this walk cannot reach)."), *Namespace, *Key, *PackageName, NearMisses);
+				}
+			}
+		}
+	}
+}
+
 bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped)
 {
 	OutRewritten = 0;
@@ -1192,142 +1332,45 @@ bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, c
 			CanonicalIndex = i;
 		}
 	}
-	const FString& CanonicalNamespace = Identities[CanonicalIndex].Key;
-	const FString& CanonicalKey = Identities[CanonicalIndex].Value;
+	const FString CanonicalNamespace = Identities[CanonicalIndex].Key;
+	const FString CanonicalKey = Identities[CanonicalIndex].Value;
 
-	for (int32 i = 0; i < Identities.Num(); ++i)
-	{
-		if (i == CanonicalIndex) { continue; }
-		const FString& Namespace = Identities[i].Key;
-		const FString& Key = Identities[i].Value;
+	TArray<TPair<FString, FString>> ToRewrite = Identities;
+	ToRewrite.RemoveAt(CanonicalIndex);
 
-		const TArray<FString> Locations = Query.GetSourceLocations(Namespace, Key);
-		if (Locations.IsEmpty())
-		{
-			++OutSkipped;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' has no manifest source location; re-run Gather and retry."), *Namespace, *Key);
-			continue;
-		}
-
-		for (const FString& Location : Locations)
-		{
-			// Asset-authored texts carry object paths; anything else (C++ code sites) cannot
-			// be rewritten from here.
-			if (!Location.StartsWith(TEXT("/")))
-			{
-				++OutSkipped;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' is authored in code (%s); change its NSLOCTEXT/LOCTEXT to namespace '%s', key '%s' by hand."), *Namespace, *Key, *Location, *CanonicalNamespace, *CanonicalKey);
-				continue;
-			}
-
-			FString PackageName = Location;
-			int32 DotIndex = INDEX_NONE;
-			if (PackageName.FindChar(TEXT('.'), DotIndex))
-			{
-				PackageName.LeftInline(DotIndex);
-			}
-
-			UPackage* Package = LoadPackage(nullptr, *PackageName, LOAD_None);
-			if (!Package)
-			{
-				++OutSkipped;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: could not load package '%s' for '%s,%s'."), *PackageName, *Namespace, *Key);
-				continue;
-			}
-
-			// Find the authored FText by its identity anywhere in the package and re-key it.
-			// Rows of data tables are raw struct memory, invisible to the object property
-			// walk, so they get their own per-row pass.
-			bool bRewrote = false;
-			int32 NearMisses = 0;
-
-			auto TryRewriteText = [&](UObject* Owner, const FText* TextPtr)
-			{
-				if (!TextPtr) { return; }
-
-				const TOptional<FString> TextNamespace = FTextInspector::GetNamespace(*TextPtr);
-				const TOptional<FString> TextKey = FTextInspector::GetKey(*TextPtr);
-				const FString* TextSource = FTextInspector::GetSourceString(*TextPtr);
-				if (!TextNamespace.IsSet() || !TextKey.IsSet() || !TextSource) { return; }
-				if (TextKey.GetValue() != Key) { return; }
-
-				// The live text's namespace carries the editor-only package localization id
-				// suffix ("" becomes " [ABCD...]"); the manifest stores it stripped.
-				const FString CleanNamespace = TextNamespaceUtil::StripPackageNamespace(TextNamespace.GetValue());
-				if (CleanNamespace != Namespace || *TextSource != SourceText)
-				{
-					++NearMisses;
-					UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge near-miss in '%s': key matched but namespace '%s' (expected '%s') / source '%s' (expected '%s')."), *Owner->GetPathName(), *CleanNamespace, *Namespace, **TextSource, *SourceText);
-					return;
-				}
-
-				Owner->Modify();
-				FText* MutableText = const_cast<FText*>(TextPtr);
-				*MutableText = FText::ChangeKey(CanonicalNamespace, CanonicalKey, *MutableText);
-				bRewrote = true;
-			};
-
-			TArray<UObject*> Objects;
-			GetObjectsWithPackage(Package, Objects, /*bIncludeNestedObjects=*/true);
-			for (UObject* Object : Objects)
-			{
-				for (TPropertyValueIterator<FTextProperty> It(Object->GetClass(), Object); It; ++It)
-				{
-					TryRewriteText(Object, static_cast<const FText*>(It.Value()));
-				}
-
-				if (const UDataTable* Table = Cast<UDataTable>(Object))
-				{
-					if (const UScriptStruct* RowStruct = Table->GetRowStruct())
-					{
-						for (const TPair<FName, uint8*>& Row : Table->GetRowMap())
-						{
-							for (TPropertyValueIterator<FTextProperty> It(RowStruct, Row.Value); It; ++It)
-							{
-								TryRewriteText(Object, static_cast<const FText*>(It.Value()));
-							}
-						}
-					}
-				}
-
-				// Blueprint graph literals (a Set Text node's input, a pin default) live on
-				// EdGraph pins, which are not reflected properties; the compiled bytecode
-				// copy regenerates from them when the blueprint recompiles on save.
-				if (UEdGraphNode* Node = Cast<UEdGraphNode>(Object))
-				{
-					for (UEdGraphPin* Pin : Node->Pins)
-					{
-						if (Pin)
-						{
-							TryRewriteText(Node, &Pin->DefaultTextValue);
-						}
-					}
-				}
-			}
-
-			if (bRewrote)
-			{
-				// Re-keyed graph literals only reach the gathered bytecode after a recompile;
-				// marking the blueprint modified makes the save do it.
-				for (UObject* Object : Objects)
-				{
-					if (UBlueprint* Blueprint = Cast<UBlueprint>(Object))
-					{
-						FBlueprintEditorUtils::MarkBlueprintAsModified(Blueprint);
-					}
-				}
-				Package->MarkPackageDirty();
-				++OutRewritten;
-			}
-			else
-			{
-				++OutSkipped;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Merge: '%s,%s' not found inside '%s' (%d near-miss(es) logged above; stale manifest needing a re-gather, or storage this walk cannot reach)."), *Namespace, *Key, *PackageName, NearMisses);
-			}
-		}
-	}
+	RewriteAuthoredTextOccurrences(Query, ToRewrite, SourceText,
+		[&CanonicalNamespace, &CanonicalKey](const FText& Text) { return FText::ChangeKey(CanonicalNamespace, CanonicalKey, Text); },
+		FString::Printf(TEXT("change its NSLOCTEXT/LOCTEXT to namespace '%s', key '%s' by hand"), *CanonicalNamespace, *CanonicalKey),
+		OutRewritten, OutSkipped);
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge to '%s,%s': %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), *CanonicalNamespace, *CanonicalKey, OutRewritten, OutSkipped);
+	return true;
+}
+
+bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped)
+{
+	OutRewritten = 0;
+	OutSkipped = 0;
+
+	if (Identities.IsEmpty())
+	{
+		OutError = LOCTEXT("NonLocNothing", "Nothing to rewrite: no identities.");
+		return false;
+	}
+
+	FKzLocQuery Query;
+	if (!Query.Load(OutError)) { return false; }
+
+	RewriteAuthoredTextOccurrences(Query, Identities, SourceText,
+		[](const FText& Text)
+		{
+			const FString* Source = FTextInspector::GetSourceString(Text);
+			return FText::AsCultureInvariant(Source ? *Source : Text.ToString());
+		},
+		FString(TEXT("wrap it in FText::AsCultureInvariant / INVTEXT by hand")),
+		OutRewritten, OutSkipped);
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Non-localizable: %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), OutRewritten, OutSkipped);
 	return true;
 }
 

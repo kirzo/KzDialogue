@@ -68,6 +68,9 @@ private:
 		bool bAudioWork = false;
 		/** Stale take on the native card: shows the Accept button (take valid despite the text change). */
 		bool bAcknowledgeable = false;
+
+		/** Localizable text that can be turned culture invariant from here (dialogue line or project text). */
+		bool bCanMakeNonLocalizable = false;
 		/** This culture's playable take (localized variant on foreign cards, source take on the native one). */
 		FSoftObjectPath AudioPath;
 
@@ -106,6 +109,9 @@ private:
 
 	/** Opens where a project text is authored: its asset editor (one asset), the content browser (several), or the code site in the IDE. */
 	void NavigateToTextSource(const TArray<FString>& Locations);
+
+	/** Turns the row's text culture invariant: the dialogue line's Text on its asset, or every authored occurrence of a project text. */
+	void MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId, FString Source, TArray<TPair<FString, FString>> Identities);
 
 	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);

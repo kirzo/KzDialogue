@@ -11,6 +11,7 @@
 
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
 #include "Misc/Paths.h"
 #include "SourceCodeNavigation.h"
 #include "Components/AudioComponent.h"
@@ -420,6 +421,7 @@ void SKzDialogueCoveragePanel::Refresh()
 				Row.Label = Line.GetDisplayLabel(60);
 				Row.Tooltip = PendingTooltip;
 				Row.AudioPath = LocalizedAudioPath;
+				Row.bCanMakeNonLocalizable = !Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet();
 				if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
 				{
 					++PendingCount;
@@ -514,9 +516,33 @@ void SKzDialogueCoveragePanel::Refresh()
 				Row.Label = Indices.Num() > 1
 					? FText::Format(LOCTEXT("OtherTextCollapsed", "{0}   (x{1})"), FText::FromString(Preview), Indices.Num())
 					: FText::FromString(Preview);
-				Row.Tooltip = !SingleStaleTooltip.IsEmpty()
+
+				Row.GroupSource = Source;
+				Row.bCanMakeNonLocalizable = true;
+				for (const int32 Index : Indices)
+				{
+					Row.GroupIdentities.Emplace(OtherTexts[Index].Namespace, OtherTexts[Index].Key);
+					Row.SourceLocations.Append(Query.GetSourceLocations(OtherTexts[Index].Namespace, OtherTexts[Index].Key));
+				}
+
+				// Owners visible without clicking: asset package paths (deduped) and code sites.
+				FString AuthoredIn;
+				{
+					TArray<FString> Owners;
+					for (const FString& Location : Row.SourceLocations)
+					{
+						FString Owner = Location;
+						int32 DotIndex = INDEX_NONE;
+						if (Owner.StartsWith(TEXT("/")) && Owner.FindChar(TEXT('.'), DotIndex)) { Owner.LeftInline(DotIndex); }
+						Owners.AddUnique(Owner);
+					}
+					AuthoredIn = FString::Join(Owners, TEXT("\n"));
+				}
+
+				const FText BaseTip = !SingleStaleTooltip.IsEmpty()
 					? SingleStaleTooltip
-					: FText::Format(LOCTEXT("OtherTextTip", "{0}\n{1}\n\nClick: opens where this text is authored."), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
+					: FText::Format(LOCTEXT("OtherTextIdentityTip", "{0}\n{1}"), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
+				Row.Tooltip = FText::Format(LOCTEXT("OtherTextAuthoredTip", "{0}\n\nAuthored in:\n{1}\n\nClick: opens where this text is authored."), BaseTip, FText::FromString(AuthoredIn));
 
 				if (GroupMissing > 0 || GroupStale > 0)
 				{
@@ -532,18 +558,6 @@ void SKzDialogueCoveragePanel::Refresh()
 					Row.StateColor = KzDoneColor;
 				}
 
-				if (Indices.Num() > 1)
-				{
-					Row.GroupSource = Source;
-					for (const int32 Index : Indices)
-					{
-						Row.GroupIdentities.Emplace(OtherTexts[Index].Namespace, OtherTexts[Index].Key);
-					}
-				}
-				for (const int32 Index : Indices)
-				{
-					Row.SourceLocations.Append(Query.GetSourceLocations(OtherTexts[Index].Namespace, OtherTexts[Index].Key));
-				}
 				OtherGroup.Lines.Add(MoveTemp(Row));
 			}
 		}
@@ -822,6 +836,32 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 					]
 			];
 	}
+	else if (Entry.bCanMakeNonLocalizable)
+	{
+		ChipContent = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				ChipContent
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 6.0f, 0.0f)
+			[
+				SNew(SButton)
+					.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+					.ContentPadding(FMargin(1.0f))
+					.ToolTipText(LOCTEXT("MakeNonLocTip", "Make non-localizable: the text becomes culture invariant (no key, never gathered, no translation work). Rewrites the authored text in place; save the dirty assets and re-run Gather afterwards. Reversible by editing the text's localization settings."))
+					.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId, Source = Entry.GroupSource, Identities = Entry.GroupIdentities]()
+					{
+						MakeRowNonLocalizable(InAsset, LineId, Source, Identities);
+						return FReply::Handled();
+					})
+					[
+						SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
+						[
+							SNew(SImage).Image(FAppStyle::GetBrush("Icons.Unlink")).ColorAndOpacity(FSlateColor::UseForeground())
+						]
+					]
+			];
+	}
 
 	// Collapsed identical-source project texts reuse the (empty for them) play column for
 	// the Merge action, keeping every label aligned.
@@ -969,7 +1009,9 @@ void SKzDialogueCoveragePanel::NavigateToTextSource(const TArray<FString>& Locat
 			Registry.GetAssetsByPackageName(FName(*PackageName), PackageAssets);
 			if (PackageAssets.Num() > 0)
 			{
-				OwnerAssets.AddUnique(PackageAssets[0]);
+				// The primary asset (name == package name), not whatever the registry lists first.
+				const FAssetData* Primary = PackageAssets.FindByPredicate([](const FAssetData& Data) { return Data.IsUAsset(); });
+				OwnerAssets.AddUnique(Primary ? *Primary : PackageAssets[0]);
 			}
 		}
 		else if (CodeSite.IsEmpty())
@@ -980,7 +1022,16 @@ void SKzDialogueCoveragePanel::NavigateToTextSource(const TArray<FString>& Locat
 
 	if (OwnerAssets.Num() == 1 && GEditor)
 	{
-		GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(OwnerAssets[0].GetSoftObjectPath());
+		// Deferred one tick: loading from inside the click handler can land the widget
+		// blueprint compile in a recursive load flush with half-loaded dependencies.
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([Path = OwnerAssets[0].GetSoftObjectPath()](float)
+		{
+			if (GEditor)
+			{
+				GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Path);
+			}
+			return false;   // one-shot
+		}));
 		return;
 	}
 	if (OwnerAssets.Num() > 1)
@@ -1012,6 +1063,47 @@ void SKzDialogueCoveragePanel::NavigateToTextSource(const TArray<FString>& Locat
 		}
 		FSourceCodeNavigation::OpenSourceFile(FPaths::ConvertRelativePathToFull(FilePath), LineNumber);
 	}
+}
+
+void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId, FString Source, TArray<TPair<FString, FString>> Identities)
+{
+	// Dialogue line: turn its Text culture invariant on the owning asset. RebindFTextKeys
+	// and the validators already respect the invariant, so it simply leaves the pipeline.
+	if (LineId.IsValid())
+	{
+		UKzDialogueAsset* Asset = InAsset.Get();
+		if (!Asset) { return; }
+		const int32 LineIndex = Asset->IndexOfLine(LineId);
+		if (LineIndex == INDEX_NONE) { return; }
+
+		const FScopedTransaction Transaction(LOCTEXT("NonLocLineTrans", "Make Line Text Non-Localizable"));
+		Asset->Modify();
+		FText& Text = Asset->Lines[LineIndex].Text;
+		const FString* SourceString = FTextInspector::GetSourceString(Text);
+		Text = FText::AsCultureInvariant(SourceString ? *SourceString : Text.ToString());
+		Asset->PostEditChange();
+		Asset->MarkPackageDirty();
+
+		Refresh();
+		return;
+	}
+
+	// Project text: rewrite every authored occurrence (same machinery as Merge).
+	FText Error;
+	int32 Rewritten = 0;
+	int32 Skipped = 0;
+	const bool bRan = FKzDialogueTranslationCsv::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped);
+
+	FNotificationInfo Info(bRan
+		? FText::Format(LOCTEXT("NonLocDone", "Non-localizable: {0} occurrence(s) rewritten, {1} skipped (see the output log). Save the dirty assets and run Gather to drop them from the target."), Rewritten, Skipped)
+		: Error);
+	Info.ExpireDuration = 8.0f;
+	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+	{
+		Item->SetCompletionState(bRan && Rewritten > 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+	}
+
+	Refresh();
 }
 
 void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities)

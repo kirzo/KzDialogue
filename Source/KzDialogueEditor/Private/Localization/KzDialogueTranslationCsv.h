@@ -173,6 +173,13 @@ public:
 	 */
 	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped);
 
+	/**
+	 * Rewrites every ASSET-authored occurrence of the given texts as culture invariant
+	 * (non-localizable): gather then drops them from the manifest. C++-authored texts cannot
+	 * be rewritten and count as skipped. Dirty assets must be saved and Gather re-run.
+	 */
+	static bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped);
+
 	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
 	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
 
