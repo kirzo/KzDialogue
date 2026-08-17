@@ -53,6 +53,9 @@ private:
 	/** Show the target's non-dialogue texts as an extra per-culture section (dashboard host). */
 	bool bIncludeProjectTexts = false;
 
+	/** "Namespace,Key" identities merged away or made non-localizable from this panel: the manifest still lists them until the next Gather, so Refresh hides them optimistically. */
+	TSet<FString> HandledIdentities;
+
 	/** One line inside a culture card: its status for that culture, its playable take and its label. */
 	struct FLineRow
 	{

@@ -1298,7 +1298,7 @@ namespace
 	}
 }
 
-bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped)
+bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TPair<FString, FString>* OutCanonical)
 {
 	OutRewritten = 0;
 	OutSkipped = 0;
@@ -1334,6 +1334,10 @@ bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, c
 	}
 	const FString CanonicalNamespace = Identities[CanonicalIndex].Key;
 	const FString CanonicalKey = Identities[CanonicalIndex].Value;
+	if (OutCanonical)
+	{
+		*OutCanonical = Identities[CanonicalIndex];
+	}
 
 	TArray<TPair<FString, FString>> ToRewrite = Identities;
 	ToRewrite.RemoveAt(CanonicalIndex);
