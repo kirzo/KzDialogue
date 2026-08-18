@@ -7,21 +7,36 @@
 
 void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
 {
+	TArray<FGuid> EntryIds;
+	if (InAsset)
+	{
+		EntryIds.Reserve(InAsset->Lines.Num());
+		for (const FKzDialogueLine& Line : InAsset->Lines)
+		{
+			EntryIds.Add(Line.LineId);
+		}
+	}
+	StartEntries(InSubsystem, InAsset, EntryIds, ExplicitChannel, UKzDialogueSubsystem::InheritPriority, bInStartImmediately, InAdvanceMode);
+}
+
+void UKzDialogueAssetSession::StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
+{
 	Subsystem = InSubsystem;
 	Asset = InAsset;
+	Priority = InPriority;
 	bStartImmediately = bInStartImmediately;
 	ResolvedAdvanceMode = (InSubsystem && InAsset) ? InSubsystem->ResolveAdvanceMode(InAdvanceMode, InAsset) : EKzDialogueAdvanceMode::Automatic;
 
-	// Split the asset's lines into maximal consecutive runs sharing a resolved channel. A valid explicit
-	// channel short-circuits per-line resolution, so every line lands on it -> a single run (identical to
-	// the old single-session play).
+	// Split the entries into maximal consecutive runs sharing a resolved channel. A valid explicit
+	// channel short-circuits per-entry resolution, so every entry lands on it -> a single run (identical
+	// to the old single-session play).
 	if (Asset && Subsystem)
 	{
 		FGameplayTag PrevChannel;
 		bool bFirst = true;
-		for (const FKzDialogueLine& Line : Asset->Lines)
+		for (const FGuid& EntryId : EntryIds)
 		{
-			const FGameplayTag Ch = Subsystem->ResolveChannelForEntry(ExplicitChannel, Asset, Line.LineId);
+			const FGameplayTag Ch = Subsystem->ResolveChannelForEntry(ExplicitChannel, Asset, EntryId);
 			if (bFirst || Ch != PrevChannel)
 			{
 				FRun& NewRun = Runs.AddDefaulted_GetRef();
@@ -29,7 +44,7 @@ void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialog
 				PrevChannel = Ch;
 				bFirst = false;
 			}
-			Runs.Last().LineIds.Add(Line.LineId);
+			Runs.Last().LineIds.Add(EntryId);
 		}
 	}
 
@@ -57,10 +72,10 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 	CurrentChannel = Run.Channel;
 
 	// Pass the run's channel EXPLICITLY (bypasses the internal first-entry resolution, so playback channel
-	// == grouping channel) and InheritPriority (-> the asset's Priority hint, matching PlayAsset). Chained
-	// runs start immediately; run 0 honours bStartImmediately.
+	// == grouping channel) and the caller's priority (InheritPriority by default -> the asset's Priority
+	// hint). Chained runs start immediately; run 0 honours bStartImmediately.
 	const bool bStart = (RunIndex == 0) ? bStartImmediately : true;
-	UKzDialoguePlayer* Player = Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, UKzDialogueSubsystem::InheritPriority, bStart, ResolvedAdvanceMode);
+	UKzDialoguePlayer* Player = Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, bStart, ResolvedAdvanceMode);
 
 	if (!Player)
 	{

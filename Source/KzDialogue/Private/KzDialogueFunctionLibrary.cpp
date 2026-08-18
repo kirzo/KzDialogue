@@ -65,7 +65,7 @@ bool UKzDialogueFunctionLibrary::TryResolveDialogueLineRef(const FKzDialogueLine
 	return Ref.TryResolve(OutLine);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
+UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority, bool bStartImmediately)
 {
 	if (!List.IsValid()) { return nullptr; }
 
@@ -75,7 +75,7 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObjec
 	UKzDialogueAsset* Loaded = List.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	return Sub->PlayAssetLineList(Loaded, List.LineIds, Channel, Priority, bStartImmediately);
+	return Sub->PlayLineList(Loaded, List.LineIds, Channel, Priority, bStartImmediately);
 }
 
 UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority, bool bStartImmediately)

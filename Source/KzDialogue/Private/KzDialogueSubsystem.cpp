@@ -304,6 +304,20 @@ UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset
 	return Session;
 }
 
+UKzDialogueAssetSession* UKzDialogueSubsystem::PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+{
+	if (!IsValid(Asset))
+	{
+		return nullptr;
+	}
+
+	// Same session machinery as PlayAsset, over the caller's subset: per-entry channels, chained runs.
+	UKzDialogueAssetSession* Session = NewObject<UKzDialogueAssetSession>(this);
+	AssetSessions.Add(Session);
+	Session->StartEntries(this, Asset, LineIds, InChannel, Priority, bStartImmediately, AdvanceMode);
+	return Session;
+}
+
 void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)
 {
 	if (Session)
