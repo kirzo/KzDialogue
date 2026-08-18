@@ -62,6 +62,9 @@ public:
 	/** Subsystem entry point: split the asset into runs and start. Call UKzDialogueSubsystem::PlayAsset, not this. */
 	void Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode);
 
+	/** Subsystem entry point: same as Start, but over an explicit ordered subset of the asset's entries (lines or aliases). Call UKzDialogueSubsystem::PlayLineList, not this. */
+	void StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode);
+
 private:
 	void LaunchRun(int32 RunIndex);
 
@@ -90,6 +93,9 @@ private:
 	TArray<FRun> Runs;
 	int32 CurrentRunIndex = INDEX_NONE;
 	FGameplayTag CurrentChannel;
+
+	/** Caller's priority request, applied to every run; -1 (InheritPriority) falls back to the asset hint / channel default. */
+	int32 Priority = -1;
 	EKzDialogueAdvanceMode ResolvedAdvanceMode = EKzDialogueAdvanceMode::Automatic;
 	EKzDialogueFinishReason FinishReason = EKzDialogueFinishReason::Completed;
 	bool bStartImmediately = true;

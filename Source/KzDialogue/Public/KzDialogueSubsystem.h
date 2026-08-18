@@ -92,6 +92,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
 	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
+	/**
+	 * Play an ordered subset of an asset's entries (lines or aliases) with the same per-entry channel
+	 * resolution and run chaining as PlayAsset. Returns a session that completes once for the whole list.
+	 * A valid InChannel forces every entry onto it (single run); InheritPriority falls back to the asset
+	 * hint / channel default. BP callers go through UKzDialogueFunctionLibrary::PlayDialogueLineList.
+	 */
+	UKzDialogueAssetSession* PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = InheritPriority, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+
 	/** Convenience wrapper: build a manual single-line provider and play it. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);

@@ -342,7 +342,18 @@ void UKzAsyncPlayDialogueLineList::GatherEntryRefs(TArray<FKzDialogueLineRef>& O
 
 UKzDialoguePlayer* UKzAsyncPlayDialogueLineList::LaunchPlayback()
 {
-	return UKzDialogueFunctionLibrary::PlayDialogueLineList(WorldContext, LaunchList, Channel, Priority, bStartImmediately);
+	// Player-based node -> ONE player on ONE channel (first-entry rule), unlike the library's
+	// PlayDialogueLineList, which chains per-entry channels through a session.
+	if (!LaunchList.IsValid()) { return nullptr; }
+
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+	if (!Subsystem) { return nullptr; }
+
+	UKzDialogueAsset* Loaded = LaunchList.Asset.LoadSynchronous();
+	if (!Loaded) { return nullptr; }
+
+	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, bStartImmediately);
 }
 
 // ------------------------------------------------------------------------------------------------

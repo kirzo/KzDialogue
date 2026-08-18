@@ -67,12 +67,14 @@ public:
 	static bool TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);
 
 	/**
-	 * Play a list of dialogue lines (or aliases) as ONE sequential dialogue on the given
-	 * channel. Aliases are resolved at launch; entries that fail to resolve are skipped.
-	 * Line events fire per entry and OnDialogueFinished once at the end.
+	 * Play a list of dialogue lines (or aliases) as ONE sequential dialogue. Each entry plays on its
+	 * own resolved channel (an explicit Channel forces the whole list onto it), chaining consecutive
+	 * same-channel entries as runs, like PlayDialogueAsset. Aliases are resolved at launch; entries
+	 * that fail to resolve are skipped. Returns a session whose OnDialogueFinished fires once when
+	 * the whole list ends.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,bStartImmediately"))
-	static UKzDialoguePlayer* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+	static UKzDialogueAssetSession* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
 
 	/**
 	 * Play an array of line refs (possibly spanning multiple assets) as ONE sequential
