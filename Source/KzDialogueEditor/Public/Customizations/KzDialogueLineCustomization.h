@@ -38,6 +38,9 @@ private:
 	/** Waveform strip + play button inside the Audio group, when the line's audio is a plain wave. */
 	void AddAudioRangeRow(IDetailGroup& AudioGroup);
 
+	/** The Text row with the named-asset token picker appended: the menu lists every token (and its parts) with a resolution preview; picking one appends it to the text. */
+	void AddTextRowWithTokenPicker(class IDetailChildrenBuilder& StructBuilder, TSharedRef<class IPropertyHandle> TextHandle);
+
 	/** Auditions exactly what the game will play: Play(AudioStartTime) plus a cut at AudioEndTime. */
 	FReply OnPlayRangeClicked();
 	bool IsAuditioningRange() const;

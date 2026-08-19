@@ -4,9 +4,11 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueNotify.h"
+#include "KzNamedAsset.h"
 #include "KzSpeakerAsset.h"
 #include "Localization/KzDialogueTranslationCsv.h"
 #include "Widgets/SKzDialogueTimeline.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 
@@ -502,14 +504,18 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 
 bool UKzDialogueValidator_Localization::CanValidate_Implementation(const UObject* Asset) const
 {
-	return Asset && (Asset->IsA<UKzDialogueAsset>() || Asset->IsA<UKzSpeakerAsset>());
+	return Asset && (Asset->IsA<UKzDialogueAsset>() || Asset->IsA<UKzNamedAsset>());
 }
 
 void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
 {
-	if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
+	if (const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Asset))
 	{
-		ValidateSpeakerAsset(SpeakerAsset, OutIssues);
+		ValidateNamedAssetToken(Named, OutIssues);
+		if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
+		{
+			ValidateSpeakerAsset(SpeakerAsset, OutIssues);
+		}
 		return;
 	}
 
@@ -546,6 +552,57 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 			}
 		};
 		CheckKey(Line.Text, TEXT("-Text"));
+	}
+
+	// Named-asset token references. A ":part" modifier states the intent unambiguously, so a
+	// missing token or unknown part there is a real mistake; plain tokens may be code-registered
+	// ambient resolvers and cannot be judged from data.
+	{
+		TMap<FName, FSoftObjectPath> Tokens;
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> NamedAssets;
+		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
+		for (const FAssetData& Data : NamedAssets)
+		{
+			FName AssetToken;
+			if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && !AssetToken.IsNone() && !Tokens.Contains(AssetToken))
+			{
+				Tokens.Add(AssetToken, Data.ToSoftObjectPath());
+			}
+		}
+
+		for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
+		{
+			const FKzDialogueLine& Line = Dialogue->Lines[i];
+			const FString* SourceString = FTextInspector::GetSourceString(Line.Text);
+			if (!SourceString || SourceString->IsEmpty()) { continue; }
+
+			TArray<FString> Args;
+			FTextFormat::FromString(*SourceString).GetFormatArgumentNames(Args);
+			for (const FString& Arg : Args)
+			{
+				FString TokenPart;
+				FString Modifier;
+				if (!Arg.Split(TEXT(":"), &TokenPart, &Modifier)) { continue; }
+
+				const FSoftObjectPath* Path = Tokens.Find(FName(*TokenPart));
+				if (!Path)
+				{
+					AddIssue(EKzValidationSeverity::Warning,
+						FText::Format(LOCTEXT("UnknownNamedToken", "Line {0}: no named asset claims the token '{1}' referenced by '`{{2}`}'."), FText::AsNumber(i + 1), FText::FromString(TokenPart), FText::FromString(Arg)),
+						Line.LineId, i);
+					continue;
+				}
+
+				const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Path->TryLoad());
+				if (Named && !Named->GetNameParts().Contains(FName(*Modifier)))
+				{
+					AddIssue(EKzValidationSeverity::Warning,
+						FText::Format(LOCTEXT("UnknownNamePart", "Line {0}: '{1}' is not a name part of '{2}' (see the token picker for the valid ones)."), FText::AsNumber(i + 1), FText::FromString(Modifier), FText::FromString(Named->GetName())),
+						Line.LineId, i);
+				}
+			}
+		}
 	}
 
 	// Translation-dependent checks need a localization target; without one there is nothing to compare against.
@@ -619,6 +676,27 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
 					Line.LineId, i);
 			}
+		}
+	}
+}
+
+void UKzDialogueValidator_Localization::ValidateNamedAssetToken(const UKzNamedAsset* Named, TArray<FKzValidationIssue>& OutIssues) const
+{
+	if (Named->Token.IsNone()) { return; }
+
+	const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+	TArray<FAssetData> NamedAssets;
+	Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
+	for (const FAssetData& Other : NamedAssets)
+	{
+		if (Other.ToSoftObjectPath() == FSoftObjectPath(Named)) { continue; }
+
+		FName OtherToken;
+		if (Other.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), OtherToken) && OtherToken == Named->Token)
+		{
+			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error,
+				FText::Format(LOCTEXT("DuplicateNamedToken", "Token '{0}' is also claimed by {1}; text references resolve to only one of them."), FText::FromName(Named->Token), FText::FromString(Other.GetObjectPathString())),
+				GetValidatorId()));
 		}
 	}
 }

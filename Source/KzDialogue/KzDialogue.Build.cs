@@ -28,7 +28,8 @@ public class KzDialogue : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				"InputCore"
+				"InputCore",
+				"AssetRegistry"
 			}
 			);
 	}
