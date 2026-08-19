@@ -65,8 +65,13 @@ private:
 	/** Export menu check: the scope exports also carry the project texts (asset-less CSV rows, _Other.po files). */
 	bool bExportProjectTexts = true;
 
-	/** "Namespace,Key" identities merged away or made non-localizable from this panel: the manifest still lists them until the next Gather, so Refresh hides them optimistically. */
+	/** "Namespace,Key" identities merged away or made non-localizable from this panel: the manifest still lists them until the next Gather, so Refresh hides them optimistically. The toolbar Refresh clears the set (e.g. after undoing one of those actions). */
 	TSet<FString> HandledIdentities;
+
+	/** Expansion state of every collapsible area, keyed "<card>|<area>": Refresh rebuilds all widgets and would otherwise collapse the whole view mid-edit. */
+	TMap<FString, bool> AreaExpansion;
+
+	bool IsAreaExpanded(const FString& Key, bool bDefault) const { const bool* Found = AreaExpansion.Find(Key); return Found ? *Found : bDefault; }
 
 	/** One line inside a culture card: its status for that culture, its playable take and its label. */
 	struct FLineRow
