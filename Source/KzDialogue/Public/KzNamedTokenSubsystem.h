@@ -40,11 +40,11 @@ struct KZDIALOGUE_API FKzNamedTokenOverrides
 };
 
 /**
- * Game-instance store of runtime named-token overrides, surviving level travel. A token
- * must already be claimed by a UKzNamedAsset (the asset is the promise: it declares the
- * parts schema and the fallback values); the setters reject unknown tokens. Persistence
- * is the game's business through the snapshot: GetNamedTokenOverrides into the save,
- * ApplyNamedTokenOverrides on load.
+ * Game-instance home of named tokens: the token-to-asset registry cache and the runtime
+ * overrides, both surviving level travel. A token must already be claimed by a
+ * UKzNamedAsset (the asset is the promise: it declares the parts schema and the fallback
+ * values); the setters reject unknown tokens. Persistence is the game's business through
+ * the snapshot: GetNamedTokenOverrides into the save, ApplyNamedTokenOverrides on load.
  */
 UCLASS()
 class KZDIALOGUE_API UKzNamedTokenSubsystem : public UGameInstanceSubsystem
@@ -75,8 +75,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
 	void ApplyNamedTokenOverrides(const FKzNamedTokenOverrides& InOverrides) { Overrides = InOverrides; }
 
-	/** Override for Token, or null. Consulted by the dialogue resolution and the subtitle speaker label. */
+	/** Override for Token, or null. Consulted by the token resolution and the subtitle speaker label. */
 	const FKzNamedTokenOverride* FindOverride(FName Token) const { return Overrides.Tokens.Find(Token); }
+
+	/** Asset path claiming Token, building the registry-scan cache on first use. Null when unclaimed. */
+	const FSoftObjectPath* FindNamedAssetPath(FName Token) const;
+
+	/** The store reachable through WorldContextObject's game instance, or null. */
+	static UKzNamedTokenSubsystem* Get(const UObject* WorldContextObject);
 
 	/** Override for Token reachable through WorldContextObject's game instance, or null (no world, no subsystem, no override). */
 	static const FKzNamedTokenOverride* FindOverrideFor(const UObject* WorldContextObject, FName Token);
@@ -85,6 +91,7 @@ private:
 	UPROPERTY(Transient)
 	FKzNamedTokenOverrides Overrides;
 
-	/** The promise check: some named asset must claim Token before it can be overridden. */
-	bool IsTokenClaimed(FName Token) const;
+	/** Named-asset tokens gathered from the asset registry on first use (session-lifetime cache; assets load lazily). */
+	mutable TMap<FName, FSoftObjectPath> NamedAssetTokens;
+	mutable bool bNamedAssetTokensBuilt = false;
 };

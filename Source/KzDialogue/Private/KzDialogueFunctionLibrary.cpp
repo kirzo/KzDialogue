@@ -4,6 +4,9 @@
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueAsset.h"
+#include "KzNamedAsset.h"
+#include "KzNamedTokenSubsystem.h"
+#include "KzSpeakerAsset.h"
 #include "Engine/World.h"
 
 static UKzDialogueSubsystem* GetDialogueSubsystem(const UObject* WorldContextObject)
@@ -173,4 +176,62 @@ void UKzDialogueFunctionLibrary::SetLineNumberArgument(FKzDialogueLine& Line, FN
 FText UKzDialogueFunctionLibrary::GetLineFormattedText(const FKzDialogueLine& Line)
 {
 	return Line.GetFormattedText();
+}
+
+bool UKzDialogueFunctionLibrary::TryResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier, FText& OutText)
+{
+	FString Token = TokenAndModifier;
+	FString Modifier;
+	TokenAndModifier.Split(TEXT(":"), &Token, &Modifier);
+
+	const UKzNamedTokenSubsystem* Tokens = UKzNamedTokenSubsystem::Get(WorldContextObject);
+	const FSoftObjectPath* Path = Tokens ? Tokens->FindNamedAssetPath(FName(*Token)) : nullptr;
+	if (!Path) { return false; }
+
+	// Small data assets: a synchronous load on first resolve is fine; later resolves hit memory.
+	const UKzNamedAsset* Thing = Cast<UKzNamedAsset>(Path->TryLoad());
+	if (!Thing) { return false; }
+
+	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier), Tokens->FindOverride(FName(*Token)));
+	return true;
+}
+
+FText UKzDialogueFunctionLibrary::ResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier)
+{
+	FText Result;
+	TryResolveNamedText(WorldContextObject, TokenAndModifier, Result);
+	return Result;
+}
+
+bool UKzDialogueFunctionLibrary::TryResolveNamedArgument(const UObject* WorldContextObject, const FString& TokenAndModifier, FFormatArgumentValue& OutValue)
+{
+	FString Token = TokenAndModifier;
+	FString Modifier;
+	TokenAndModifier.Split(TEXT(":"), &Token, &Modifier);
+
+	if (Modifier.Equals(TEXT("gender"), ESearchCase::IgnoreCase))
+	{
+		const UKzNamedTokenSubsystem* Tokens = UKzNamedTokenSubsystem::Get(WorldContextObject);
+		const FSoftObjectPath* Path = Tokens ? Tokens->FindNamedAssetPath(FName(*Token)) : nullptr;
+		if (const UKzSpeakerAsset* Speaker = Path ? Cast<UKzSpeakerAsset>(Path->TryLoad()) : nullptr)
+		{
+			const FKzNamedTokenOverride* Override = Tokens->FindOverride(FName(*Token));
+			const EKzGender Gender = (Override && Override->bOverrideGender) ? Override->Gender : Speaker->Gender;
+
+			// Unspecified maps to Neuter, the |gender() fallback form.
+			const ETextGender TextGender =
+				Gender == EKzGender::Masculine ? ETextGender::Masculine :
+				Gender == EKzGender::Feminine ? ETextGender::Feminine : ETextGender::Neuter;
+			OutValue = FFormatArgumentValue(TextGender);
+			return true;
+		}
+	}
+
+	FText Text;
+	if (TryResolveNamedText(WorldContextObject, TokenAndModifier, Text))
+	{
+		OutValue = FFormatArgumentValue(Text);
+		return true;
+	}
+	return false;
 }
