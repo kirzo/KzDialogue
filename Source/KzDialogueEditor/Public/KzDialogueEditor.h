@@ -8,6 +8,7 @@ class FKzDialogueEditorModule : public FKzLibEditorModule_Base
 {
 private:
 	FDelegateHandle DialogueTrackEditorHandle;
+	FDelegateHandle NamedTokenRenamedHandle;
 	TSharedPtr<class FKzDialogueLinePinFactory> LinePinFactory;
 
 protected:

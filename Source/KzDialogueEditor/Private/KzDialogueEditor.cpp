@@ -6,6 +6,7 @@
 #include "KzDialogueEditorStyle.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
+#include "KzNamedAsset.h"
 #include "KzSpeakerAsset.h"
 #include "KzWordAsset.h"
 
@@ -114,6 +115,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FKzDialogueTranslationCsv::RegisterMenus));
 
+	// Token renames refactor the lines and archives that reference the old token.
+	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&FKzDialogueTranslationCsv::RenameNamedTokenReferences);
+
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing(TEXT("KzDialogueL10N"), LOCTEXT("L10NLogLabel", "KzDialogue Localization"));
 
@@ -137,6 +141,8 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
+	UKzNamedAsset::OnTokenRenamed.Remove(NamedTokenRenamedHandle);
+
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SKzDialogueDashboard::TabId);
 
 	FKzDialogueEditorStyle::Shutdown();

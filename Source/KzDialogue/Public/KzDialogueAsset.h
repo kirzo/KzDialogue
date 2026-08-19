@@ -74,6 +74,10 @@ public:
 	UPROPERTY(Instanced)
 	TArray<TObjectPtr<UKzDialogueTimeline>> Timelines;
 
+	/** Named assets referenced by this asset's line-text tokens ("{Kirzo}"), refreshed at save. Soft references on purpose: the cooker follows them, so token-only referenced things package without Asset Manager rules, while nothing force-loads at runtime. */
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue")
+	TArray<TSoftObjectPtr<UObject>> TokenReferences;
+
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue")
 	int32 IndexOfLine(const FGuid& LineId) const;

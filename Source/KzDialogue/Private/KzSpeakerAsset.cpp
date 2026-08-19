@@ -52,6 +52,7 @@ FText UKzSpeakerAsset::ResolveName(FName Part) const
 	if (Part == TEXT("family")) { return FamilyName.Resolve(Gender); }
 	if (Part == TEXT("honorific")) { return Honorific.Resolve(Gender); }
 	if (Part == TEXT("qualifier")) { return Qualifier.Resolve(Gender); }
+	if (Part == TEXT("gender")) { return FText::FromString(StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Gender))); }
 	if (Part == TEXT("display")) { return DisplayName; }
 	if (Part == TEXT("fullname")) { return ComposeStructuredName(true, true); }
 	if (Part == TEXT("no-honorific")) { return ComposeStructuredName(false, true); }
@@ -70,7 +71,7 @@ FPrimaryAssetId UKzSpeakerAsset::GetPrimaryAssetId() const
 
 TArray<FName> UKzSpeakerAsset::GetNameParts() const
 {
-	return { TEXT("given"), TEXT("family"), TEXT("honorific"), TEXT("qualifier"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
+	return { TEXT("given"), TEXT("family"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
 }
 
 void UKzSpeakerAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

@@ -7,6 +7,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
 #include "KzNamedAsset.h"
+#include "KzSpeakerAsset.h"
 #include "Settings/KzDialogueSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/World.h"
@@ -607,6 +608,35 @@ FText UKzDialogueSubsystem::ResolveNamedText(const FString& TokenAndModifier) co
 	FText Result;
 	TryResolveNamedText(TokenAndModifier, Result);
 	return Result;
+}
+
+bool UKzDialogueSubsystem::TryResolveNamedArgument(const FString& TokenAndModifier, FFormatArgumentValue& OutValue) const
+{
+	FString Token = TokenAndModifier;
+	FString Modifier;
+	TokenAndModifier.Split(TEXT(":"), &Token, &Modifier);
+
+	if (Modifier.Equals(TEXT("gender"), ESearchCase::IgnoreCase))
+	{
+		const FSoftObjectPath* Path = FindNamedAssetPath(FName(*Token));
+		if (const UKzSpeakerAsset* Speaker = Path ? Cast<UKzSpeakerAsset>(Path->TryLoad()) : nullptr)
+		{
+			// Unspecified maps to Neuter, the |gender() fallback form.
+			const ETextGender TextGender =
+				Speaker->Gender == EKzGender::Masculine ? ETextGender::Masculine :
+				Speaker->Gender == EKzGender::Feminine ? ETextGender::Feminine : ETextGender::Neuter;
+			OutValue = FFormatArgumentValue(TextGender);
+			return true;
+		}
+	}
+
+	FText Text;
+	if (TryResolveNamedText(TokenAndModifier, Text))
+	{
+		OutValue = FFormatArgumentValue(Text);
+		return true;
+	}
+	return false;
 }
 
 const FSoftObjectPath* UKzDialogueSubsystem::FindNamedAssetPath(FName Token) const

@@ -37,7 +37,19 @@ public:
 	virtual FText ResolveName(FName Part = NAME_None) const;
 
 #if WITH_EDITOR
+	DECLARE_MULTICAST_DELEGATE_TwoParams(FKzOnNamedTokenRenamed, UKzNamedAsset* /*Asset*/, FName /*OldToken*/);
+
+	/** Fired after Token changes on an asset (old value included); the editor module rewrites the lines referencing the old token. */
+	static FKzOnNamedTokenRenamed OnTokenRenamed;
+
 	/** Valid ":part" modifiers of this type, feeding the token picker and the validator. */
 	virtual TArray<FName> GetNameParts() const { return {}; }
+
+	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+
+private:
+	/** Token value captured before an edit, so the rename broadcast can carry the old name. */
+	FName TokenBeforeEdit;
 #endif
 };

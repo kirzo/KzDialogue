@@ -789,11 +789,12 @@ void UKzDialoguePlayer::ResolveLineFormatArguments()
 			continue;
 		}
 
-		// Data tier: named assets addressed by token ("{Kirzo}", "{Kirzo:given}", "{Gate:Feminine}").
-		FText NamedText;
-		if (Subsystem->TryResolveNamedText(ArgumentName, NamedText))
+		// Data tier: named assets addressed by token ("{Kirzo}", "{Kirzo:given}"). The
+		// ":gender" part yields an ETextGender argument for |gender(...) in translations.
+		FFormatArgumentValue NamedValue;
+		if (Subsystem->TryResolveNamedArgument(ArgumentName, NamedValue))
 		{
-			CurrentLine.FormatArguments.Add(ArgumentName, FFormatArgumentValue(NamedText));
+			CurrentLine.FormatArguments.Add(ArgumentName, NamedValue);
 		}
 	}
 }

@@ -163,6 +163,15 @@ public:
 	/** Writes one translation for every given (Namespace, Key) identity straight into Culture's archive: the panel's inline editing. Source is the string the translation was made against (the current one). */
 	static bool WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError);
 
+	/**
+	 * Token-rename refactor, bound to UKzNamedAsset::OnTokenRenamed at module startup:
+	 * rewrites every dialogue line using "{OldToken}" / "{OldToken:part}" to the asset's new
+	 * token (case-insensitive, inside the ongoing edit transaction so Ctrl+Z reverts both),
+	 * and updates the archives' sources and translations so nothing turns stale. Up-to-date
+	 * recorded-take hashes are preserved: renaming a token does not change what was spoken.
+	 */
+	static void RenameNamedTokenReferences(class UKzNamedAsset* Renamed, FName OldToken);
+
 	/** Culture-less import of SourceText edits made in an exported CSV: rewrites the AUTHORED texts (dialogue lines, speaker fields, project-text occurrences) keeping their namespace/key. A row applies only when the asset did not change after the export (hash still matches); both-sides edits count as conflicted and the asset wins. Transacted; dirty assets must be saved and Gather re-run. */
 	static bool ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError);
 

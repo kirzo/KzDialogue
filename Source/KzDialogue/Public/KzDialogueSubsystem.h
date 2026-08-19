@@ -198,6 +198,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem")
 	FText ResolveNamedText(const FString& TokenAndModifier) const;
 
+	/**
+	 * Like TryResolveNamedText, but producing a format ARGUMENT: a speaker's ":gender" part
+	 * resolves to an ETextGender value, so translations can decline the text around the token
+	 * with the standard |gender(masculine, feminine, neuter) modifier. Everything else
+	 * resolves as text. Used by the line players.
+	 */
+	bool TryResolveNamedArgument(const FString& TokenAndModifier, FFormatArgumentValue& OutValue) const;
+
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
