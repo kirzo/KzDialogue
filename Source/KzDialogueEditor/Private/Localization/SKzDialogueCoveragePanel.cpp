@@ -12,6 +12,7 @@
 #include "AssetRegistry/AssetData.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
+#include "Misc/ConfigCacheIni.h"
 #include "Misc/Paths.h"
 #include "SourceCodeNavigation.h"
 #include "Components/AudioComponent.h"
@@ -75,6 +76,7 @@ namespace
 void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets)
 {
 	bIncludeProjectTexts = InArgs._bIncludeProjectTexts;
+	LoadPersistedFilters();
 
 	for (UKzDialogueAsset* Asset : InAssets)
 	{
@@ -214,6 +216,25 @@ void SKzDialogueCoveragePanel::OnObjectPropertyChanged(UObject* Object, FPropert
 	{
 		Refresh();
 	}
+}
+
+void SKzDialogueCoveragePanel::LoadPersistedFilters()
+{
+	// GetBool leaves the member untouched when the key is missing, so code defaults hold.
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bShowLocalizedAudio"), bShowLocalizedAudio, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bOnlyMissingVoice"), bOnlyMissingVoice, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bOnlyIncomplete"), bOnlyIncomplete, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bShowDialogueLines"), bShowDialogueLines, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bShowOtherTexts"), bShowOtherTexts, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bOnlyMergeableTexts"), bOnlyMergeableTexts, GEditorPerProjectIni);
+	GConfig->GetBool(TEXT("KzDialogueCoveragePanel"), TEXT("bExportProjectTexts"), bExportProjectTexts, GEditorPerProjectIni);
+}
+
+void SKzDialogueCoveragePanel::SavePersistedFilter(const TCHAR* Key, bool bValue) const
+{
+	GConfig->SetBool(TEXT("KzDialogueCoveragePanel"), Key, bValue, GEditorPerProjectIni);
+	// Straight to disk: a raw GConfig write is not guaranteed to survive shutdown otherwise.
+	GConfig->Flush(false, GEditorPerProjectIni);
 }
 
 void SKzDialogueCoveragePanel::Refresh()
@@ -1772,7 +1793,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 		LOCTEXT("MissingVoiceTip", "Show only lines with audio work: missing or stale takes, missing localized variants."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; SavePersistedFilter(TEXT("bOnlyMissingVoice"), bOnlyMissingVoice); Refresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bOnlyMissingVoice; })),
 		NAME_None,
@@ -1783,7 +1804,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 		LOCTEXT("OnlyIncompleteTip", "Hide the 'ok' lines; cultures with nothing pending lose their whole card."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; SavePersistedFilter(TEXT("bOnlyIncomplete"), bOnlyIncomplete); Refresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bOnlyIncomplete; })),
 		NAME_None,
@@ -1801,7 +1822,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 		LOCTEXT("ShowLocalizedAudioTip", "Show the foreign cultures' localized-audio state. Turn off in projects that do not localize audio; the native recording state (missing and stale takes) always shows."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bShowLocalizedAudio = !bShowLocalizedAudio; Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bShowLocalizedAudio = !bShowLocalizedAudio; SavePersistedFilter(TEXT("bShowLocalizedAudio"), bShowLocalizedAudio); Refresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bShowLocalizedAudio; })),
 		NAME_None,
@@ -1814,7 +1835,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("ShowDialogueLinesTip", "Show the dialogue line areas and their bars. Turn off to focus on the project texts."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bShowDialogueLines = !bShowDialogueLines; Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bShowDialogueLines = !bShowDialogueLines; SavePersistedFilter(TEXT("bShowDialogueLines"), bShowDialogueLines); Refresh(); }),
 				FCanExecuteAction(),
 				FIsActionChecked::CreateLambda([this]() { return bShowDialogueLines; })),
 			NAME_None,
@@ -1825,7 +1846,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("ShowOtherTextsTip", "Show the target's non-dialogue gathered texts (UI, menus...) as their own area and progress bar on each culture card."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bShowOtherTexts = !bShowOtherTexts; Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bShowOtherTexts = !bShowOtherTexts; SavePersistedFilter(TEXT("bShowOtherTexts"), bShowOtherTexts); Refresh(); }),
 				FCanExecuteAction(),
 				FIsActionChecked::CreateLambda([this]() { return bShowOtherTexts; })),
 			NAME_None,
@@ -1836,7 +1857,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("OnlyMergeableTextsTip", "Other texts show only identical-source groups (x2 and up): the Merge candidates."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bOnlyMergeableTexts = !bOnlyMergeableTexts; Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bOnlyMergeableTexts = !bOnlyMergeableTexts; SavePersistedFilter(TEXT("bOnlyMergeableTexts"), bOnlyMergeableTexts); Refresh(); }),
 				FCanExecuteAction::CreateLambda([this]() { return bShowOtherTexts; }),
 				FIsActionChecked::CreateLambda([this]() { return bOnlyMergeableTexts; })),
 			NAME_None,
@@ -2040,7 +2061,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 			LOCTEXT("IncludeOtherTextsTip", "The scope exports above also carry every gathered text outside the dialogue assets (UI, menus...): extra asset-less rows in the CSV, <Target>_Other.po files next to the PO ones."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bExportProjectTexts = !bExportProjectTexts; }),
+				FExecuteAction::CreateLambda([this]() { bExportProjectTexts = !bExportProjectTexts; SavePersistedFilter(TEXT("bExportProjectTexts"), bExportProjectTexts); }),
 				FCanExecuteAction::CreateLambda([OtherCount]() { return OtherCount > 0; }),
 				FIsActionChecked::CreateLambda([this]() { return bExportProjectTexts; })),
 			NAME_None,

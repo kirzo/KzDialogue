@@ -73,6 +73,10 @@ private:
 
 	bool IsAreaExpanded(const FString& Key, bool bDefault) const { const bool* Found = AreaExpansion.Find(Key); return Found ? *Found : bDefault; }
 
+	/** The view/filter toggles persist per user across editor sessions (EditorPerProjectUserSettings), so a project that never localizes audio keeps that eye off for good. Saves are per key, from the toggle that changed it: a bulk save would let a stale panel instance clobber another one's choices. */
+	void LoadPersistedFilters();
+	void SavePersistedFilter(const TCHAR* Key, bool bValue) const;
+
 	/** One line inside a culture card: its status for that culture, its playable take and its label. */
 	struct FLineRow
 	{
