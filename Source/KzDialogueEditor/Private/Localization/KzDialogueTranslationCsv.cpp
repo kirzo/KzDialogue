@@ -265,8 +265,10 @@ bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& A
 		AddSpeakerText(Speaker->DisplayName);
 		AddSpeakerText(Speaker->GivenName.Text);
 		AddSpeakerText(Speaker->FamilyName.Text);
+		AddSpeakerText(Speaker->SecondFamilyName.Text);
 		AddSpeakerText(Speaker->Honorific.Text);
 		AddSpeakerText(Speaker->Qualifier.Text);
+		AddSpeakerText(Speaker->NickName.Text);
 	}
 
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
@@ -694,8 +696,10 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		AddSpeakerRow(Speaker->DisplayName, Speaker->SourceDisplayNameHash);
 		AddSpeakerRow(Speaker->GivenName.Text, Speaker->SourceGivenNameHash);
 		AddSpeakerRow(Speaker->FamilyName.Text, Speaker->SourceFamilyNameHash);
+		AddSpeakerRow(Speaker->SecondFamilyName.Text, Speaker->SourceSecondFamilyNameHash);
 		AddSpeakerRow(Speaker->Honorific.Text, Speaker->SourceHonorificHash);
 		AddSpeakerRow(Speaker->Qualifier.Text, Speaker->SourceQualifierHash);
+		AddSpeakerRow(Speaker->NickName.Text, Speaker->SourceNickNameHash);
 	}
 
 	// Asset-less rows (empty Asset column marks them): the manifest validates them at
@@ -918,8 +922,10 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			if (Key == TEXT("DisplayName")) { SourceText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
 			else if (Key == TEXT("GivenName")) { SourceText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
 			else if (Key == TEXT("FamilyName")) { SourceText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
+			else if (Key == TEXT("SecondFamilyName")) { SourceText = &SpeakerAsset->SecondFamilyName.Text; CurrentHash = SpeakerAsset->SourceSecondFamilyNameHash; }
 			else if (Key == TEXT("Honorific")) { SourceText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
 			else if (Key == TEXT("Qualifier")) { SourceText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
+			else if (Key == TEXT("NickName")) { SourceText = &SpeakerAsset->NickName.Text; CurrentHash = SpeakerAsset->SourceNickNameHash; }
 		}
 
 		if (!SourceText)
@@ -1289,8 +1295,10 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 		AppendPoText(Entries, Speaker->DisplayName, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->GivenName.Text, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->FamilyName.Text, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->SecondFamilyName.Text, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->Honorific.Text, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->Qualifier.Text, CopyTemp(Comments));
+		AppendPoText(Entries, Speaker->NickName.Text, CopyTemp(Comments));
 	}
 
 	// Shared word assets: global vocabulary, present in every export so the glossary
@@ -1967,8 +1975,10 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 			if (Key == TEXT("DisplayName")) { TargetText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
 			else if (Key == TEXT("GivenName")) { TargetText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
 			else if (Key == TEXT("FamilyName")) { TargetText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
+			else if (Key == TEXT("SecondFamilyName")) { TargetText = &SpeakerAsset->SecondFamilyName.Text; CurrentHash = SpeakerAsset->SourceSecondFamilyNameHash; }
 			else if (Key == TEXT("Honorific")) { TargetText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
 			else if (Key == TEXT("Qualifier")) { TargetText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
+			else if (Key == TEXT("NickName")) { TargetText = &SpeakerAsset->NickName.Text; CurrentHash = SpeakerAsset->SourceNickNameHash; }
 		}
 
 		if (!TargetText)

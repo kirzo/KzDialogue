@@ -21,7 +21,7 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 
 FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier) const
 {
-	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty())
+	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && SecondFamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty() && NickName.IsEmpty())
 	{
 		return FText::GetEmpty();
 	}
@@ -33,6 +33,8 @@ FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQual
 	FFormatNamedArguments Args;
 	Args.Add(TEXT("Given"), GivenName.Resolve(Gender));
 	Args.Add(TEXT("Family"), FamilyName.Resolve(Gender));
+	Args.Add(TEXT("Family2"), SecondFamilyName.Resolve(Gender));
+	Args.Add(TEXT("Nick"), NickName.Resolve(Gender));
 	Args.Add(TEXT("Honorific"), bWithHonorific ? Honorific.Resolve(Gender) : FText::GetEmpty());
 	Args.Add(TEXT("Qualifier"), bWithQualifier ? Qualifier.Resolve(Gender) : FText::GetEmpty());
 	FString Composed = FText::Format(FTextFormat::FromString(Format), Args).ToString();
@@ -50,6 +52,8 @@ FText UKzSpeakerAsset::ResolveName(FName Part) const
 	if (Part.IsNone()) { return GetResolvedDisplayName(); }
 	if (Part == TEXT("given")) { return GivenName.Resolve(Gender); }
 	if (Part == TEXT("family")) { return FamilyName.Resolve(Gender); }
+	if (Part == TEXT("family2")) { return SecondFamilyName.Resolve(Gender); }
+	if (Part == TEXT("nick")) { return NickName.Resolve(Gender); }
 	if (Part == TEXT("honorific")) { return Honorific.Resolve(Gender); }
 	if (Part == TEXT("qualifier")) { return Qualifier.Resolve(Gender); }
 	if (Part == TEXT("gender")) { return FText::FromString(StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Gender))); }
@@ -71,7 +75,7 @@ FPrimaryAssetId UKzSpeakerAsset::GetPrimaryAssetId() const
 
 TArray<FName> UKzSpeakerAsset::GetNameParts() const
 {
-	return { TEXT("given"), TEXT("family"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
+	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
 }
 
 void UKzSpeakerAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
@@ -136,8 +140,10 @@ void UKzSpeakerAsset::RefreshMetadata()
 	ResetKeyedEmpty(DisplayName);
 	ResetKeyedEmpty(GivenName.Text);
 	ResetKeyedEmpty(FamilyName.Text);
+	ResetKeyedEmpty(SecondFamilyName.Text);
 	ResetKeyedEmpty(Honorific.Text);
 	ResetKeyedEmpty(Qualifier.Text);
+	ResetKeyedEmpty(NickName.Text);
 
 	// A referenced shared word wins: the inline text empties so the localization gather
 	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not
@@ -153,8 +159,10 @@ void UKzSpeakerAsset::RefreshMetadata()
 	};
 	EnforceWordWins(GivenName);
 	EnforceWordWins(FamilyName);
+	EnforceWordWins(SecondFamilyName);
 	EnforceWordWins(Honorific);
 	EnforceWordWins(Qualifier);
+	EnforceWordWins(NickName);
 
 	RebindFTextKeys();
 
@@ -170,8 +178,10 @@ void UKzSpeakerAsset::RefreshMetadata()
 	RefreshHash(DisplayName, SourceDisplayNameHash);
 	RefreshHash(GivenName.Text, SourceGivenNameHash);
 	RefreshHash(FamilyName.Text, SourceFamilyNameHash);
+	RefreshHash(SecondFamilyName.Text, SourceSecondFamilyNameHash);
 	RefreshHash(Honorific.Text, SourceHonorificHash);
 	RefreshHash(Qualifier.Text, SourceQualifierHash);
+	RefreshHash(NickName.Text, SourceNickNameHash);
 
 	if (bDirty)
 	{
@@ -200,8 +210,10 @@ void UKzSpeakerAsset::RebindFTextKeys()
 	Rebind(DisplayName, TEXT("DisplayName"));
 	Rebind(GivenName.Text, TEXT("GivenName"));
 	Rebind(FamilyName.Text, TEXT("FamilyName"));
+	Rebind(SecondFamilyName.Text, TEXT("SecondFamilyName"));
 	Rebind(Honorific.Text, TEXT("Honorific"));
 	Rebind(Qualifier.Text, TEXT("Qualifier"));
+	Rebind(NickName.Text, TEXT("NickName"));
 }
 
 #endif
