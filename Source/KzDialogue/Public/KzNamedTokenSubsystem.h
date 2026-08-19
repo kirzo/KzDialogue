@@ -57,7 +57,7 @@ public:
 	bool SetNamedTokenGender(FName Token, EKzGender Gender);
 
 	/** Overrides one part text ("given", "nick"; "Text" for words). Atoms flow into compositions. False when no named asset claims Token. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens", meta = (KzTokenPin = "Token"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens", meta = (KzTokenPin = "Token", KzTokenPartPin = "Part"))
 	bool SetNamedTokenPart(FName Token, FName Part, FText Text);
 
 	/** Drops every override of Token; the asset's authored values apply again. */

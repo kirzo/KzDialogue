@@ -10,6 +10,9 @@
 #include "K2Node_MakeDialogueLineRef.h"
 #include "K2Node_MakeDialogueLineList.h"
 #include "KzDialogueAsset.h"
+#include "KzNamedAsset.h"
+
+#include "AssetRegistry/AssetRegistryModule.h"
 
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
@@ -79,8 +82,9 @@ namespace KzDialogueLinePinFactoryInternal
 		return false;
 	}
 
-	/** Named-token pin opt-in metadata: KzTokenPin names the token parameter. */
+	/** Named-token pin opt-in metadata: KzTokenPin names the token parameter, KzTokenPartPin a part parameter whose choices depend on the token pin's value. */
 	static const FName MD_KzTokenPin(TEXT("KzTokenPin"));
+	static const FName MD_KzTokenPartPin(TEXT("KzTokenPartPin"));
 
 	/** The function called by the pin's owning node, or null when the node is not a call. */
 	static const UFunction* GetCalledFunction(const UEdGraphPin* Pin)
@@ -89,13 +93,32 @@ namespace KzDialogueLinePinFactoryInternal
 		return Call ? Call->GetTargetFunction() : nullptr;
 	}
 
-	/** True when Pin is the token parameter a called function marked with KzTokenPin. */
-	static bool IsNamedTokenPin(const UEdGraphPin* Pin)
+	/** True when Pin is the parameter the called function's MetaKey metadata names. */
+	static bool IsMetaMarkedPin(const UEdGraphPin* Pin, const FName MetaKey)
 	{
 		if (!Pin || Pin->Direction != EGPD_Input || Pin->ParentPin) { return false; }
 
 		const UFunction* Function = GetCalledFunction(Pin);
-		return Function && Function->GetMetaData(MD_KzTokenPin) == Pin->PinName.ToString();
+		return Function && Function->GetMetaData(MetaKey) == Pin->PinName.ToString();
+	}
+
+	/** The named asset claiming Token, loaded, or null. Same registry discovery as the runtime lookup. */
+	static const UKzNamedAsset* FindNamedAssetByToken(const FString& Token)
+	{
+		if (Token.IsEmpty()) { return nullptr; }
+
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> NamedAssets;
+		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
+		for (const FAssetData& Data : NamedAssets)
+		{
+			FName AssetToken;
+			if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && AssetToken == FName(*Token))
+			{
+				return Cast<UKzNamedAsset>(Data.ToSoftObjectPath().TryLoad());
+			}
+		}
+		return nullptr;
 	}
 }
 
@@ -324,6 +347,103 @@ private:
 };
 
 // =======================================================================================
+// Named-token part SGraphPin
+// =======================================================================================
+
+class SKzTokenPartGraphPin : public SGraphPin
+{
+public:
+	SLATE_BEGIN_ARGS(SKzTokenPartGraphPin) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs, UEdGraphPin* InPin)
+	{
+		SGraphPin::Construct(SGraphPin::FArguments(), InPin);
+	}
+
+protected:
+	virtual TSharedRef<SWidget> GetDefaultValueWidget() override
+	{
+		return SNew(SBox)
+			.WidthOverride(120.f)
+			[
+				SAssignNew(ComboButton, SComboButton)
+					.OnGetMenuContent(this, &SKzTokenPartGraphPin::BuildPartsMenu)
+					.ContentPadding(FMargin(2.f))
+					.ButtonContent()
+					[
+						SNew(STextBlock)
+							.Text(this, &SKzTokenPartGraphPin::GetCurrentPartLabel)
+							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+			];
+	}
+
+private:
+	FText GetCurrentPartLabel() const
+	{
+		const FString DefaultStr = GraphPinObj ? GraphPinObj->GetDefaultAsString() : FString();
+		return DefaultStr.IsEmpty() ? LOCTEXT("PickPart", "Select part...") : FText::FromString(DefaultStr);
+	}
+
+	/** The sibling pin the function's KzTokenPin metadata names, holding the token this part belongs to. */
+	UEdGraphPin* FindTokenPin() const
+	{
+		using namespace KzDialogueLinePinFactoryInternal;
+
+		const UFunction* Function = GetCalledFunction(GraphPinObj);
+		const FString TokenPinName = Function ? Function->GetMetaData(MD_KzTokenPin) : FString();
+		return TokenPinName.IsEmpty() ? nullptr : GraphPinObj->GetOwningNode()->FindPin(FName(*TokenPinName), EGPD_Input);
+	}
+
+	TSharedPtr<SComboButton> ComboButton;
+
+	/** The parts menu is built on open, so it always reflects the token pin's current value. It is the token picker itself in parts mode, so the two dropdowns share one look. */
+	TSharedRef<SWidget> BuildPartsMenu()
+	{
+		using namespace KzDialogueLinePinFactoryInternal;
+
+		auto Hint = [](const FText& Text) -> TSharedRef<SWidget>
+		{
+			return SNew(SBox).Padding(8.f)
+				[
+					SNew(STextBlock).Text(Text).ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				];
+		};
+
+		const UEdGraphPin* TokenPin = FindTokenPin();
+		if (!TokenPin) { return Hint(LOCTEXT("NoTokenPin", "No token pin on this node.")); }
+		if (TokenPin->LinkedTo.Num() > 0) { return Hint(LOCTEXT("TokenConnected", "Token is connected: type the part manually.")); }
+
+		const FString Token = TokenPin->GetDefaultAsString();
+		if (Token.IsEmpty()) { return Hint(LOCTEXT("NoTokenValue", "Pick a token first.")); }
+
+		const UKzNamedAsset* Named = FindNamedAssetByToken(Token);
+		if (!Named) { return Hint(FText::Format(LOCTEXT("UnknownToken", "No named asset claims '{0}'."), FText::FromString(Token))); }
+
+		TSharedRef<SKzTokenPicker> Picker = SNew(SKzTokenPicker)
+			.PartsAsset(Named)
+			.OnTokenChosen(FOnKzTokenChosen::CreateSP(this, &SKzTokenPartGraphPin::OnPartChosen));
+		if (ComboButton.IsValid())
+		{
+			ComboButton->SetMenuContentWidgetToFocus(Picker->GetWidgetToFocus());
+		}
+		return Picker;
+	}
+
+	void OnPartChosen(const FString& Part)
+	{
+		if (!GraphPinObj) { return; }
+
+		const FScopedTransaction Transaction(LOCTEXT("PickPartTransaction", "Select token part"));
+		GraphPinObj->Modify();
+		GraphPinObj->GetSchema()->TrySetDefaultValue(*GraphPinObj, Part);
+
+		FSlateApplication::Get().DismissAllMenus();
+	}
+};
+
+// =======================================================================================
 // Factory
 // =======================================================================================
 
@@ -336,8 +456,9 @@ TSharedPtr<SGraphPin> FKzDialogueLinePinFactory::CreatePin(UEdGraphPin* InPin) c
 	// Line-id pins of our K2Nodes.
 	if (IsLineIdPin(InPin->GetOwningNode(), InPin)) { return SNew(SKzDialogueLineGraphPin, InPin); }
 
-	// Token parameters of functions marked with KzTokenPin metadata.
-	if (IsNamedTokenPin(InPin)) { return SNew(SKzTokenGraphPin, InPin); }
+	// Token and part parameters of functions marked with KzTokenPin / KzTokenPartPin metadata.
+	if (IsMetaMarkedPin(InPin, MD_KzTokenPin)) { return SNew(SKzTokenGraphPin, InPin); }
+	if (IsMetaMarkedPin(InPin, MD_KzTokenPartPin)) { return SNew(SKzTokenPartGraphPin, InPin); }
 
 	return nullptr;
 }

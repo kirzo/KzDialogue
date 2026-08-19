@@ -62,6 +62,16 @@ TArray<FName> UKzWordAsset::GetNameParts() const
 	return Parts;
 }
 
+TArray<FName> UKzWordAsset::GetOverridablePartNames() const
+{
+	// The default form is pinnable too, under its field name (the ":part" modifiers only
+	// cover the gender forms).
+	TArray<FName> Parts;
+	Parts.Add(TEXT("Text"));
+	Parts.Append(GetNameParts());
+	return Parts;
+}
+
 FText UKzWordAsset::GetNamePartDescription(FName Part) const
 {
 	return FText::Format(NSLOCTEXT("KzWord", "PartGenderForm", "The {0} gender form of the word; unauthored forms fall back to Text."), FText::FromName(Part));

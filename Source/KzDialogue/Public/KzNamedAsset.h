@@ -50,6 +50,9 @@ public:
 	/** Valid ":part" modifiers of this type, feeding the token picker and the validator. */
 	virtual TArray<FName> GetNameParts() const { return {}; }
 
+	/** Part keys a runtime override may pin (SetNamedTokenPart), feeding the Part pin picker. The ":part" modifiers unless the subclass has extra pinnable keys. */
+	virtual TArray<FName> GetOverridablePartNames() const { return GetNameParts(); }
+
 	/** Human explanation of one ":part" modifier, shown by the token picker. Empty = no description. */
 	virtual FText GetNamePartDescription(FName Part) const { return FText::GetEmpty(); }
 
