@@ -2,8 +2,10 @@
 
 #include "KzDialogueAsset.h"
 #include "KzDialogueTimeline.h"
+#include "KzNamedAsset.h"
 #include "KzSpeakerAsset.h"
 #include "Sound/SoundBase.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/Crc.h"
 #include "Internationalization/Text.h"
 #include "UObject/AssetRegistryTagsContext.h"
@@ -419,6 +421,53 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		else if (Line.AudioEndTime > 0.0f && Line.AudioEndTime <= Line.AudioStartTime)
 		{
 			Line.AudioEndTime = Line.AudioStartTime + 0.05f;
+			bDirty = true;
+		}
+	}
+
+	// Soft references to the named assets our line tokens resolve to, so the cooker packages
+	// token-only referenced things automatically. Tokens come from the asset registry tag,
+	// like the runtime lookup; unresolved tokens simply contribute nothing. While the startup
+	// scan is still running the registry is incomplete, so the saved references are kept.
+	if (!FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().IsLoadingAssets())
+	{
+		TSet<FName> UsedTokens;
+		for (const FKzDialogueLine& Line : Lines)
+		{
+			const FString* Source = FTextInspector::GetSourceString(Line.Text);
+			if (!Source || Source->IsEmpty()) { continue; }
+
+			TArray<FString> ArgumentNames;
+			FTextFormat::FromString(*Source).GetFormatArgumentNames(ArgumentNames);
+			for (const FString& ArgumentName : ArgumentNames)
+			{
+				FString Token = ArgumentName;
+				FString Modifier;
+				ArgumentName.Split(TEXT(":"), &Token, &Modifier);
+				if (!Token.IsEmpty()) { UsedTokens.Add(FName(*Token)); }
+			}
+		}
+
+		TArray<TSoftObjectPtr<UObject>> NewReferences;
+		if (!UsedTokens.IsEmpty())
+		{
+			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+			TArray<FAssetData> NamedAssets;
+			Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
+			for (const FAssetData& Data : NamedAssets)
+			{
+				FName AssetToken;
+				if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && UsedTokens.Contains(AssetToken))
+				{
+					NewReferences.Emplace(Data.ToSoftObjectPath());
+				}
+			}
+			NewReferences.Sort([](const TSoftObjectPtr<UObject>& A, const TSoftObjectPtr<UObject>& B) { return A.ToString() < B.ToString(); });
+		}
+
+		if (NewReferences != TokenReferences)
+		{
+			TokenReferences = MoveTemp(NewReferences);
 			bDirty = true;
 		}
 	}

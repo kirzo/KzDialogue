@@ -383,6 +383,19 @@ void SKzDialogueCoveragePanel::Refresh()
 				if (Alias.Speaker.Asset) { SpeakerSet.Add(Alias.Speaker.Asset); }
 			}
 		}
+		// Project scope: every speaker must be translatable, including the ones referenced
+		// only by line tokens (or not referenced yet).
+		if (bIncludeProjectTexts)
+		{
+			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+			TArray<FAssetData> SpeakerAssets;
+			Registry.GetAssetsByClass(UKzSpeakerAsset::StaticClass()->GetClassPathName(), SpeakerAssets, /*bSearchSubClasses=*/true);
+			for (const FAssetData& Data : SpeakerAssets)
+			{
+				if (UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Data.GetAsset())) { SpeakerSet.Add(Speaker); }
+			}
+		}
+
 		Speakers = SpeakerSet.Array();
 		Speakers.Sort([](const UKzSpeakerAsset& A, const UKzSpeakerAsset& B) { return A.GetName() < B.GetName(); });
 	}
@@ -400,6 +413,19 @@ void SKzDialogueCoveragePanel::Refresh()
 				if (Field->Word) { WordSet.Add(Field->Word); }
 			}
 		}
+
+		// Project scope without a speaker filter: every word asset, token-referenced or not.
+		if (bIncludeProjectTexts && !bSpeakerFilterActive)
+		{
+			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+			TArray<FAssetData> WordAssets;
+			Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
+			for (const FAssetData& Data : WordAssets)
+			{
+				if (UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset())) { WordSet.Add(Word); }
+			}
+		}
+
 		Words = WordSet.Array();
 		Words.Sort([](const UKzWordAsset& A, const UKzWordAsset& B) { return A.GetName() < B.GetName(); });
 	}

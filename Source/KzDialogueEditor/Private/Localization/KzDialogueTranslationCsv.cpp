@@ -4,8 +4,10 @@
 
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
+#include "KzWordAsset.h"
 #include "Settings/KzDialogueSettings.h"
 
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "ContentBrowserMenuContexts.h"
 #include "DesktopPlatformModule.h"
 #include "EdGraph/EdGraphNode.h"
@@ -696,32 +698,69 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		AddSpeakerRow(Speaker->Qualifier.Text, Speaker->SourceQualifierHash);
 	}
 
-	// Project texts ride along as asset-less rows (empty Asset column marks them): the
-	// manifest validates them at import instead of an asset hash.
+	// Asset-less rows (empty Asset column marks them): the manifest validates them at
+	// import instead of an asset hash. Used by shared words and project texts.
+	auto AddAssetlessRow = [&Csv, &NumRows, &FillCultureCells](const FString& Namespace, const FString& Key, const FString& Source)
+	{
+		FString Translation;
+		FString StaleTranslation;
+		FillCultureCells(Namespace, Key, Source, Translation, StaleTranslation);
+
+		Csv += TEXT(",");
+		Csv += CsvEscape(Namespace) + TEXT(",");
+		Csv += CsvEscape(Key) + TEXT(",");
+		Csv += TEXT(",");
+		Csv += CsvEscape(Source) + TEXT(",");
+		Csv += CsvEscape(Translation) + TEXT(",");
+		Csv += TEXT(",");
+		Csv += TEXT("0,");
+		Csv += TEXT(",");
+		Csv += TEXT(",");
+		Csv += TEXT("0,");
+		Csv += CsvEscape(StaleTranslation);
+		Csv += LINE_TERMINATOR;
+		++NumRows;
+	};
+
+	// Shared word assets: global vocabulary, present in every export so the glossary
+	// travels with the file and translates exactly once.
+	{
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> WordAssets;
+		Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
+		WordAssets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetObjectPathString() < B.GetObjectPathString(); });
+
+		auto AddWordText = [&AddAssetlessRow](const FText& Value)
+		{
+			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Value);
+			const TOptional<FString> Key = FTextInspector::GetKey(Value);
+			const FString* Source = FTextInspector::GetSourceString(Value);
+			if (!Namespace.IsSet() || !Key.IsSet() || !Source || Source->IsEmpty()) { return; }
+			AddAssetlessRow(Namespace.GetValue(), Key.GetValue(), *Source);
+		};
+
+		for (const FAssetData& Data : WordAssets)
+		{
+			const UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset());
+			if (!Word) { continue; }
+
+			AddWordText(Word->Text);
+			for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
+			{
+				AddWordText(Form.Value);
+			}
+		}
+	}
+
+	// Project texts ride along the same way when requested.
 	if (OtherIdentities && !OtherIdentities->IsEmpty() && bQueryLoaded)
 	{
-		Query.EnumerateOtherTexts([&Csv, &NumRows, &FillCultureCells, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
+		Query.EnumerateOtherTexts([&AddAssetlessRow, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
 		{
-			if (!OtherIdentities->Contains(Namespace + TEXT(",") + Key)) { return; }
-
-			FString Translation;
-			FString StaleTranslation;
-			FillCultureCells(Namespace, Key, Source, Translation, StaleTranslation);
-
-			Csv += TEXT(",");
-			Csv += CsvEscape(Namespace) + TEXT(",");
-			Csv += CsvEscape(Key) + TEXT(",");
-			Csv += TEXT(",");
-			Csv += CsvEscape(Source) + TEXT(",");
-			Csv += CsvEscape(Translation) + TEXT(",");
-			Csv += TEXT(",");
-			Csv += TEXT("0,");
-			Csv += TEXT(",");
-			Csv += TEXT(",");
-			Csv += TEXT("0,");
-			Csv += CsvEscape(StaleTranslation);
-			Csv += LINE_TERMINATOR;
-			++NumRows;
+			if (OtherIdentities->Contains(Namespace + TEXT(",") + Key))
+			{
+				AddAssetlessRow(Namespace, Key, Source);
+			}
 		});
 	}
 
@@ -968,6 +1007,124 @@ bool FKzDialogueTranslationCsv::WriteTranslation(const FString& Culture, const T
 	return LocHelper.SaveArchive(Culture, &OutError);
 }
 
+void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken)
+{
+	const FName NewToken = Renamed ? Renamed->Token : NAME_None;
+	if (OldToken.IsNone() || NewToken.IsNone() || OldToken == NewToken) { return; }
+
+	// Case-insensitive, mirroring how tokens resolve (FName lookups ignore case).
+	const FString OldBase = FString::Printf(TEXT("{%s}"), *OldToken.ToString());
+	const FString NewBase = FString::Printf(TEXT("{%s}"), *NewToken.ToString());
+	const FString OldWithPart = FString::Printf(TEXT("{%s:"), *OldToken.ToString());
+	const FString NewWithPart = FString::Printf(TEXT("{%s:"), *NewToken.ToString());
+	auto ReplaceTokens = [&](const FString& In)
+	{
+		FString Out = In.Replace(*OldBase, *NewBase, ESearchCase::IgnoreCase);
+		Out = Out.Replace(*OldWithPart, *NewWithPart, ESearchCase::IgnoreCase);
+		return Out;
+	};
+
+	// One affected text: its identity plus the source strings before and after the rename,
+	// so the archives can follow without turning anything stale.
+	struct FKzRenamedText
+	{
+		FString Namespace;
+		FString Key;
+		FString NewSource;
+	};
+	TArray<FKzRenamedText> RenamedTexts;
+
+	const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+	TArray<FAssetData> DialogueAssets;
+	Registry.GetAssetsByClass(UKzDialogueAsset::StaticClass()->GetClassPathName(), DialogueAssets, /*bSearchSubClasses=*/true);
+
+	int32 ChangedAssets = 0;
+	for (const FAssetData& Data : DialogueAssets)
+	{
+		UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Data.GetAsset());
+		if (!Dialogue) { continue; }
+
+		bool bChanged = false;
+		for (FKzDialogueLine& Line : Dialogue->Lines)
+		{
+			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
+			const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
+			const FString* Source = FTextInspector::GetSourceString(Line.Text);
+			if (!Namespace.IsSet() || !Key.IsSet() || !Source || Source->IsEmpty()) { continue; }
+
+			const FString NewSource = ReplaceTokens(*Source);
+			if (NewSource == *Source) { continue; }
+
+			if (!bChanged)
+			{
+				Dialogue->Modify();
+				bChanged = true;
+			}
+
+			// Renaming a token does not change what was recorded: an up-to-date take stays
+			// up to date under the rewritten text's hash.
+			const bool bTakeWasCurrent = Line.RecordedTextHash != 0 && Line.RecordedTextHash == Line.SourceTextHash;
+			Line.Text = FText::ChangeKey(Namespace.GetValue(), Key.GetValue(), FText::FromString(NewSource));
+			if (bTakeWasCurrent)
+			{
+				Line.RecordedTextHash = KzComputeSourceTextHash(Line.Text);
+			}
+
+			RenamedTexts.Add({ TextNamespaceUtil::StripPackageNamespace(Namespace.GetValue()), Key.GetValue(), NewSource });
+		}
+
+		if (bChanged)
+		{
+			Dialogue->PostEditChange();
+			Dialogue->MarkPackageDirty();
+			++ChangedAssets;
+		}
+	}
+
+	// Follow up in the archives: re-key each affected entry to the new source, rewriting the
+	// token inside existing translations too, so nothing shows as stale after the rename.
+	if (RenamedTexts.Num() > 0)
+	{
+		FKzLocTargetInfo Target;
+		FText TargetError;
+		if (ReadLocTargetInfo(Target, TargetError))
+		{
+			FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+			FText LoadError;
+			if (LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &LoadError) && LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &LoadError))
+			{
+				for (const FString& Culture : Target.ForeignCultures)
+				{
+					if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, &LoadError)) { continue; }
+
+					bool bArchiveChanged = false;
+					for (const FKzRenamedText& Text : RenamedTexts)
+					{
+						const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
+						if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
+
+						const FString NewTranslation = ReplaceTokens(Entry->Translation.Text);
+						if (LocHelper.ImportTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr, FLocItem(Text.NewSource), FLocItem(NewTranslation), false))
+						{
+							bArchiveChanged = true;
+						}
+					}
+
+					if (bArchiveChanged)
+					{
+						EnsureArchiveWritable(Target, Culture);
+						LocHelper.SaveArchive(Culture, nullptr);
+					}
+				}
+			}
+		}
+	}
+
+	ShowNotification(FText::Format(
+		LOCTEXT("TokenRenameDone", "Token '{0}' renamed to '{1}': {2} line(s) in {3} asset(s) rewritten, archives updated. Save the dirty assets and re-run Gather."),
+		FText::FromName(OldToken), FText::FromName(NewToken), RenamedTexts.Num(), ChangedAssets), true);
+}
+
 FText FKzDialogueTranslationCsv::GetCultureDisplayLabel(const FString& Culture)
 {
 	const FCulturePtr CulturePtr = FInternationalization::Get().GetCulture(Culture);
@@ -1134,6 +1291,27 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 		AppendPoText(Entries, Speaker->FamilyName.Text, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->Honorific.Text, CopyTemp(Comments));
 		AppendPoText(Entries, Speaker->Qualifier.Text, CopyTemp(Comments));
+	}
+
+	// Shared word assets: global vocabulary, present in every export so the glossary
+	// travels with the file and translates exactly once.
+	{
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> WordAssets;
+		Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
+		WordAssets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetObjectPathString() < B.GetObjectPathString(); });
+
+		for (const FAssetData& Data : WordAssets)
+		{
+			const UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset());
+			if (!Word) { continue; }
+
+			AppendPoText(Entries, Word->Text, { FString::Printf(TEXT("Word asset: %s"), *Word->GetName()) });
+			for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
+			{
+				AppendPoText(Entries, Form.Value, { FString::Printf(TEXT("Word asset: %s (%s form)"), *Word->GetName(), *StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key))) });
+			}
+		}
 	}
 
 	if (Entries.IsEmpty())
