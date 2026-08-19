@@ -786,6 +786,14 @@ void UKzDialoguePlayer::ResolveLineFormatArguments()
 		if (Resolver && Resolver->IsBound())
 		{
 			CurrentLine.FormatArguments.Add(ArgumentName, FFormatArgumentValue(Resolver->Execute(CurrentLine)));
+			continue;
+		}
+
+		// Data tier: named assets addressed by token ("{Kirzo}", "{Kirzo:given}", "{Gate:Feminine}").
+		FText NamedText;
+		if (Subsystem->TryResolveNamedText(ArgumentName, NamedText))
+		{
+			CurrentLine.FormatArguments.Add(ArgumentName, FFormatArgumentValue(NamedText));
 		}
 	}
 }

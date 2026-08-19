@@ -6,6 +6,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
+#include "UObject/SoftObjectPath.h"
 #include "KzDialogueSubsystem.generated.h"
 
 class UKzDialoguePlayer;
@@ -185,6 +186,18 @@ public:
 	/** Resolver registered for Token, or null. Consulted by players when a line enters. */
 	const FKzDialogueTextArgumentResolver* FindTextArgumentResolver(FName Token) const;
 
+	/**
+	 * Resolve a named-asset text token ("Kirzo" or "Kirzo:given"): the thing's localized
+	 * name, optionally narrowed by the ":part" modifier (speaker name parts, word gender
+	 * forms). Tokens come from UKzNamedAsset::Token, discovered through the asset registry;
+	 * the asset loads on first resolve. False when no named asset claims the token.
+	 */
+	bool TryResolveNamedText(const FString& TokenAndModifier, FText& OutText) const;
+
+	/** Blueprint access to named-asset tokens for text outside dialogue lines (objectives, UI). Empty when no named asset claims the token. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem")
+	FText ResolveNamedText(const FString& TokenAndModifier) const;
+
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
@@ -202,6 +215,13 @@ private:
 
 	/** Ambient token resolvers, keyed by template token name. Dynamic delegates bind weakly, so stale owners just unbind. */
 	TMap<FName, FKzDialogueTextArgumentResolver> TextArgumentResolvers;
+
+	/** Named-asset tokens gathered from the asset registry on first resolve (world lifetime cache; assets load lazily). */
+	mutable TMap<FName, FSoftObjectPath> NamedAssetTokens;
+	mutable bool bNamedAssetTokensBuilt = false;
+
+	/** Asset path claiming Token, building the registry-scan cache on first use. Null when unclaimed. */
+	const FSoftObjectPath* FindNamedAssetPath(FName Token) const;
 
 	/**
 	 * Resolve the priority to use given:

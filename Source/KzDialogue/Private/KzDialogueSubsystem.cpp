@@ -6,7 +6,9 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
+#include "KzNamedAsset.h"
 #include "Settings/KzDialogueSettings.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
 #include "Sound/SoundBase.h"
@@ -581,6 +583,59 @@ void UKzDialogueSubsystem::UnregisterTextArgumentResolver(FName Token)
 const FKzDialogueTextArgumentResolver* UKzDialogueSubsystem::FindTextArgumentResolver(FName Token) const
 {
 	return TextArgumentResolvers.Find(Token);
+}
+
+bool UKzDialogueSubsystem::TryResolveNamedText(const FString& TokenAndModifier, FText& OutText) const
+{
+	FString Token = TokenAndModifier;
+	FString Modifier;
+	TokenAndModifier.Split(TEXT(":"), &Token, &Modifier);
+
+	const FSoftObjectPath* Path = FindNamedAssetPath(FName(*Token));
+	if (!Path) { return false; }
+
+	// Small data assets: a synchronous load on first resolve is fine; later resolves hit memory.
+	const UKzNamedAsset* Thing = Cast<UKzNamedAsset>(Path->TryLoad());
+	if (!Thing) { return false; }
+
+	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier));
+	return true;
+}
+
+FText UKzDialogueSubsystem::ResolveNamedText(const FString& TokenAndModifier) const
+{
+	FText Result;
+	TryResolveNamedText(TokenAndModifier, Result);
+	return Result;
+}
+
+const FSoftObjectPath* UKzDialogueSubsystem::FindNamedAssetPath(FName Token) const
+{
+	if (Token.IsNone()) { return nullptr; }
+
+	if (!bNamedAssetTokensBuilt)
+	{
+		bNamedAssetTokensBuilt = true;
+
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> Assets;
+		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), Assets, /*bSearchSubClasses=*/true);
+
+		for (const FAssetData& Asset : Assets)
+		{
+			FName AssetToken;
+			if (!Asset.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) || AssetToken.IsNone()) { continue; }
+
+			if (const FSoftObjectPath* Existing = NamedAssetTokens.Find(AssetToken))
+			{
+				UE_LOG(LogKzDialogue, Warning, TEXT("Named-asset token '%s' is claimed by both '%s' and '%s'; keeping the first."), *AssetToken.ToString(), *Existing->ToString(), *Asset.GetObjectPathString());
+				continue;
+			}
+			NamedAssetTokens.Add(AssetToken, Asset.ToSoftObjectPath());
+		}
+	}
+
+	return NamedAssetTokens.Find(Token);
 }
 
 FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)

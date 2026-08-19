@@ -136,11 +136,12 @@ public:
 /**
  * Localization correctness checks: texts not anchored to their stable GUID-derived key, stale
  * translations (source text changed after they were made), translations exceeding the line's
- * MaxCharacters, and placeholder mismatches between source and translation. Also validates
- * speaker assets (name field key anchoring + stale name translations). Completeness
- * (untranslated texts, missing localized audio) is the coverage report's business, not a
- * per-save warning. Archive-dependent checks are silently skipped while the project has no
- * localization target.
+ * MaxCharacters, placeholder mismatches between source and translation, and named-asset
+ * token references ("{Token:part}" with no claiming asset or an unknown part). Also validates
+ * named assets (duplicate tokens) and speaker assets (name field key anchoring + stale name
+ * translations). Completeness (untranslated texts, missing localized audio) is the coverage
+ * report's business, not a per-save warning. Archive-dependent checks are silently skipped
+ * while the project has no localization target.
  */
 UCLASS()
 class KZDIALOGUEEDITOR_API UKzDialogueValidator_Localization : public UKzAssetValidator
@@ -153,4 +154,7 @@ public:
 private:
 	/** Speaker-asset branch: key anchoring and stale translations of the name fields. */
 	void ValidateSpeakerAsset(const class UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const;
+
+	/** Named-asset branch: another asset claiming the same token is an error (text references resolve to only one). */
+	void ValidateNamedAssetToken(const class UKzNamedAsset* Named, TArray<FKzValidationIssue>& OutIssues) const;
 };

@@ -21,7 +21,7 @@
  * which then resolves through the speaker's Gender and localizes once for everyone.
  */
 UCLASS(BlueprintType, Const)
-class KZDIALOGUE_API UKzSpeakerAsset : public UPrimaryDataAsset
+class KZDIALOGUE_API UKzSpeakerAsset : public UKzNamedAsset
 {
 	GENERATED_BODY()
 
@@ -78,9 +78,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Speaker")
 	FText GetResolvedDisplayName() const;
 
+	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. */
+	FText ComposeStructuredName(bool bWithHonorific, bool bWithQualifier) const;
+
+	//~ UKzNamedAsset: parts are given / family / honorific / qualifier / display / fullname (structured composition even when DisplayName is set) / no-honorific / no-qualifier; None or unknown = GetResolvedDisplayName.
+	virtual FText ResolveName(FName Part = NAME_None) const override;
+
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 #if WITH_EDITOR
+	virtual TArray<FName> GetNameParts() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostLoad() override;

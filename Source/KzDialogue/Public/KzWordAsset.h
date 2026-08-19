@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
+#include "KzNamedAsset.h"
 #include "KzWordAsset.generated.h"
 
 /** Grammatical gender of a speaker or word form; target languages decline shared words by it. */
@@ -23,7 +23,7 @@ enum class EKzGender : uint8
  * a missing or empty form falls back to Text.
  */
 UCLASS(BlueprintType, Const)
-class KZDIALOGUE_API UKzWordAsset : public UDataAsset
+class KZDIALOGUE_API UKzWordAsset : public UKzNamedAsset
 {
 	GENERATED_BODY()
 
@@ -44,8 +44,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Word")
 	FText Resolve(EKzGender Gender = EKzGender::Unspecified) const;
 
+	//~ UKzNamedAsset: parts are gender form names ("{Gate:Feminine}"); None or unknown = Text.
+	virtual FText ResolveName(FName Part = NAME_None) const override;
+
 	//~ UObject
+	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 #if WITH_EDITOR
+	virtual TArray<FName> GetNameParts() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostLoad() override;
@@ -78,7 +83,7 @@ struct KZDIALOGUE_API FKzWordText
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Text")
 	TObjectPtr<UKzWordAsset> Word;
 
-	bool IsEmpty() const { return !Word && Text.IsEmpty(); }
+	bool IsEmpty() const { return !Word && KzIsTextSourceEmpty(Text); }
 
 	/** The final text: the word asset's gender form when referenced, the inline text otherwise. */
 	FText Resolve(EKzGender Gender = EKzGender::Unspecified) const { return Word ? Word->Resolve(Gender) : Text; }

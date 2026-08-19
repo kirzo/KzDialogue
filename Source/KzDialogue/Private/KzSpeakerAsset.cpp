@@ -6,13 +6,21 @@
 #include "Internationalization/Text.h"
 #include "Settings/KzDialogueSettings.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogKzSpeaker, Log, All);
+
 FText UKzSpeakerAsset::GetResolvedDisplayName() const
 {
-	if (!DisplayName.IsEmpty())
+	// Source-based emptiness: a keyed empty DisplayName can display a stale translation and
+	// would otherwise shadow the structured composition.
+	if (!KzIsTextSourceEmpty(DisplayName))
 	{
 		return DisplayName;
 	}
+	return ComposeStructuredName(/*bWithHonorific=*/true, /*bWithQualifier=*/true);
+}
 
+FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier) const
+{
 	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty())
 	{
 		return FText::GetEmpty();
@@ -25,8 +33,8 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 	FFormatNamedArguments Args;
 	Args.Add(TEXT("Given"), GivenName.Resolve(Gender));
 	Args.Add(TEXT("Family"), FamilyName.Resolve(Gender));
-	Args.Add(TEXT("Honorific"), Honorific.Resolve(Gender));
-	Args.Add(TEXT("Qualifier"), Qualifier.Resolve(Gender));
+	Args.Add(TEXT("Honorific"), bWithHonorific ? Honorific.Resolve(Gender) : FText::GetEmpty());
+	Args.Add(TEXT("Qualifier"), bWithQualifier ? Qualifier.Resolve(Gender) : FText::GetEmpty());
 	FString Composed = FText::Format(FTextFormat::FromString(Format), Args).ToString();
 
 	// Collapse the gaps empty parts leave behind: runs of spaces inside, stray spaces at
@@ -37,12 +45,33 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 	return FText::FromString(Composed);
 }
 
+FText UKzSpeakerAsset::ResolveName(FName Part) const
+{
+	if (Part.IsNone()) { return GetResolvedDisplayName(); }
+	if (Part == TEXT("given")) { return GivenName.Resolve(Gender); }
+	if (Part == TEXT("family")) { return FamilyName.Resolve(Gender); }
+	if (Part == TEXT("honorific")) { return Honorific.Resolve(Gender); }
+	if (Part == TEXT("qualifier")) { return Qualifier.Resolve(Gender); }
+	if (Part == TEXT("display")) { return DisplayName; }
+	if (Part == TEXT("fullname")) { return ComposeStructuredName(true, true); }
+	if (Part == TEXT("no-honorific")) { return ComposeStructuredName(false, true); }
+	if (Part == TEXT("no-qualifier")) { return ComposeStructuredName(true, false); }
+
+	UE_LOG(LogKzSpeaker, Warning, TEXT("'%s': unknown name part '%s'; using the default name."), *GetName(), *Part.ToString());
+	return GetResolvedDisplayName();
+}
+
 FPrimaryAssetId UKzSpeakerAsset::GetPrimaryAssetId() const
 {
 	return FPrimaryAssetId(TEXT("KzSpeaker"), GetFName());
 }
 
 #if WITH_EDITOR
+
+TArray<FName> UKzSpeakerAsset::GetNameParts() const
+{
+	return { TEXT("given"), TEXT("family"), TEXT("honorific"), TEXT("qualifier"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
+}
 
 void UKzSpeakerAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
@@ -91,6 +120,23 @@ void UKzSpeakerAsset::RefreshMetadata()
 		AssetId = FGuid::NewGuid();
 		bDirty = true;
 	}
+
+	// Texts whose SOURCE went empty keep no identity: a keyed empty can resolve a stale
+	// translation as its display string and read as non-empty everywhere. Self-heals assets
+	// keyed back when the rebind did not skip empties yet.
+	auto ResetKeyedEmpty = [&bDirty](FText& InText)
+	{
+		if (FTextInspector::GetNamespace(InText).IsSet() && KzIsTextSourceEmpty(InText))
+		{
+			InText = FText::GetEmpty();
+			bDirty = true;
+		}
+	};
+	ResetKeyedEmpty(DisplayName);
+	ResetKeyedEmpty(GivenName.Text);
+	ResetKeyedEmpty(FamilyName.Text);
+	ResetKeyedEmpty(Honorific.Text);
+	ResetKeyedEmpty(Qualifier.Text);
 
 	// A referenced shared word wins: the inline text empties so the localization gather
 	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not

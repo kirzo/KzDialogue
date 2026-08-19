@@ -2,11 +2,13 @@
 
 #include "KzWordAsset.h"
 
+DEFINE_LOG_CATEGORY_STATIC(LogKzWord, Log, All);
+
 FText UKzWordAsset::Resolve(EKzGender Gender) const
 {
 	if (const FText* Form = GenderForms.Find(Gender))
 	{
-		if (!Form->IsEmpty())
+		if (!KzIsTextSourceEmpty(*Form))
 		{
 			return *Form;
 		}
@@ -14,7 +16,43 @@ FText UKzWordAsset::Resolve(EKzGender Gender) const
 	return Text;
 }
 
+FText UKzWordAsset::ResolveName(FName Part) const
+{
+	if (Part.IsNone())
+	{
+		return Text;
+	}
+
+	const int64 Value = StaticEnum<EKzGender>()->GetValueByNameString(Part.ToString());
+	if (Value == INDEX_NONE)
+	{
+		UE_LOG(LogKzWord, Warning, TEXT("'%s': unknown name part '%s' (expected a gender form); using the default form."), *GetName(), *Part.ToString());
+		return Text;
+	}
+	return Resolve(static_cast<EKzGender>(Value));
+}
+
+FPrimaryAssetId UKzWordAsset::GetPrimaryAssetId() const
+{
+	return FPrimaryAssetId(TEXT("KzWord"), GetFName());
+}
+
 #if WITH_EDITOR
+
+TArray<FName> UKzWordAsset::GetNameParts() const
+{
+	// Every gender form name is addressable; unauthored forms fall back to Text by design.
+	TArray<FName> Parts;
+	const UEnum* Enum = StaticEnum<EKzGender>();
+	for (int32 i = 0; i < Enum->NumEnums() - 1; ++i)
+	{
+		if (static_cast<EKzGender>(Enum->GetValueByIndex(i)) != EKzGender::Unspecified)
+		{
+			Parts.Add(*Enum->GetNameStringByIndex(i));
+		}
+	}
+	return Parts;
+}
 
 void UKzWordAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
@@ -60,6 +98,22 @@ void UKzWordAsset::RefreshMetadata()
 	{
 		AssetId = FGuid::NewGuid();
 		MarkPackageDirty();
+	}
+
+	// Texts whose SOURCE went empty keep no identity: a keyed empty can resolve a stale
+	// translation as its display string and read as non-empty everywhere.
+	auto ResetKeyedEmpty = [this](FText& InText)
+	{
+		if (FTextInspector::GetNamespace(InText).IsSet() && KzIsTextSourceEmpty(InText))
+		{
+			InText = FText::GetEmpty();
+			MarkPackageDirty();
+		}
+	};
+	ResetKeyedEmpty(Text);
+	for (TPair<EKzGender, FText>& Form : GenderForms)
+	{
+		ResetKeyedEmpty(Form.Value);
 	}
 
 	RebindFTextKeys();
