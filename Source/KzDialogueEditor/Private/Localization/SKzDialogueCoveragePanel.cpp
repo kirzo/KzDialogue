@@ -682,8 +682,10 @@ void SKzDialogueCoveragePanel::Refresh()
 				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("DisplayName")), Speaker->DisplayName, SpeakerClickTip);
 				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("GivenName")), Speaker->GivenName.Text, SpeakerClickTip);
 				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("FamilyName")), Speaker->FamilyName.Text, SpeakerClickTip);
+				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("SecondFamilyName")), Speaker->SecondFamilyName.Text, SpeakerClickTip);
 				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("Honorific")), Speaker->Honorific.Text, SpeakerClickTip);
 				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("Qualifier")), Speaker->Qualifier.Text, SpeakerClickTip);
+				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("NickName")), Speaker->NickName.Text, SpeakerClickTip);
 			}
 		}
 

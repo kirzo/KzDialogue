@@ -711,8 +711,10 @@ void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAss
 		{ TEXT("DisplayName"), Speaker->DisplayName },
 		{ TEXT("GivenName"), Speaker->GivenName.Text },
 		{ TEXT("FamilyName"), Speaker->FamilyName.Text },
+		{ TEXT("SecondFamilyName"), Speaker->SecondFamilyName.Text },
 		{ TEXT("Honorific"), Speaker->Honorific.Text },
 		{ TEXT("Qualifier"), Speaker->Qualifier.Text },
+		{ TEXT("NickName"), Speaker->NickName.Text },
 	};
 
 	// Key anchoring. Self-heals on resave. Culture-invariant fields are deliberately

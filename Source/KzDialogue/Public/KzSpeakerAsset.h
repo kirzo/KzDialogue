@@ -46,6 +46,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText FamilyName;
 
+	/** Second family-name component: the Hispanic second surname, a Portuguese double surname, a patronymic... Placed by the name format's {Family2}; addressable as "{Token:family2}". */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
+	FKzWordText SecondFamilyName;
+
 	/** Optional honorific ("Dr.", "-san"). Placement is decided by the per-culture name format. Common vocabulary: prefer a shared word asset. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText Honorific;
@@ -53,6 +57,10 @@ public:
 	/** Optional qualifier describing the character variant ("Teen", "Young", "Ghost of"). Not a form of address; placement is decided by the per-culture name format. Common vocabulary: prefer a shared word asset. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText Qualifier;
+
+	/** Informal address ("Bob" for Robert): how other characters call this one in dialogue, via "{Token:nick}". Not part of the default composed name; the {Nick} format arg exists for projects that want it composed. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
+	FKzWordText NickName;
 
 	/** CRC32 of DisplayName's source string. Updated automatically; used to detect translation drift. */
 	UPROPERTY()
@@ -66,6 +74,10 @@ public:
 	UPROPERTY()
 	uint32 SourceFamilyNameHash = 0;
 
+	/** CRC32 of SecondFamilyName's source string. Same role as SourceDisplayNameHash. */
+	UPROPERTY()
+	uint32 SourceSecondFamilyNameHash = 0;
+
 	/** CRC32 of Honorific's source string. Same role as SourceDisplayNameHash. */
 	UPROPERTY()
 	uint32 SourceHonorificHash = 0;
@@ -73,6 +85,10 @@ public:
 	/** CRC32 of Qualifier's source string. Same role as SourceDisplayNameHash. */
 	UPROPERTY()
 	uint32 SourceQualifierHash = 0;
+
+	/** CRC32 of NickName's source string. Same role as SourceDisplayNameHash. */
+	UPROPERTY()
+	uint32 SourceNickNameHash = 0;
 
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Speaker")
