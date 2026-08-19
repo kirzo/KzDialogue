@@ -556,18 +556,19 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 
 	// Named-asset token references. A ":part" modifier states the intent unambiguously, so a
 	// missing token or unknown part there is a real mistake; plain tokens may be code-registered
-	// ambient resolvers and cannot be judged from data.
+	// ambient resolvers and cannot be judged from data. The token map also whitelists the
+	// tokens translations may legitimately ADD (the gender mechanism lives only there).
+	TMap<FName, FSoftObjectPath> NamedTokens;
 	{
-		TMap<FName, FSoftObjectPath> Tokens;
 		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 		TArray<FAssetData> NamedAssets;
 		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
 		for (const FAssetData& Data : NamedAssets)
 		{
 			FName AssetToken;
-			if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && !AssetToken.IsNone() && !Tokens.Contains(AssetToken))
+			if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && !AssetToken.IsNone() && !NamedTokens.Contains(AssetToken))
 			{
-				Tokens.Add(AssetToken, Data.ToSoftObjectPath());
+				NamedTokens.Add(AssetToken, Data.ToSoftObjectPath());
 			}
 		}
 
@@ -585,7 +586,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 				FString Modifier;
 				if (!Arg.Split(TEXT(":"), &TokenPart, &Modifier)) { continue; }
 
-				const FSoftObjectPath* Path = Tokens.Find(FName(*TokenPart));
+				const FSoftObjectPath* Path = NamedTokens.Find(FName(*TokenPart));
 				if (!Path)
 				{
 					AddIssue(EKzValidationSeverity::Warning,
@@ -669,8 +670,25 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 					Line.LineId, i);
 			}
 
+			// Every source placeholder must survive into the translation. EXTRA translation
+			// placeholders are fine when they are named-asset tokens: the gender mechanism
+			// ("{player:gender}|gender(...)") exists only in translations by design.
 			const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
-			if (SourceArgs.Num() != TranslationArgs.Num() || !SourceArgs.Includes(TranslationArgs))
+			TSet<FString> Problems;
+			for (const FString& Arg : SourceArgs)
+			{
+				if (!TranslationArgs.Contains(Arg)) { Problems.Add(Arg); }
+			}
+			for (const FString& Arg : TranslationArgs)
+			{
+				if (SourceArgs.Contains(Arg)) { continue; }
+
+				FString Token = Arg;
+				FString Modifier;
+				Arg.Split(TEXT(":"), &Token, &Modifier);
+				if (!NamedTokens.Contains(FName(*Token))) { Problems.Add(Arg); }
+			}
+			if (Problems.Num() > 0)
 			{
 				AddIssue(EKzValidationSeverity::Error,
 					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
