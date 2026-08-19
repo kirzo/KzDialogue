@@ -22,6 +22,7 @@ TArray<FString> SKzTokenPicker::RecentTokens;
 void SKzTokenPicker::Construct(const FArguments& InArgs)
 {
 	bAutocompleteMode = InArgs._bAutocompleteMode;
+	bBaseTokensOnly = InArgs._bBaseTokensOnly;
 	OnTokenChosen = InArgs._OnTokenChosen;
 
 	BuildNodes();
@@ -137,16 +138,19 @@ void SKzTokenPicker::BuildNodes()
 		Base->bEmptyPreview = Base->Preview.IsEmpty();
 		TypeNames.AddUnique(Base->TypeName);
 
-		for (const FName Part : Named->GetNameParts())
+		if (!bBaseTokensOnly)
 		{
-			TSharedPtr<FKzTokenNode> Child = MakeShared<FKzTokenNode>();
-			Child->TokenText = FString::Printf(TEXT("{%s:%s}"), *Token.ToString(), *Part.ToString());
-			Child->Preview = Named->ResolveName(Part);
-			Child->Description = Named->GetNamePartDescription(Part);
-			Child->TypeName = Base->TypeName;
-			Child->AssetPath = Base->AssetPath;
-			Child->bEmptyPreview = Child->Preview.IsEmpty();
-			Base->Children.Add(Child);
+			for (const FName Part : Named->GetNameParts())
+			{
+				TSharedPtr<FKzTokenNode> Child = MakeShared<FKzTokenNode>();
+				Child->TokenText = FString::Printf(TEXT("{%s:%s}"), *Token.ToString(), *Part.ToString());
+				Child->Preview = Named->ResolveName(Part);
+				Child->Description = Named->GetNamePartDescription(Part);
+				Child->TypeName = Base->TypeName;
+				Child->AssetPath = Base->AssetPath;
+				Child->bEmptyPreview = Child->Preview.IsEmpty();
+				Base->Children.Add(Child);
+			}
 		}
 
 		AllNodes.Add(Base);

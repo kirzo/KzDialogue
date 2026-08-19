@@ -166,7 +166,7 @@ public:
 	static bool TryResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier, FText& OutText);
 
 	/** Blueprint access to named-asset tokens for text outside dialogue lines (objectives, UI). Empty when no named asset claims the token. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (WorldContext = "WorldContextObject", KzTokenPin = "TokenAndModifier"))
 	static FText ResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier);
 
 	/**

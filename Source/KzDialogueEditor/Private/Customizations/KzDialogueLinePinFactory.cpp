@@ -2,7 +2,9 @@
 
 #include "Customizations/KzDialogueLinePinFactory.h"
 #include "Widgets/SKzDialogueLinePicker.h"
+#include "Widgets/SKzTokenPicker.h"
 
+#include "K2Node_CallFunction.h"
 #include "K2Node_PlayDialogueLine.h"
 #include "K2Node_PlayDialogueLineAsync.h"
 #include "K2Node_MakeDialogueLineRef.h"
@@ -75,6 +77,25 @@ namespace KzDialogueLinePinFactoryInternal
 		if (const UK2Node_MakeDialogueLineList* MakeList = Cast<UK2Node_MakeDialogueLineList>(Node)) { return MakeList->IsLinePin(Pin); }
 
 		return false;
+	}
+
+	/** Named-token pin opt-in metadata: KzTokenPin names the token parameter. */
+	static const FName MD_KzTokenPin(TEXT("KzTokenPin"));
+
+	/** The function called by the pin's owning node, or null when the node is not a call. */
+	static const UFunction* GetCalledFunction(const UEdGraphPin* Pin)
+	{
+		const UK2Node_CallFunction* Call = Pin ? Cast<UK2Node_CallFunction>(Pin->GetOwningNode()) : nullptr;
+		return Call ? Call->GetTargetFunction() : nullptr;
+	}
+
+	/** True when Pin is the token parameter a called function marked with KzTokenPin. */
+	static bool IsNamedTokenPin(const UEdGraphPin* Pin)
+	{
+		if (!Pin || Pin->Direction != EGPD_Input || Pin->ParentPin) { return false; }
+
+		const UFunction* Function = GetCalledFunction(Pin);
+		return Function && Function->GetMetaData(MD_KzTokenPin) == Pin->PinName.ToString();
 	}
 }
 
@@ -225,6 +246,84 @@ private:
 };
 
 // =======================================================================================
+// Named-token SGraphPin
+// =======================================================================================
+
+class SKzTokenGraphPin : public SGraphPin
+{
+public:
+	SLATE_BEGIN_ARGS(SKzTokenGraphPin) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs, UEdGraphPin* InPin)
+	{
+		SGraphPin::Construct(SGraphPin::FArguments(), InPin);
+	}
+
+protected:
+	virtual TSharedRef<SWidget> GetDefaultValueWidget() override
+	{
+		return SNew(SBox)
+			.WidthOverride(150.f)
+			[
+				SAssignNew(ComboButton, SComboButton)
+					.OnGetMenuContent(this, &SKzTokenGraphPin::BuildPickerContent)
+					.ContentPadding(FMargin(2.f))
+					.ButtonContent()
+					[
+						SNew(STextBlock)
+							.Text(this, &SKzTokenGraphPin::GetCurrentTokenLabel)
+							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
+					]
+			];
+	}
+
+private:
+	TSharedPtr<SComboButton> ComboButton;
+
+	FText GetCurrentTokenLabel() const
+	{
+		const FString DefaultStr = GraphPinObj ? GraphPinObj->GetDefaultAsString() : FString();
+		return DefaultStr.IsEmpty() ? LOCTEXT("PickToken", "Select token...") : FText::FromString(DefaultStr);
+	}
+
+	TSharedRef<SWidget> BuildPickerContent()
+	{
+		// Name pins hold a bare token, so parts would not fit; string pins take "Token:part".
+		TSharedRef<SKzTokenPicker> Picker = SNew(SKzTokenPicker)
+			.bBaseTokensOnly(!IsStringPin())
+			.OnTokenChosen(FOnKzTokenChosen::CreateSP(this, &SKzTokenGraphPin::OnTokenChosen));
+		if (ComboButton.IsValid())
+		{
+			ComboButton->SetMenuContentWidgetToFocus(Picker->GetWidgetToFocus());
+		}
+
+		// The picker sizes itself.
+		return Picker;
+	}
+
+	void OnTokenChosen(const FString& TokenText)
+	{
+		if (!GraphPinObj) { return; }
+
+		// The picker hands over the insertable form ("{Kirzo}" / "{Kirzo:given}").
+		FString Inner = TokenText.TrimStartAndEnd();
+		if (Inner.StartsWith(TEXT("{")) && Inner.EndsWith(TEXT("}"))) { Inner = Inner.Mid(1, Inner.Len() - 2); }
+
+		const FScopedTransaction Transaction(LOCTEXT("PickTokenTransaction", "Select named token"));
+		GraphPinObj->Modify();
+		GraphPinObj->GetSchema()->TrySetDefaultValue(*GraphPinObj, Inner);
+
+		FSlateApplication::Get().DismissAllMenus();
+	}
+
+	bool IsStringPin() const
+	{
+		return GraphPinObj && GraphPinObj->PinType.PinCategory == UEdGraphSchema_K2::PC_String;
+	}
+};
+
+// =======================================================================================
 // Factory
 // =======================================================================================
 
@@ -234,10 +333,13 @@ TSharedPtr<SGraphPin> FKzDialogueLinePinFactory::CreatePin(UEdGraphPin* InPin) c
 
 	if (!InPin) { return nullptr; }
 
-	// Only intercept the line-id pins of our K2Nodes.
-	if (!IsLineIdPin(InPin->GetOwningNode(), InPin)) { return nullptr; }
+	// Line-id pins of our K2Nodes.
+	if (IsLineIdPin(InPin->GetOwningNode(), InPin)) { return SNew(SKzDialogueLineGraphPin, InPin); }
 
-	return SNew(SKzDialogueLineGraphPin, InPin);
+	// Token parameters of functions marked with KzTokenPin metadata.
+	if (IsNamedTokenPin(InPin)) { return SNew(SKzTokenGraphPin, InPin); }
+
+	return nullptr;
 }
 
 #undef LOCTEXT_NAMESPACE

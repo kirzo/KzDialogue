@@ -28,11 +28,14 @@ class SKzTokenPicker : public SCompoundWidget
 public:
 	SLATE_BEGIN_ARGS(SKzTokenPicker)
 		: _bAutocompleteMode(false)
+		, _bBaseTokensOnly(false)
 		{}
 		/** Fired with the full insertable token text ("{Kirzo:given}"). */
 		SLATE_EVENT(FOnKzTokenChosen, OnTokenChosen)
 		/** Compact, externally driven variant for the inline "{" completion. */
 		SLATE_ARGUMENT(bool, bAutocompleteMode)
+		/** Offers base tokens only, no ":part" children: for hosts whose slot is a bare token (a Token pin). */
+		SLATE_ARGUMENT(bool, bBaseTokensOnly)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -76,6 +79,7 @@ private:
 	FString Filter;
 	FString TypeFilter;
 	bool bAutocompleteMode = false;
+	bool bBaseTokensOnly = false;
 	FOnKzTokenChosen OnTokenChosen;
 
 	TSharedPtr<STreeView<TSharedPtr<FKzTokenNode>>> TreeView;
