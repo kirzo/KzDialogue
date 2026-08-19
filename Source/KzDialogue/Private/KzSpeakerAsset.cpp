@@ -79,6 +79,23 @@ TArray<FName> UKzSpeakerAsset::GetNameParts() const
 	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier"), TEXT("no-family") };
 }
 
+FText UKzSpeakerAsset::GetNamePartDescription(FName Part) const
+{
+	if (Part == TEXT("given")) { return NSLOCTEXT("KzSpeaker", "PartGiven", "Given (first) name only."); }
+	if (Part == TEXT("family")) { return NSLOCTEXT("KzSpeaker", "PartFamily", "First family name only."); }
+	if (Part == TEXT("family2")) { return NSLOCTEXT("KzSpeaker", "PartFamily2", "Second family-name component only (second surname, patronymic)."); }
+	if (Part == TEXT("nick")) { return NSLOCTEXT("KzSpeaker", "PartNick", "Informal address (\"Bob\")."); }
+	if (Part == TEXT("honorific")) { return NSLOCTEXT("KzSpeaker", "PartHonorific", "Honorific only (\"Dr.\"), in this character's gender form."); }
+	if (Part == TEXT("qualifier")) { return NSLOCTEXT("KzSpeaker", "PartQualifier", "Variant qualifier only (\"Teen\")."); }
+	if (Part == TEXT("gender")) { return NSLOCTEXT("KzSpeaker", "PartGender", "No visible text: a gender value for |gender(masculine, feminine, neuter) in translations."); }
+	if (Part == TEXT("display")) { return NSLOCTEXT("KzSpeaker", "PartDisplay", "The raw DisplayName field, ignoring the structured parts."); }
+	if (Part == TEXT("fullname")) { return NSLOCTEXT("KzSpeaker", "PartFullname", "Structured composition with every part, even when DisplayName is set."); }
+	if (Part == TEXT("no-honorific")) { return NSLOCTEXT("KzSpeaker", "PartNoHonorific", "Composition without the honorific."); }
+	if (Part == TEXT("no-qualifier")) { return NSLOCTEXT("KzSpeaker", "PartNoQualifier", "Composition without the qualifier."); }
+	if (Part == TEXT("no-family")) { return NSLOCTEXT("KzSpeaker", "PartNoFamily", "Composition without either surname (\"Teen Kirzo\")."); }
+	return FText::GetEmpty();
+}
+
 void UKzSpeakerAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);

@@ -45,6 +45,9 @@ public:
 	/** Valid ":part" modifiers of this type, feeding the token picker and the validator. */
 	virtual TArray<FName> GetNameParts() const { return {}; }
 
+	/** Human explanation of one ":part" modifier, shown by the token picker. Empty = no description. */
+	virtual FText GetNamePartDescription(FName Part) const { return FText::GetEmpty(); }
+
 	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 
