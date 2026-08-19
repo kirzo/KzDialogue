@@ -53,15 +53,15 @@ class KZDIALOGUE_API UKzNamedTokenSubsystem : public UGameInstanceSubsystem
 
 public:
 	/** Overrides the gender used to resolve the token's name parts and its ":gender" argument. False when no named asset claims Token. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens", meta = (KzTokenPin = "Token"))
 	bool SetNamedTokenGender(FName Token, EKzGender Gender);
 
 	/** Overrides one part text ("given", "nick"; "Text" for words). Atoms flow into compositions. False when no named asset claims Token. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens", meta = (KzTokenPin = "Token"))
 	bool SetNamedTokenPart(FName Token, FName Part, FText Text);
 
 	/** Drops every override of Token; the asset's authored values apply again. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens", meta = (KzTokenPin = "Token"))
 	void ClearNamedTokenOverride(FName Token);
 
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
