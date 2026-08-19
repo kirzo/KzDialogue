@@ -122,6 +122,12 @@ private:
 	TWeakObjectPtr<class UAudioComponent> PreviewAudio;
 	FString PreviewKey;
 
+	/** Translation editors in build (visual) order, keyed "<culture>|<namespace>|<key>"; rebuilt every Refresh. */
+	TArray<TPair<FString, TWeakPtr<class SEditableText>>> TranslationEditors;
+
+	/** Set by the Tab handler right before it forces the commit, so that commit advances the focus like Enter. */
+	bool bAdvanceTranslationFocus = false;
+
 	void Refresh();
 
 	/** Auto-refresh: the panel follows edits to any of its assets instead of relying on the Refresh button. */
@@ -133,8 +139,14 @@ private:
 	/** Accepts the current text for a stale take: re-stamps RecordedTextHash without re-recording. */
 	void AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
 
-	/** Writes an inline-edited translation into the culture's archive (every identity of the row) and refreshes on the next tick. */
-	void CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation);
+	/** Writes an inline-edited translation into the culture's archive (every identity of the row) and refreshes on the next tick. FocusAfter: editor keys to focus after the rebuild (first one still present wins), for fluid Enter/Tab chains. */
+	void CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation, TArray<FString> FocusAfter = TArray<FString>());
+
+	/** Ordered keys of every translation editor after EditorKey in the current build; the follow-ups let the focus land on the next surviving row when filters drop some. */
+	TArray<FString> NextEditorKeysAfter(const FString& EditorKey) const;
+
+	/** Focus the first live translation editor among CandidateKeys. */
+	void FocusTranslationEditor(const TArray<FString>& CandidateKeys);
 
 	/** Rewrites the identical-source occurrences to one shared namespace/key (MergeIdenticalTexts) and reports the result. */
 	void MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities);

@@ -18,6 +18,7 @@
 #include "ContentBrowserModule.h"
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "InputCoreTypes.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -215,6 +216,7 @@ void SKzDialogueCoveragePanel::OnObjectPropertyChanged(UObject* Object, FPropert
 void SKzDialogueCoveragePanel::Refresh()
 {
 	Rows->ClearChildren();
+	TranslationEditors.Reset();
 
 	auto AddMessage = [this](const FText& Message)
 	{
@@ -1264,7 +1266,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			];
 	}
 
-	return SNew(SBorder)
+	// Fluid keyboard editing: the editor registers under a stable key so Enter/Tab can hop
+	// to the next one even after the post-commit rebuild replaced every widget.
+	const FString EditorKey = (!Entry.TranslationCulture.IsEmpty() && Entry.TranslationIdentities.Num() > 0)
+		? Entry.TranslationCulture + TEXT("|") + Entry.TranslationIdentities[0].Key + TEXT("|") + Entry.TranslationIdentities[0].Value
+		: FString();
+	TSharedPtr<SEditableText> TranslationEditor;
+
+	TSharedRef<SWidget> RowWidget = SNew(SBorder)
 		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
 		.Padding(FMargin(4.0f, 2.0f))
 		[
@@ -1314,24 +1323,60 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(2.0f, 0.0f, 4.0f, 0.0f)
 			[
-				SNew(SEditableText)
+				SAssignNew(TranslationEditor, SEditableText)
 					.Text(Entry.Translation)
 					.HintText(LOCTEXT("TranslationHint", "untranslated"))
 					.ToolTipText(Entry.Translation.IsEmpty()
-						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter: it is written into this culture's archive.")
+						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter or Tab: it is written into this culture's archive and the focus moves to the next row.")
 						: Entry.Translation)
 					.SelectAllTextWhenFocused(true)
 					.ClearKeyboardFocusOnCommit(true)
-					.OnTextCommitted_Lambda([this, Culture = Entry.TranslationCulture, Identities = Entry.TranslationIdentities, TranslationSource = Entry.TranslationSource, Previous = Entry.Translation](const FText& NewText, ETextCommit::Type CommitType)
+					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
 					{
+						// Tab routes through the commit (via the focus clear) so it saves AND advances like Enter.
+						if (KeyEvent.GetKey() == EKeys::Tab)
+						{
+							bAdvanceTranslationFocus = true;
+							FSlateApplication::Get().ClearKeyboardFocus(EFocusCause::SetDirectly);
+							return FReply::Handled();
+						}
+						return FReply::Unhandled();
+					})
+					.OnTextCommitted_Lambda([this, Culture = Entry.TranslationCulture, Identities = Entry.TranslationIdentities, TranslationSource = Entry.TranslationSource, Previous = Entry.Translation, EditorKey](const FText& NewText, ETextCommit::Type CommitType)
+					{
+						const bool bAdvance = CommitType == ETextCommit::OnEnter || bAdvanceTranslationFocus;
+						bAdvanceTranslationFocus = false;
 						if (CommitType == ETextCommit::OnCleared) { return; }
+
 						const FString NewTranslation = NewText.ToString();
-						if (NewTranslation.IsEmpty() || NewTranslation == Previous.ToString()) { return; }
-						CommitTranslation(Culture, Identities, TranslationSource, NewTranslation);
+						if (!NewTranslation.IsEmpty() && NewTranslation != Previous.ToString())
+						{
+							CommitTranslation(Culture, Identities, TranslationSource, NewTranslation, bAdvance ? NextEditorKeysAfter(EditorKey) : TArray<FString>());
+						}
+						else if (bAdvance)
+						{
+							// Nothing to write (unchanged or empty): skip straight to the next row.
+							// Deferred one tick: the editor clears the keyboard focus right after
+							// this callback and would stomp an immediate jump.
+							FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this)), Keys = NextEditorKeysAfter(EditorKey)](float)
+							{
+								if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
+								{
+									Panel->FocusTranslationEditor(Keys);
+								}
+								return false;
+							}));
+						}
 					})
 					.Visibility(Entry.TranslationCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 			]
 		];
+
+	if (!EditorKey.IsEmpty() && TranslationEditor.IsValid())
+	{
+		TranslationEditors.Emplace(EditorKey, TranslationEditor);
+	}
+	return RowWidget;
 }
 
 TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords)
@@ -1550,7 +1595,7 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	Refresh();
 }
 
-void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation)
+void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation, TArray<FString> FocusAfter)
 {
 	FText Error;
 	if (!FKzDialogueTranslationCsv::WriteTranslation(Culture, Identities, Source, NewTranslation, Error))
@@ -1564,15 +1609,47 @@ void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<F
 		return;
 	}
 
-	// The commit runs from inside the row's editable widget; rebuild next tick, not under its feet.
-	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this))](float)
+	// The commit runs from inside the row's editable widget; rebuild next tick, not under its
+	// feet, then land the focus on the next editor of the fresh widget tree.
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this)), FocusAfter = MoveTemp(FocusAfter)](float)
 	{
 		if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
 		{
 			Panel->Refresh();
+			Panel->FocusTranslationEditor(FocusAfter);
 		}
 		return false;
 	}));
+}
+
+TArray<FString> SKzDialogueCoveragePanel::NextEditorKeysAfter(const FString& EditorKey) const
+{
+	TArray<FString> Keys;
+	bool bFound = false;
+	for (const TPair<FString, TWeakPtr<SEditableText>>& Editor : TranslationEditors)
+	{
+		if (bFound) { Keys.Add(Editor.Key); }
+		else if (Editor.Key == EditorKey) { bFound = true; }
+	}
+	return Keys;
+}
+
+void SKzDialogueCoveragePanel::FocusTranslationEditor(const TArray<FString>& CandidateKeys)
+{
+	for (const FString& Key : CandidateKeys)
+	{
+		for (const TPair<FString, TWeakPtr<SEditableText>>& Editor : TranslationEditors)
+		{
+			if (Editor.Key == Key)
+			{
+				if (TSharedPtr<SEditableText> Widget = Editor.Value.Pin())
+				{
+					FSlateApplication::Get().SetKeyboardFocus(Widget, EFocusCause::SetDirectly);
+					return;
+				}
+			}
+		}
+	}
 }
 
 void SKzDialogueCoveragePanel::AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
