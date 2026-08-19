@@ -73,6 +73,10 @@ private:
 
 	bool IsAreaExpanded(const FString& Key, bool bDefault) const { const bool* Found = AreaExpansion.Find(Key); return Found ? *Found : bDefault; }
 
+	/** The view/filter toggles persist per user across editor sessions (EditorPerProjectUserSettings), so a project that never localizes audio keeps that eye off for good. Saves are per key, from the toggle that changed it: a bulk save would let a stale panel instance clobber another one's choices. */
+	void LoadPersistedFilters();
+	void SavePersistedFilter(const TCHAR* Key, bool bValue) const;
+
 	/** One line inside a culture card: its status for that culture, its playable take and its label. */
 	struct FLineRow
 	{
@@ -157,7 +161,10 @@ private:
 	/** Turns the row's text culture invariant: the dialogue line's Text on its asset, or every authored occurrence of a project text. */
 	void MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId, FString Source, TArray<TPair<FString, FString>> Identities);
 
-	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix);
+	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix, const FString& CardCulture);
+
+	/** Runs Compile Text for one culture: only its .locres changes (the card header's package icon). */
+	void CompileCulture(const FString& Culture);
 	TSharedRef<SWidget> MakeProgressRow(const FText& Label, int32 Done, int32 Total, int32 StaleCount, int32 PendingWords = 0);
 
 	/** Asset separator row inside a multi-asset line list: display name, magnifier, double-click opens. */

@@ -3,12 +3,14 @@
 #include "Dashboard/SKzDialogueDashboard.h"
 
 #include "KzDialogueAsset.h"
+#include "Localization/KzDialogueTranslationCsv.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
 #include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "FileHelpers.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "LocalizationCommandletTasks.h"
 #include "LocalizationModule.h"
@@ -16,6 +18,7 @@
 #include "Misc/MessageDialog.h"
 #include "Misc/ScopedSlowTask.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
@@ -111,10 +114,13 @@ void SKzDialogueDashboard::RebuildPanel()
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f, 0.f, 0.f)
 			[
-				SNew(SButton)
-					.Text(LOCTEXT("CompileText", "Compile"))
-					.ToolTipText(LOCTEXT("CompileTextTip", "Run Compile Text on the localization target: writes the .locres files the game reads at runtime."))
-					.OnClicked(this, &SKzDialogueDashboard::OnCompileClicked)
+				SNew(SComboButton)
+					.OnGetMenuContent(this, &SKzDialogueDashboard::BuildCompileMenu)
+					.ToolTipText(LOCTEXT("CompileTextTip", "Run Compile Text on the localization target: writes the .locres files the game reads at runtime. Pick one culture to touch only its file."))
+					.ButtonContent()
+					[
+						SNew(STextBlock).Text(LOCTEXT("CompileText", "Compile"))
+					]
 			]
 		]);
 }
@@ -156,22 +162,58 @@ FReply SKzDialogueDashboard::OnGatherClicked()
 	return FReply::Handled();
 }
 
-FReply SKzDialogueDashboard::OnCompileClicked()
+TSharedRef<SWidget> SKzDialogueDashboard::BuildCompileMenu()
+{
+	FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
+
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("CompileAllCultures", "All cultures"),
+		LOCTEXT("CompileAllCulturesTip", "Compile every culture's .locres."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this]() { RunCompile(FString()); })));
+
+	FKzLocTargetInfo TargetInfo;
+	FText Error;
+	if (FKzDialogueTranslationCsv::ReadLocTargetInfo(TargetInfo, Error))
+	{
+		TArray<FString> Cultures;
+		if (!TargetInfo.NativeCulture.IsEmpty()) { Cultures.Add(TargetInfo.NativeCulture); }
+		Cultures.Append(TargetInfo.ForeignCultures);
+		for (const FString& Culture : Cultures)
+		{
+			MenuBuilder.AddMenuEntry(
+				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+				FText::Format(LOCTEXT("CompileCultureTip", "Compile only the '{0}' .locres; the other cultures' files stay untouched."), FText::FromString(Culture)),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { RunCompile(Culture); })));
+		}
+	}
+
+	return MenuBuilder.MakeWidget();
+}
+
+void SKzDialogueDashboard::RunCompile(FString Culture)
 {
 	ULocalizationTarget* Target = FindDialogueLocTarget();
 	if (!Target)
 	{
 		ShowDashboardNotification(LOCTEXT("NoLocTarget", "Localization target not found. Create it once in the Localization Dashboard (Tools menu)."), false);
-		return FReply::Handled();
+		return;
 	}
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
 	if (!Window.IsValid()) { Window = FSlateApplication::Get().GetActiveTopLevelWindow(); }
-	if (!Window.IsValid()) { return FReply::Handled(); }
+	if (!Window.IsValid()) { return; }
 
 	// Compile only writes .locres; the archives the panel reads stay valid.
-	LocalizationCommandletTasks::CompileTextForTarget(Window.ToSharedRef(), Target);
-	return FReply::Handled();
+	if (Culture.IsEmpty())
+	{
+		LocalizationCommandletTasks::CompileTextForTarget(Window.ToSharedRef(), Target);
+	}
+	else
+	{
+		LocalizationCommandletTasks::CompileTextForCulture(Window.ToSharedRef(), Target, Culture);
+	}
 }
 
 void SKzDialogueDashboard::OnAssetRegistryChanged(const FAssetData& Data)
