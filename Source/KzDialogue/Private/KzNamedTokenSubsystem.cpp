@@ -9,19 +9,24 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzNamedToken, Log, All);
 
-const FKzNamedTokenOverride* UKzNamedTokenSubsystem::FindOverrideFor(const UObject* WorldContextObject, FName Token)
+UKzNamedTokenSubsystem* UKzNamedTokenSubsystem::Get(const UObject* WorldContextObject)
 {
-	if (!WorldContextObject || Token.IsNone()) { return nullptr; }
+	if (!WorldContextObject) { return nullptr; }
 
 	const UWorld* World = WorldContextObject->GetWorld();
 	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
-	const UKzNamedTokenSubsystem* Store = GameInstance ? GameInstance->GetSubsystem<UKzNamedTokenSubsystem>() : nullptr;
-	return Store ? Store->FindOverride(Token) : nullptr;
+	return GameInstance ? GameInstance->GetSubsystem<UKzNamedTokenSubsystem>() : nullptr;
+}
+
+const FKzNamedTokenOverride* UKzNamedTokenSubsystem::FindOverrideFor(const UObject* WorldContextObject, FName Token)
+{
+	const UKzNamedTokenSubsystem* Store = Get(WorldContextObject);
+	return (Store && !Token.IsNone()) ? Store->FindOverride(Token) : nullptr;
 }
 
 bool UKzNamedTokenSubsystem::SetNamedTokenGender(FName Token, EKzGender Gender)
 {
-	if (!IsTokenClaimed(Token))
+	if (!FindNamedAssetPath(Token))
 	{
 		UE_LOG(LogKzNamedToken, Warning, TEXT("SetNamedTokenGender: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
 		return false;
@@ -35,7 +40,7 @@ bool UKzNamedTokenSubsystem::SetNamedTokenGender(FName Token, EKzGender Gender)
 
 bool UKzNamedTokenSubsystem::SetNamedTokenPart(FName Token, FName Part, FText Text)
 {
-	if (!IsTokenClaimed(Token))
+	if (!FindNamedAssetPath(Token))
 	{
 		UE_LOG(LogKzNamedToken, Warning, TEXT("SetNamedTokenPart: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
 		return false;
@@ -55,21 +60,31 @@ void UKzNamedTokenSubsystem::ClearAllNamedTokenOverrides()
 	Overrides.Tokens.Reset();
 }
 
-bool UKzNamedTokenSubsystem::IsTokenClaimed(FName Token) const
+const FSoftObjectPath* UKzNamedTokenSubsystem::FindNamedAssetPath(FName Token) const
 {
-	if (Token.IsNone()) { return false; }
+	if (Token.IsNone()) { return nullptr; }
 
-	// Set calls are rare (character creation, load), so a registry scan per call is fine.
-	const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-	TArray<FAssetData> NamedAssets;
-	Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
-	for (const FAssetData& Data : NamedAssets)
+	if (!bNamedAssetTokensBuilt)
 	{
-		FName AssetToken;
-		if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && AssetToken == Token)
+		bNamedAssetTokensBuilt = true;
+
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> Assets;
+		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), Assets, /*bSearchSubClasses=*/true);
+
+		for (const FAssetData& Asset : Assets)
 		{
-			return true;
+			FName AssetToken;
+			if (!Asset.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) || AssetToken.IsNone()) { continue; }
+
+			if (const FSoftObjectPath* Existing = NamedAssetTokens.Find(AssetToken))
+			{
+				UE_LOG(LogKzNamedToken, Warning, TEXT("Named-asset token '%s' is claimed by both '%s' and '%s'; keeping the first."), *AssetToken.ToString(), *Existing->ToString(), *Asset.GetObjectPathString());
+				continue;
+			}
+			NamedAssetTokens.Add(AssetToken, Asset.ToSoftObjectPath());
 		}
 	}
-	return false;
+
+	return NamedAssetTokens.Find(Token);
 }

@@ -4,6 +4,7 @@
 #include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueFunctionLibrary.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
@@ -792,7 +793,7 @@ void UKzDialoguePlayer::ResolveLineFormatArguments()
 		// Data tier: named assets addressed by token ("{Kirzo}", "{Kirzo:given}"). The
 		// ":gender" part yields an ETextGender argument for |gender(...) in translations.
 		FFormatArgumentValue NamedValue;
-		if (Subsystem->TryResolveNamedArgument(ArgumentName, NamedValue))
+		if (UKzDialogueFunctionLibrary::TryResolveNamedArgument(this, ArgumentName, NamedValue))
 		{
 			CurrentLine.FormatArguments.Add(ArgumentName, NamedValue);
 		}

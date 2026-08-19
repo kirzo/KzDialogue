@@ -155,4 +155,25 @@ public:
 	/** Interrupt all dialogues. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
 	static void InterruptAllDialogues(const UObject* WorldContextObject);
+
+	/**
+	 * Resolve a named-asset text token ("Kirzo" or "Kirzo:given"): the thing's localized
+	 * name, optionally narrowed by the ":part" modifier (speaker name parts, word gender
+	 * forms). Tokens come from UKzNamedAsset::Token, discovered through the asset registry;
+	 * the asset loads on first resolve. Runtime token overrides win over the authored
+	 * fields. False when no named asset claims the token.
+	 */
+	static bool TryResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier, FText& OutText);
+
+	/** Blueprint access to named-asset tokens for text outside dialogue lines (objectives, UI). Empty when no named asset claims the token. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (WorldContext = "WorldContextObject"))
+	static FText ResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier);
+
+	/**
+	 * Like TryResolveNamedText, but producing a format ARGUMENT: a speaker's ":gender" part
+	 * resolves to an ETextGender value, so translations can decline the text around the token
+	 * with the standard |gender(masculine, feminine, neuter) modifier. Everything else
+	 * resolves as text. Used by the line players.
+	 */
+	static bool TryResolveNamedArgument(const UObject* WorldContextObject, const FString& TokenAndModifier, FFormatArgumentValue& OutValue);
 };
