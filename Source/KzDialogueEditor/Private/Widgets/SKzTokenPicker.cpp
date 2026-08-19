@@ -23,9 +23,17 @@ void SKzTokenPicker::Construct(const FArguments& InArgs)
 {
 	bAutocompleteMode = InArgs._bAutocompleteMode;
 	bBaseTokensOnly = InArgs._bBaseTokensOnly;
+	bPartsMode = InArgs._PartsAsset != nullptr;
 	OnTokenChosen = InArgs._OnTokenChosen;
 
-	BuildNodes();
+	if (bPartsMode)
+	{
+		BuildPartNodes(InArgs._PartsAsset);
+	}
+	else
+	{
+		BuildNodes();
+	}
 
 	TreeView = SNew(STreeView<TSharedPtr<FKzTokenNode>>)
 		.TreeItemsSource(&VisibleNodes)
@@ -45,7 +53,7 @@ void SKzTokenPicker::Construct(const FArguments& InArgs)
 	if (!bAutocompleteMode)
 	{
 		SearchBox = SNew(SSearchBox)
-			.HintText(LOCTEXT("TokenSearchHint", "Search tokens..."))
+			.HintText(bPartsMode ? LOCTEXT("PartSearchHint", "Search parts...") : LOCTEXT("TokenSearchHint", "Search tokens..."))
 			.OnTextChanged_Lambda([this](const FText& NewText) { SetFilter(NewText.ToString()); })
 			.OnTextCommitted_Lambda([this](const FText&, ETextCommit::Type CommitType)
 			{
@@ -64,14 +72,16 @@ void SKzTokenPicker::Construct(const FArguments& InArgs)
 				return FReply::Unhandled();
 			});
 
-		Content->AddSlot().AutoHeight().Padding(4.0f)
-		[
-			SNew(SHorizontalBox)
+		TSharedRef<SHorizontalBox> SearchRow = SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f)
 			[
 				SearchBox.ToSharedRef()
-			]
-			+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			];
+
+		// The type filter is meaningless when browsing the parts of one asset.
+		if (!bPartsMode)
+		{
+			SearchRow->AddSlot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				SNew(SComboButton)
 					.ToolTipText(LOCTEXT("TokenTypeFilterTip", "Show only tokens of one asset type."))
@@ -92,7 +102,12 @@ void SKzTokenPicker::Construct(const FArguments& InArgs)
 					[
 						SNew(STextBlock).Text_Lambda([this]() { return TypeFilter.IsEmpty() ? LOCTEXT("AllTokenTypes", "All types") : FText::FromString(TypeFilter); })
 					]
-			]
+			];
+		}
+
+		Content->AddSlot().AutoHeight().Padding(4.0f)
+		[
+			SearchRow
 		];
 	}
 
@@ -158,6 +173,24 @@ void SKzTokenPicker::BuildNodes()
 
 	AllNodes.Sort([](const TSharedPtr<FKzTokenNode>& A, const TSharedPtr<FKzTokenNode>& B) { return A->TokenText < B->TokenText; });
 	TypeNames.Sort();
+}
+
+void SKzTokenPicker::BuildPartNodes(const UKzNamedAsset* Named)
+{
+	if (!Named) { return; }
+
+	// Flat rows in authored order (given/family/... reads better than alphabetical).
+	for (const FName Part : Named->GetOverridablePartNames())
+	{
+		TSharedPtr<FKzTokenNode> Node = MakeShared<FKzTokenNode>();
+		Node->TokenText = Part.ToString();
+		Node->Preview = Named->ResolveName(Part);
+		Node->Description = Named->GetNamePartDescription(Part);
+		Node->TypeName = Named->GetClass()->GetDisplayNameText().ToString();
+		Node->AssetPath = Named->GetPathName();
+		Node->bEmptyPreview = Node->Preview.IsEmpty();
+		AllNodes.Add(Node);
+	}
 }
 
 void SKzTokenPicker::RebuildVisible()
@@ -301,9 +334,13 @@ void SKzTokenPicker::Choose(const TSharedPtr<FKzTokenNode>& Node)
 {
 	if (!Node.IsValid()) { return; }
 
-	RecentTokens.Remove(Node->TokenText);
-	RecentTokens.Insert(Node->TokenText, 0);
-	if (RecentTokens.Num() > 8) { RecentTokens.SetNum(8); }
+	// Part rows are per-asset and would pollute the shared token recents.
+	if (!bPartsMode)
+	{
+		RecentTokens.Remove(Node->TokenText);
+		RecentTokens.Insert(Node->TokenText, 0);
+		if (RecentTokens.Num() > 8) { RecentTokens.SetNum(8); }
+	}
 
 	OnTokenChosen.ExecuteIfBound(Node->TokenText);
 }

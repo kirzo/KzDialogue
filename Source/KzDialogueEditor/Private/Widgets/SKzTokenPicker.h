@@ -8,6 +8,7 @@
 class ITableRow;
 class SSearchBox;
 class STableViewBase;
+class UKzNamedAsset;
 template <typename ItemType> class STreeView;
 
 DECLARE_DELEGATE_OneParam(FOnKzTokenChosen, const FString& /*TokenText*/);
@@ -22,6 +23,10 @@ DECLARE_DELEGATE_OneParam(FOnKzTokenChosen, const FString& /*TokenText*/);
  * Button mode shows the search box and a type filter. Autocomplete mode hides both: the
  * host feeds SetFilter from the typed fragment and drives the selection with
  * MoveSelection / AcceptSelection while its own text box keeps the keyboard focus.
+ *
+ * PartsAsset switches the browser to the overridable parts of that single asset (the Part
+ * pin picker): a flat list in authored order, same search box and rows, no type filter,
+ * no recents; OnTokenChosen fires with the bare part name ("given").
  */
 class SKzTokenPicker : public SCompoundWidget
 {
@@ -29,13 +34,16 @@ public:
 	SLATE_BEGIN_ARGS(SKzTokenPicker)
 		: _bAutocompleteMode(false)
 		, _bBaseTokensOnly(false)
+		, _PartsAsset(nullptr)
 		{}
-		/** Fired with the full insertable token text ("{Kirzo:given}"). */
+		/** Fired with the full insertable token text ("{Kirzo:given}"); with PartsAsset, the bare part name. */
 		SLATE_EVENT(FOnKzTokenChosen, OnTokenChosen)
 		/** Compact, externally driven variant for the inline "{" completion. */
 		SLATE_ARGUMENT(bool, bAutocompleteMode)
 		/** Offers base tokens only, no ":part" children: for hosts whose slot is a bare token (a Token pin). */
 		SLATE_ARGUMENT(bool, bBaseTokensOnly)
+		/** Browse the overridable parts of this single asset instead of the token registry (a Part pin). */
+		SLATE_ARGUMENT(const UKzNamedAsset*, PartsAsset)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -80,12 +88,14 @@ private:
 	FString TypeFilter;
 	bool bAutocompleteMode = false;
 	bool bBaseTokensOnly = false;
+	bool bPartsMode = false;
 	FOnKzTokenChosen OnTokenChosen;
 
 	TSharedPtr<STreeView<TSharedPtr<FKzTokenNode>>> TreeView;
 	TSharedPtr<SSearchBox> SearchBox;
 
 	void BuildNodes();
+	void BuildPartNodes(const UKzNamedAsset* Named);
 	void RebuildVisible();
 	void Choose(const TSharedPtr<FKzTokenNode>& Node);
 	TSharedRef<ITableRow> MakeNodeRow(TSharedPtr<FKzTokenNode> Node, const TSharedRef<STableViewBase>& OwnerTable);

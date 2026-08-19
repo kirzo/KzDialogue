@@ -100,6 +100,13 @@ TArray<FName> UKzSpeakerAsset::GetNameParts() const
 	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier"), TEXT("no-family") };
 }
 
+TArray<FName> UKzSpeakerAsset::GetOverridablePartNames() const
+{
+	// Atoms only: the compositions (fullname, no-*) recompute from pinned atoms, and gender
+	// has its own typed setter.
+	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("display") };
+}
+
 FText UKzSpeakerAsset::GetNamePartDescription(FName Part) const
 {
 	if (Part == TEXT("given")) { return NSLOCTEXT("KzSpeaker", "PartGiven", "Given (first) name only."); }

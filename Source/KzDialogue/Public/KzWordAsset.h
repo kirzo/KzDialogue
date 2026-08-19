@@ -51,6 +51,7 @@ public:
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 #if WITH_EDITOR
 	virtual TArray<FName> GetNameParts() const override;
+	virtual TArray<FName> GetOverridablePartNames() const override;
 	virtual FText GetNamePartDescription(FName Part) const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;

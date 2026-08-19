@@ -13,8 +13,9 @@
  * connected).
  *
  * Named-token pins get the token browser instead of a blind text box. Functions opt in
- * through UFUNCTION metadata: KzTokenPin names the token parameter. Name pins browse base
- * tokens only; string pins ("Token:part" slots) browse the parts too.
+ * through UFUNCTION metadata: KzTokenPin names the token parameter (name pins browse base
+ * tokens only; string pins ("Token:part" slots) browse the parts too) and KzTokenPartPin
+ * a part parameter, whose dropdown lists the parts of the asset the token pin names.
  */
 class FKzDialogueLinePinFactory : public FGraphPanelPinFactory
 {
