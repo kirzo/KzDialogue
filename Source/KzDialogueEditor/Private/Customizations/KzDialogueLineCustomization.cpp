@@ -1,4 +1,4 @@
-// Copyright 2026 kirzo
+﻿// Copyright 2026 kirzo
 
 #include "Customizations/KzDialogueLineCustomization.h"
 #include "KzDialogueTypes.h"
@@ -20,17 +20,19 @@
 
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
+#include "InputCoreTypes.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
-#include "Widgets/Input/SSearchBox.h"
+#include "Widgets/Input/SMenuAnchor.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Widgets/Views/SListView.h"
 #include "Widgets/SKzAudioRangeStrip.h"
 #include "Widgets/SKzDialogueTimeline.h"
+#include "Widgets/SKzTokenPicker.h"
 
 #include "Components/AudioComponent.h"
 #include "Sound/SoundBase.h"
@@ -38,184 +40,6 @@
 
 #define LOCTEXT_NAMESPACE "KzDialogueLineCustomization"
 
-namespace
-{
-	/** One insertable token in the picker: "{Kirzo}" or "{Kirzo:given}", with its live resolution preview and the owning asset's type for filtering. */
-	struct FKzTokenPickerRow
-	{
-		FString TokenText;
-		FText Preview;
-		FString TypeName;
-		FString AssetPath;
-	};
-
-	/**
-	 * Token picker content: a searchable, type-filterable flat list of every named asset's
-	 * token and parts, each with a live resolution preview. Data is snapshotted up front so
-	 * the widget holds plain values, never asset pointers. Enter inserts the top match;
-	 * clicking a row (even the already-selected one) inserts it.
-	 */
-	TSharedRef<SWidget> BuildTokenPickerMenu(TSharedRef<IPropertyHandle> TextHandle, TSharedPtr<SSearchBox>& OutSearchBox)
-	{
-		TSharedRef<TArray<TSharedPtr<FKzTokenPickerRow>>> AllRows = MakeShared<TArray<TSharedPtr<FKzTokenPickerRow>>>();
-		TSharedRef<TArray<FString>> TypeNames = MakeShared<TArray<FString>>();
-		{
-			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-			TArray<FAssetData> NamedAssets;
-			Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
-
-			TSet<FName> Seen;
-			for (const FAssetData& Data : NamedAssets)
-			{
-				FName Token;
-				if (!Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), Token) || Token.IsNone() || Seen.Contains(Token)) { continue; }
-				Seen.Add(Token);
-
-				const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Data.ToSoftObjectPath().TryLoad());
-				if (!Named) { continue; }
-
-				const FString TypeName = Named->GetClass()->GetDisplayNameText().ToString();
-				TypeNames->AddUnique(TypeName);
-
-				auto AddRow = [&](const FString& TokenText, const FText& Preview)
-				{
-					TSharedPtr<FKzTokenPickerRow> Row = MakeShared<FKzTokenPickerRow>();
-					Row->TokenText = TokenText;
-					Row->Preview = Preview;
-					Row->TypeName = TypeName;
-					Row->AssetPath = Data.GetObjectPathString();
-					AllRows->Add(Row);
-				};
-
-				AddRow(FString::Printf(TEXT("{%s}"), *Token.ToString()), Named->ResolveName());
-				for (const FName Part : Named->GetNameParts())
-				{
-					AddRow(FString::Printf(TEXT("{%s:%s}"), *Token.ToString(), *Part.ToString()), Named->ResolveName(Part));
-				}
-			}
-			AllRows->Sort([](const TSharedPtr<FKzTokenPickerRow>& A, const TSharedPtr<FKzTokenPickerRow>& B) { return A->TokenText < B->TokenText; });
-			TypeNames->Sort();
-		}
-
-		// Shared picker state: the search string, the type filter ("" = all) and the visible slice.
-		TSharedRef<FString> SearchFilter = MakeShared<FString>();
-		TSharedRef<FString> TypeFilter = MakeShared<FString>();
-		TSharedRef<TArray<TSharedPtr<FKzTokenPickerRow>>> VisibleRows = MakeShared<TArray<TSharedPtr<FKzTokenPickerRow>>>(*AllRows);
-
-		auto InsertToken = [TextHandle](const FString& TokenText)
-		{
-			FText Current;
-			TextHandle->GetValue(Current);
-			TextHandle->SetValue(FText::FromString(Current.ToString() + TokenText));
-			FSlateApplication::Get().DismissAllMenus();
-		};
-
-		TSharedRef<SListView<TSharedPtr<FKzTokenPickerRow>>> ListView =
-			SNew(SListView<TSharedPtr<FKzTokenPickerRow>>)
-				.ListItemsSource(&VisibleRows.Get())
-				.SelectionMode(ESelectionMode::Single)
-				// Click commits even when the item was already selected (selection alone does not).
-				.OnMouseButtonClick_Lambda([InsertToken](TSharedPtr<FKzTokenPickerRow> Row)
-				{
-					if (Row.IsValid()) { InsertToken(Row->TokenText); }
-				})
-				.OnGenerateRow_Lambda([](TSharedPtr<FKzTokenPickerRow> Row, const TSharedRef<STableViewBase>& OwnerTable)
-				{
-					return SNew(STableRow<TSharedPtr<FKzTokenPickerRow>>, OwnerTable)
-						.ToolTipText(FText::Format(LOCTEXT("TokenRowTip", "Resolves to: {0}\n{1}\n{2}"), Row->Preview, FText::FromString(Row->TypeName), FText::FromString(Row->AssetPath)))
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(4.0f, 2.0f)
-							[
-								SNew(STextBlock)
-									.Text(FText::FromString(Row->TokenText))
-									.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-							]
-							+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(8.0f, 2.0f, 4.0f, 2.0f)
-							[
-								SNew(STextBlock)
-									.Text(Row->Preview)
-									.Justification(ETextJustify::Right)
-									.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-									.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-							]
-						];
-				});
-
-		auto RebuildVisible = [AllRows, VisibleRows, SearchFilter, TypeFilter, ListViewWeak = TWeakPtr<SListView<TSharedPtr<FKzTokenPickerRow>>>(ListView)]()
-		{
-			VisibleRows->Reset();
-			for (const TSharedPtr<FKzTokenPickerRow>& Row : *AllRows)
-			{
-				if (!TypeFilter->IsEmpty() && Row->TypeName != *TypeFilter) { continue; }
-				if (!SearchFilter->IsEmpty() && !Row->TokenText.Contains(*SearchFilter, ESearchCase::IgnoreCase) && !Row->Preview.ToString().Contains(*SearchFilter, ESearchCase::IgnoreCase)) { continue; }
-				VisibleRows->Add(Row);
-			}
-			if (TSharedPtr<SListView<TSharedPtr<FKzTokenPickerRow>>> Pinned = ListViewWeak.Pin())
-			{
-				Pinned->RequestListRefresh();
-			}
-		};
-
-		TSharedRef<SSearchBox> SearchBox = SNew(SSearchBox)
-			.HintText(LOCTEXT("TokenSearchHint", "Search tokens..."))
-			.OnTextChanged_Lambda([SearchFilter, RebuildVisible](const FText& NewText)
-			{
-				*SearchFilter = NewText.ToString();
-				RebuildVisible();
-			})
-			.OnTextCommitted_Lambda([VisibleRows, InsertToken](const FText&, ETextCommit::Type CommitType)
-			{
-				// Enter takes the top match, so search-and-enter needs no mouse at all.
-				if (CommitType == ETextCommit::OnEnter && VisibleRows->Num() > 0)
-				{
-					InsertToken((*VisibleRows)[0]->TokenText);
-				}
-			});
-		OutSearchBox = SearchBox;
-
-		return SNew(SBox).WidthOverride(400.0f).HeightOverride(320.0f)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(4.0f)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
-					SearchBox
-				]
-				+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
-				[
-					SNew(SComboButton)
-						.ToolTipText(LOCTEXT("TokenTypeFilterTip", "Show only tokens of one asset type."))
-						.OnGetMenuContent_Lambda([TypeNames, TypeFilter, RebuildVisible]()
-						{
-							// Close-self-only: picking a type must not dismiss the whole picker popup.
-							FMenuBuilder TypeMenu(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr, nullptr, /*bInCloseSelfOnly=*/true);
-							TypeMenu.AddMenuEntry(LOCTEXT("AllTokenTypes", "All types"), FText::GetEmpty(), FSlateIcon(),
-								FUIAction(FExecuteAction::CreateLambda([TypeFilter, RebuildVisible]() { TypeFilter->Reset(); RebuildVisible(); })));
-							for (const FString& TypeName : *TypeNames)
-							{
-								TypeMenu.AddMenuEntry(FText::FromString(TypeName), FText::GetEmpty(), FSlateIcon(),
-									FUIAction(FExecuteAction::CreateLambda([TypeFilter, RebuildVisible, TypeName]() { *TypeFilter = TypeName; RebuildVisible(); })));
-							}
-							return TypeMenu.MakeWidget();
-						})
-						.ButtonContent()
-						[
-							SNew(STextBlock).Text_Lambda([TypeFilter]() { return TypeFilter->IsEmpty() ? LOCTEXT("AllTokenTypes", "All types") : FText::FromString(*TypeFilter); })
-						]
-				]
-			]
-			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f, 0.0f, 4.0f, 4.0f)
-			[
-				AllRows->IsEmpty()
-					? StaticCastSharedRef<SWidget>(SNew(STextBlock).Text(LOCTEXT("NoNamedAssets", "No named assets: set Token on a Speaker or Word asset first")).ColorAndOpacity(FSlateColor::UseSubduedForeground()))
-					: StaticCastSharedRef<SWidget>(ListView)
-			]
-		];
-	}
-}
 
 TSharedRef<IPropertyTypeCustomization> FKzDialogueLineCustomization::MakeInstance()
 {
@@ -336,20 +160,90 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 
 void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuilder& StructBuilder, TSharedRef<IPropertyHandle> TextHandle)
 {
-	// Default text editor plus the token picker; picked tokens append at the end of the text.
-	// The holder wires the lazily-built menu's search box as the combo's focus target.
+	FText InitialText;
+	TextHandle->GetValue(InitialText);
+	LineTextSnapshot = InitialText.ToString();
+
+	// Our own multiline editor instead of the stock value widget: it owns the caret (picker
+	// inserts land at the cursor) and hosts the inline "{" autocomplete. Commits on focus
+	// loss, like the stock multiline editor; Enter inside the text inserts a newline.
+	// The text is UNBOUND on purpose: with a bound attribute, InsertTextAtCursor edits get
+	// wiped by the attribute refresh and GetText reads the stale binding. External changes
+	// (undo, other views) re-sync through the property change notify below.
+	LineTextEditor = SNew(SMultiLineEditableTextBox)
+		.Text(InitialText)
+		.AutoWrapText(true)
+		.OnTextChanged_Lambda([this](const FText& NewText) { OnLineTextChanged(NewText); })
+		// The commit must NOT cancel the autocomplete session: clicking a popup row moves the
+		// focus (committing) BEFORE the click lands; the session ends via OnMenuOpenChanged.
+		.OnTextCommitted_Lambda([this, TextHandle](const FText& NewText, ETextCommit::Type)
+		{
+			FText Current;
+			TextHandle->GetValue(Current);
+			if (!NewText.ToString().Equals(Current.ToString(), ESearchCase::CaseSensitive))
+			{
+				TextHandle->SetValue(NewText);
+			}
+		})
+		.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent) { return OnLineTextKeyDown(KeyEvent); });
+
+	TextHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateSPLambda(this, [this, TextHandle]()
+	{
+		if (LineTextEditor.IsValid())
+		{
+			FText Value;
+			TextHandle->GetValue(Value);
+			if (!Value.ToString().Equals(LineTextEditor->GetText().ToString(), ESearchCase::CaseSensitive))
+			{
+				LineTextEditor->SetText(Value);
+			}
+		}
+	}));
+
+	// The autocomplete popup anchors under the editor; it never takes the keyboard focus,
+	// the editor routes the keyboard to it while a session is active.
+	TokenMenuAnchor = SNew(SMenuAnchor)
+		.Placement(MenuPlacement_BelowAnchor)
+		// Whatever closes the popup (outside click, accept, Esc) also ends the session state.
+		.OnMenuOpenChanged_Lambda([this](bool bOpen)
+		{
+			if (!bOpen)
+			{
+				AutocompleteBraceIndex = INDEX_NONE;
+				AutocompleteFragmentLen = 0;
+			}
+		})
+		.OnGetMenuContent_Lambda([this, TextHandle]()
+		{
+			return SAssignNew(AutocompletePicker, SKzTokenPicker)
+				.bAutocompleteMode(true)
+				.OnTokenChosen_Lambda([this, TextHandle](const FString& TokenText) { AcceptTokenAutocomplete(TokenText, TextHandle); });
+		})
+		[
+			LineTextEditor.ToSharedRef()
+		];
+
+	// The "{}" button opens the full browser; the holder wires its search box as the focus target.
 	TSharedRef<TWeakPtr<SComboButton>> ComboHolder = MakeShared<TWeakPtr<SComboButton>>();
 	TSharedRef<SComboButton> Combo = SNew(SComboButton)
-		.ToolTipText(LOCTEXT("TokenPickerTip", "Insert a named-asset token: it resolves to the thing's localized name when the line plays."))
-		.OnGetMenuContent_Lambda([TextHandle, ComboHolder]()
+		.ToolTipText(LOCTEXT("TokenPickerTip", "Insert a named-asset token at the cursor: it resolves to the thing's localized name when the line plays. Typing '{' in the text offers the same list inline."))
+		.OnGetMenuContent_Lambda([this, TextHandle, ComboHolder]()
 		{
-			TSharedPtr<SSearchBox> SearchBox;
-			TSharedRef<SWidget> Menu = BuildTokenPickerMenu(TextHandle, SearchBox);
+			TSharedRef<SKzTokenPicker> Picker = SNew(SKzTokenPicker)
+				.OnTokenChosen_Lambda([this, TextHandle](const FString& TokenText)
+				{
+					if (LineTextEditor.IsValid())
+					{
+						LineTextEditor->InsertTextAtCursor(TokenText);
+						TextHandle->SetValue(LineTextEditor->GetText());
+					}
+					FSlateApplication::Get().DismissAllMenus();
+				});
 			if (TSharedPtr<SComboButton> Pinned = ComboHolder->Pin())
 			{
-				Pinned->SetMenuContentWidgetToFocus(SearchBox);
+				Pinned->SetMenuContentWidgetToFocus(Picker->GetWidgetToFocus());
 			}
-			return Menu;
+			return StaticCastSharedRef<SWidget>(Picker);
 		})
 		.ButtonContent()
 		[
@@ -369,13 +263,172 @@ void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuil
 			SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot().FillWidth(1.0f)
 			[
-				TextHandle->CreatePropertyValueWidget()
+				TokenMenuAnchor.ToSharedRef()
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				Combo
 			]
 		];
+}
+
+void FKzDialogueLineCustomization::OnLineTextChanged(const FText& NewText)
+{
+	const FString New = NewText.ToString();
+	const FString Old = LineTextSnapshot;
+	LineTextSnapshot = New;
+
+	if (AutocompleteBraceIndex == INDEX_NONE)
+	{
+		// A session opens on a single typed "{".
+		if (New.Len() == Old.Len() + 1)
+		{
+			int32 DiffIndex = 0;
+			while (DiffIndex < Old.Len() && Old[DiffIndex] == New[DiffIndex]) { ++DiffIndex; }
+			if (New[DiffIndex] == TEXT('{'))
+			{
+				AutocompleteBraceIndex = DiffIndex;
+				AutocompleteFragmentLen = 0;
+				if (TokenMenuAnchor.IsValid())
+				{
+					TokenMenuAnchor->SetIsOpen(true, /*bFocusMenu=*/false);
+				}
+				if (AutocompletePicker.IsValid())
+				{
+					AutocompletePicker->SetFilter(FString());
+				}
+			}
+		}
+		return;
+	}
+
+	// Session active: only single-character edits inside the fragment keep it alive; anything
+	// unusual (paste, selection edits, typing elsewhere, closing the brace by hand) ends it.
+	const int32 FragmentEnd = AutocompleteBraceIndex + 1 + AutocompleteFragmentLen;
+	if (New.Len() == Old.Len() + 1)
+	{
+		int32 DiffIndex = 0;
+		while (DiffIndex < Old.Len() && Old[DiffIndex] == New[DiffIndex]) { ++DiffIndex; }
+		const TCHAR Typed = New[DiffIndex];
+		const bool bInFragment = DiffIndex > AutocompleteBraceIndex && DiffIndex <= FragmentEnd;
+		const bool bTokenChar = FChar::IsAlnum(Typed) || Typed == TEXT('_') || Typed == TEXT(':') || Typed == TEXT('-');
+		if (!bInFragment || !bTokenChar)
+		{
+			CancelTokenAutocomplete();
+			return;
+		}
+		++AutocompleteFragmentLen;
+	}
+	else if (New.Len() == Old.Len() - 1)
+	{
+		int32 DiffIndex = 0;
+		while (DiffIndex < New.Len() && Old[DiffIndex] == New[DiffIndex]) { ++DiffIndex; }
+		const bool bInFragment = DiffIndex > AutocompleteBraceIndex && DiffIndex <= FragmentEnd && AutocompleteFragmentLen > 0;
+		if (!bInFragment)
+		{
+			CancelTokenAutocomplete();
+			return;
+		}
+		--AutocompleteFragmentLen;
+	}
+	else
+	{
+		CancelTokenAutocomplete();
+		return;
+	}
+
+	if (AutocompletePicker.IsValid() && New.IsValidIndex(AutocompleteBraceIndex) && New[AutocompleteBraceIndex] == TEXT('{'))
+	{
+		AutocompletePicker->SetFilter(New.Mid(AutocompleteBraceIndex + 1, AutocompleteFragmentLen));
+	}
+	else
+	{
+		CancelTokenAutocomplete();
+	}
+}
+
+FReply FKzDialogueLineCustomization::OnLineTextKeyDown(const FKeyEvent& KeyEvent)
+{
+	if (AutocompleteBraceIndex == INDEX_NONE) { return FReply::Unhandled(); }
+
+	const FKey Key = KeyEvent.GetKey();
+	if (Key == EKeys::Down || Key == EKeys::Up)
+	{
+		if (AutocompletePicker.IsValid()) { AutocompletePicker->MoveSelection(Key == EKeys::Down ? 1 : -1); }
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Right || Key == EKeys::Left)
+	{
+		// Expand/collapse the selected base to reach its parts without the mouse; the caret
+		// stays put during the session (Esc first to move it).
+		if (AutocompletePicker.IsValid()) { AutocompletePicker->SetSelectionExpanded(Key == EKeys::Right); }
+		return FReply::Handled();
+	}
+	if (Key == EKeys::Enter || Key == EKeys::Tab)
+	{
+		if (AutocompletePicker.IsValid() && AutocompletePicker->AcceptSelection())
+		{
+			return FReply::Handled();
+		}
+		// No match to accept: end the session and let the key act normally.
+		CancelTokenAutocomplete();
+		return FReply::Unhandled();
+	}
+	if (Key == EKeys::Escape)
+	{
+		CancelTokenAutocomplete();
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
+}
+
+void FKzDialogueLineCustomization::AcceptTokenAutocomplete(const FString& TokenText, TSharedRef<IPropertyHandle> TextHandle)
+{
+	if (AutocompleteBraceIndex == INDEX_NONE || !LineTextEditor.IsValid())
+	{
+		CancelTokenAutocomplete();
+		return;
+	}
+
+	const FString Full = LineTextEditor->GetText().ToString();
+	if (!Full.IsValidIndex(AutocompleteBraceIndex) || Full[AutocompleteBraceIndex] != TEXT('{'))
+	{
+		CancelTokenAutocomplete();
+		return;
+	}
+
+	// Replace "{fragment" with the full token, put the caret right after it, commit.
+	const FString Result = Full.Left(AutocompleteBraceIndex) + TokenText + Full.Mid(AutocompleteBraceIndex + 1 + AutocompleteFragmentLen);
+	const int32 CaretOffset = AutocompleteBraceIndex + TokenText.Len();
+	CancelTokenAutocomplete();
+
+	LineTextSnapshot = Result;
+	LineTextEditor->SetText(FText::FromString(Result));
+
+	int32 LineIndex = 0;
+	int32 LineStart = 0;
+	for (int32 i = 0; i < CaretOffset && i < Result.Len(); ++i)
+	{
+		if (Result[i] == TEXT('\n'))
+		{
+			++LineIndex;
+			LineStart = i + 1;
+		}
+	}
+	LineTextEditor->GoTo(FTextLocation(LineIndex, CaretOffset - LineStart));
+	FSlateApplication::Get().SetKeyboardFocus(LineTextEditor);
+
+	TextHandle->SetValue(FText::FromString(Result));
+}
+
+void FKzDialogueLineCustomization::CancelTokenAutocomplete()
+{
+	AutocompleteBraceIndex = INDEX_NONE;
+	AutocompleteFragmentLen = 0;
+	if (TokenMenuAnchor.IsValid() && TokenMenuAnchor->IsOpen())
+	{
+		TokenMenuAnchor->SetIsOpen(false);
+	}
 }
 
 void FKzDialogueLineCustomization::AddAudioRangeRow(IDetailGroup& AudioGroup)

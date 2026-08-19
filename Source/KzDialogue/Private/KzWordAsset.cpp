@@ -54,6 +54,11 @@ TArray<FName> UKzWordAsset::GetNameParts() const
 	return Parts;
 }
 
+FText UKzWordAsset::GetNamePartDescription(FName Part) const
+{
+	return FText::Format(NSLOCTEXT("KzWord", "PartGenderForm", "The {0} gender form of the word; unauthored forms fall back to Text."), FText::FromName(Part));
+}
+
 void UKzWordAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
