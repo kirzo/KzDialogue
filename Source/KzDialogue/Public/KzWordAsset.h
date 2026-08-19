@@ -44,8 +44,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Word")
 	FText Resolve(EKzGender Gender = EKzGender::Unspecified) const;
 
-	//~ UKzNamedAsset: parts are gender form names ("{Gate:Feminine}"); None or unknown = Text.
-	virtual FText ResolveName(FName Part = NAME_None) const override;
+	//~ UKzNamedAsset: parts are gender form names ("{Gate:Feminine}"); None or unknown = Text. Overrides pin the default form under its field name "Text".
+	virtual FText ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const override;
 
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;

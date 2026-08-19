@@ -2,6 +2,8 @@
 
 #include "KzWordAsset.h"
 
+#include "KzNamedTokenSubsystem.h"
+
 DEFINE_LOG_CATEGORY_STATIC(LogKzWord, Log, All);
 
 FText UKzWordAsset::Resolve(EKzGender Gender) const
@@ -16,8 +18,14 @@ FText UKzWordAsset::Resolve(EKzGender Gender) const
 	return Text;
 }
 
-FText UKzWordAsset::ResolveName(FName Part) const
+FText UKzWordAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const
 {
+	// A pinned part wins; the default form is addressed under its field name "Text".
+	if (Overrides)
+	{
+		if (const FText* Pinned = Overrides->Parts.Find(Part.IsNone() ? FName(TEXT("Text")) : Part)) { return *Pinned; }
+	}
+
 	if (Part.IsNone())
 	{
 		return Text;

@@ -2,6 +2,7 @@
 
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
+#include "KzNamedTokenSubsystem.h"
 #include "KzSpeakerAsset.h"
 
 FText FKzDialogueLine::GetFormattedText() const
@@ -9,14 +10,15 @@ FText FKzDialogueLine::GetFormattedText() const
 	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
 }
 
-FText FKzDialogueSpeaker::GetDisplayLabel() const
+FText FKzDialogueSpeaker::GetDisplayLabel(const UObject* WorldContextObject) const
 {
 	if (!Asset)
 	{
 		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
 	}
 
-	const FText Resolved = Asset->GetResolvedDisplayName();
+	const FKzNamedTokenOverride* Override = UKzNamedTokenSubsystem::FindOverrideFor(WorldContextObject, Asset->Token);
+	const FText Resolved = Asset->ResolveName(NAME_None, Override);
 	if (!Resolved.IsEmpty())
 	{
 		return Resolved;

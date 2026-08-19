@@ -2,8 +2,17 @@
 
 #include "KzNamedAsset.h"
 
-FText UKzNamedAsset::ResolveName(FName /*Part*/) const
+#include "KzNamedTokenSubsystem.h"
+
+FText UKzNamedAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const
 {
+	if (Overrides && !Part.IsNone())
+	{
+		if (const FText* Pinned = Overrides->Parts.Find(Part))
+		{
+			return *Pinned;
+		}
+	}
 	return FText::GetEmpty();
 }
 

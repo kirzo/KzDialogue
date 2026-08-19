@@ -3,6 +3,7 @@
 #include "KzSpeakerAsset.h"
 
 #include "KzDialogueTypes.h"
+#include "KzNamedTokenSubsystem.h"
 #include "Internationalization/Text.h"
 #include "Settings/KzDialogueSettings.h"
 
@@ -10,18 +11,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogKzSpeaker, Log, All);
 
 FText UKzSpeakerAsset::GetResolvedDisplayName() const
 {
-	// Source-based emptiness: a keyed empty DisplayName can display a stale translation and
-	// would otherwise shadow the structured composition.
-	if (!KzIsTextSourceEmpty(DisplayName))
-	{
-		return DisplayName;
-	}
-	return ComposeStructuredName(/*bWithHonorific=*/true, /*bWithQualifier=*/true);
+	return ResolveName(NAME_None, nullptr);
 }
 
-FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily) const
+FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily, const FKzNamedTokenOverride* Overrides) const
 {
-	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && SecondFamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty() && NickName.IsEmpty())
+	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && SecondFamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty() && NickName.IsEmpty() && (!Overrides || Overrides->Parts.IsEmpty()))
 	{
 		return FText::GetEmpty();
 	}
@@ -30,13 +25,24 @@ FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQual
 	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
 	const FString& Format = Settings ? Settings->GetActiveSpeakerNameFormat() : FallbackFormat;
 
+	// Pinned atoms flow into the composition; unset ones fall through to the authored field.
+	const EKzGender EffectiveGender = (Overrides && Overrides->bOverrideGender) ? Overrides->Gender : Gender;
+	auto Atom = [Overrides, EffectiveGender](const TCHAR* PartName, const FKzWordText& Field) -> FText
+	{
+		if (Overrides)
+		{
+			if (const FText* Pinned = Overrides->Parts.Find(PartName)) { return *Pinned; }
+		}
+		return Field.Resolve(EffectiveGender);
+	};
+
 	FFormatNamedArguments Args;
-	Args.Add(TEXT("Given"), GivenName.Resolve(Gender));
-	Args.Add(TEXT("Family"), bWithFamily ? FamilyName.Resolve(Gender) : FText::GetEmpty());
-	Args.Add(TEXT("Family2"), bWithFamily ? SecondFamilyName.Resolve(Gender) : FText::GetEmpty());
-	Args.Add(TEXT("Nick"), NickName.Resolve(Gender));
-	Args.Add(TEXT("Honorific"), bWithHonorific ? Honorific.Resolve(Gender) : FText::GetEmpty());
-	Args.Add(TEXT("Qualifier"), bWithQualifier ? Qualifier.Resolve(Gender) : FText::GetEmpty());
+	Args.Add(TEXT("Given"), Atom(TEXT("given"), GivenName));
+	Args.Add(TEXT("Family"), bWithFamily ? Atom(TEXT("family"), FamilyName) : FText::GetEmpty());
+	Args.Add(TEXT("Family2"), bWithFamily ? Atom(TEXT("family2"), SecondFamilyName) : FText::GetEmpty());
+	Args.Add(TEXT("Nick"), Atom(TEXT("nick"), NickName));
+	Args.Add(TEXT("Honorific"), bWithHonorific ? Atom(TEXT("honorific"), Honorific) : FText::GetEmpty());
+	Args.Add(TEXT("Qualifier"), bWithQualifier ? Atom(TEXT("qualifier"), Qualifier) : FText::GetEmpty());
 	FString Composed = FText::Format(FTextFormat::FromString(Format), Args).ToString();
 
 	// Collapse the gaps empty parts leave behind: runs of spaces inside, stray spaces at
@@ -47,24 +53,39 @@ FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQual
 	return FText::FromString(Composed);
 }
 
-FText UKzSpeakerAsset::ResolveName(FName Part) const
+FText UKzSpeakerAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const
 {
-	if (Part.IsNone()) { return GetResolvedDisplayName(); }
-	if (Part == TEXT("given")) { return GivenName.Resolve(Gender); }
-	if (Part == TEXT("family")) { return FamilyName.Resolve(Gender); }
-	if (Part == TEXT("family2")) { return SecondFamilyName.Resolve(Gender); }
-	if (Part == TEXT("nick")) { return NickName.Resolve(Gender); }
-	if (Part == TEXT("honorific")) { return Honorific.Resolve(Gender); }
-	if (Part == TEXT("qualifier")) { return Qualifier.Resolve(Gender); }
-	if (Part == TEXT("gender")) { return FText::FromString(StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Gender))); }
+	// A pinned part wins outright, compositions included; pinned atoms flow into
+	// compositions through ComposeStructuredName.
+	if (Overrides && !Part.IsNone())
+	{
+		if (const FText* Pinned = Overrides->Parts.Find(Part)) { return *Pinned; }
+	}
+
+	const EKzGender EffectiveGender = (Overrides && Overrides->bOverrideGender) ? Overrides->Gender : Gender;
+
+	if (Part.IsNone())
+	{
+		// Source-based emptiness: a keyed empty DisplayName can display a stale translation
+		// and would otherwise shadow the structured composition.
+		if (!KzIsTextSourceEmpty(DisplayName)) { return DisplayName; }
+		return ComposeStructuredName(true, true, true, Overrides);
+	}
+	if (Part == TEXT("given")) { return GivenName.Resolve(EffectiveGender); }
+	if (Part == TEXT("family")) { return FamilyName.Resolve(EffectiveGender); }
+	if (Part == TEXT("family2")) { return SecondFamilyName.Resolve(EffectiveGender); }
+	if (Part == TEXT("nick")) { return NickName.Resolve(EffectiveGender); }
+	if (Part == TEXT("honorific")) { return Honorific.Resolve(EffectiveGender); }
+	if (Part == TEXT("qualifier")) { return Qualifier.Resolve(EffectiveGender); }
+	if (Part == TEXT("gender")) { return FText::FromString(StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(EffectiveGender))); }
 	if (Part == TEXT("display")) { return DisplayName; }
-	if (Part == TEXT("fullname")) { return ComposeStructuredName(true, true); }
-	if (Part == TEXT("no-honorific")) { return ComposeStructuredName(false, true); }
-	if (Part == TEXT("no-qualifier")) { return ComposeStructuredName(true, false); }
-	if (Part == TEXT("no-family")) { return ComposeStructuredName(true, true, false); }
+	if (Part == TEXT("fullname")) { return ComposeStructuredName(true, true, true, Overrides); }
+	if (Part == TEXT("no-honorific")) { return ComposeStructuredName(false, true, true, Overrides); }
+	if (Part == TEXT("no-qualifier")) { return ComposeStructuredName(true, false, true, Overrides); }
+	if (Part == TEXT("no-family")) { return ComposeStructuredName(true, true, false, Overrides); }
 
 	UE_LOG(LogKzSpeaker, Warning, TEXT("'%s': unknown name part '%s'; using the default name."), *GetName(), *Part.ToString());
-	return GetResolvedDisplayName();
+	return ResolveName(NAME_None, Overrides);
 }
 
 FPrimaryAssetId UKzSpeakerAsset::GetPrimaryAssetId() const

@@ -6,6 +6,8 @@
 #include "Engine/DataAsset.h"
 #include "KzNamedAsset.generated.h"
 
+struct FKzNamedTokenOverride;
+
 /** True when the text has no SOURCE string. FText::IsEmpty checks the display string, which for a KEYED empty text can resolve a stale translation and lie. */
 FORCEINLINE bool KzIsTextSourceEmpty(const FText& Text)
 {
@@ -34,7 +36,10 @@ public:
 
 	/** The localized name rendered for a "{Token:Part}" reference. None = the default rendering; unknown parts fall back to it. */
 	UFUNCTION(BlueprintPure, Category = "Named Asset")
-	virtual FText ResolveName(FName Part = NAME_None) const;
+	FText ResolveName(FName Part = NAME_None) const { return ResolveName(Part, nullptr); }
+
+	/** Same, honoring runtime token overrides (player-chosen names and genders): a pinned part replaces its rendering outright, pinned atoms flow into compositions, unset pieces fall through to the authored fields. Null = authored values only. */
+	virtual FText ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const;
 
 #if WITH_EDITOR
 	DECLARE_MULTICAST_DELEGATE_TwoParams(FKzOnNamedTokenRenamed, UKzNamedAsset* /*Asset*/, FName /*OldToken*/);
