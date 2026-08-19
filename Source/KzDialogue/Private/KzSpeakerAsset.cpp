@@ -19,7 +19,7 @@ FText UKzSpeakerAsset::GetResolvedDisplayName() const
 	return ComposeStructuredName(/*bWithHonorific=*/true, /*bWithQualifier=*/true);
 }
 
-FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier) const
+FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily) const
 {
 	if (GivenName.IsEmpty() && FamilyName.IsEmpty() && SecondFamilyName.IsEmpty() && Honorific.IsEmpty() && Qualifier.IsEmpty() && NickName.IsEmpty())
 	{
@@ -32,8 +32,8 @@ FText UKzSpeakerAsset::ComposeStructuredName(bool bWithHonorific, bool bWithQual
 
 	FFormatNamedArguments Args;
 	Args.Add(TEXT("Given"), GivenName.Resolve(Gender));
-	Args.Add(TEXT("Family"), FamilyName.Resolve(Gender));
-	Args.Add(TEXT("Family2"), SecondFamilyName.Resolve(Gender));
+	Args.Add(TEXT("Family"), bWithFamily ? FamilyName.Resolve(Gender) : FText::GetEmpty());
+	Args.Add(TEXT("Family2"), bWithFamily ? SecondFamilyName.Resolve(Gender) : FText::GetEmpty());
 	Args.Add(TEXT("Nick"), NickName.Resolve(Gender));
 	Args.Add(TEXT("Honorific"), bWithHonorific ? Honorific.Resolve(Gender) : FText::GetEmpty());
 	Args.Add(TEXT("Qualifier"), bWithQualifier ? Qualifier.Resolve(Gender) : FText::GetEmpty());
@@ -61,6 +61,7 @@ FText UKzSpeakerAsset::ResolveName(FName Part) const
 	if (Part == TEXT("fullname")) { return ComposeStructuredName(true, true); }
 	if (Part == TEXT("no-honorific")) { return ComposeStructuredName(false, true); }
 	if (Part == TEXT("no-qualifier")) { return ComposeStructuredName(true, false); }
+	if (Part == TEXT("no-family")) { return ComposeStructuredName(true, true, false); }
 
 	UE_LOG(LogKzSpeaker, Warning, TEXT("'%s': unknown name part '%s'; using the default name."), *GetName(), *Part.ToString());
 	return GetResolvedDisplayName();
@@ -75,7 +76,7 @@ FPrimaryAssetId UKzSpeakerAsset::GetPrimaryAssetId() const
 
 TArray<FName> UKzSpeakerAsset::GetNameParts() const
 {
-	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier") };
+	return { TEXT("given"), TEXT("family"), TEXT("family2"), TEXT("nick"), TEXT("honorific"), TEXT("qualifier"), TEXT("gender"), TEXT("display"), TEXT("fullname"), TEXT("no-honorific"), TEXT("no-qualifier"), TEXT("no-family") };
 }
 
 void UKzSpeakerAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
