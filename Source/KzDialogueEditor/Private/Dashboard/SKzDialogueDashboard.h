@@ -35,7 +35,12 @@ private:
 
 	/** Runs the engine's Gather Text / Compile Text commandlet for the plugin's localization target, without opening the Localization Dashboard. */
 	FReply OnGatherClicked();
-	FReply OnCompileClicked();
+
+	/** Compile menu: every culture at once, or one culture alone (only its .locres changes, which keeps source control clean after a single-language edit). */
+	TSharedRef<SWidget> BuildCompileMenu();
+
+	/** Compile Text for the whole target, or for one culture when given. */
+	void RunCompile(FString Culture);
 
 	void OnAssetRegistryChanged(const FAssetData& Data);
 	void OnAssetRenamed(const FAssetData& Data, const FString& OldPath);

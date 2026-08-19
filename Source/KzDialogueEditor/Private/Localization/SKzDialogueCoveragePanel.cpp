@@ -19,6 +19,9 @@
 #include "Editor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
+#include "LocalizationCommandletTasks.h"
+#include "LocalizationModule.h"
+#include "LocalizationTargetTypes.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -332,7 +335,7 @@ void SKzDialogueCoveragePanel::Refresh()
 			[
 				MakeCultureCard(
 					FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture)),
-					MoveTemp(Bars), Groups, TEXT("native"))
+					MoveTemp(Bars), Groups, TEXT("native"), Query.GetTarget().NativeCulture)
 			];
 		}
 	}
@@ -824,12 +827,12 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), Groups, Culture)
+			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), Groups, Culture, Culture)
 		];
 	}
 }
 
-TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix)
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix, const FString& CardCulture)
 {
 	// Progress (badge + bars) always reflects every line; the ok-filters below only shape the list.
 	int32 PendingCount = 0;
@@ -857,6 +860,20 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 			SNew(STextBlock)
 				.Text(PendingCount == 0 ? LOCTEXT("CardComplete", "complete") : FText::Format(LOCTEXT("CardPendingCount", "{0} pending"), PendingCount))
 				.ColorAndOpacity(FSlateColor(PendingCount == 0 ? KzDoneColor : KzPartialColor))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+		[
+			SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(2.0f))
+				.ToolTipText(FText::Format(LOCTEXT("CompileCardTip", "Compile Text for '{0}' only: writes just this culture's .locres."), FText::FromString(CardCulture)))
+				.OnClicked_Lambda([this, CardCulture]() { CompileCulture(CardCulture); return FReply::Handled(); })
+				[
+					SNew(SBox).WidthOverride(16.0f).HeightOverride(16.0f)
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("Icons.Package")).ColorAndOpacity(FSlateColor::UseForeground())
+					]
+				]
 		]
 	];
 
@@ -1593,6 +1610,28 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	}
 
 	Refresh();
+}
+
+void SKzDialogueCoveragePanel::CompileCulture(const FString& Culture)
+{
+	ULocalizationTarget* Target = ILocalizationModule::Get().GetLocalizationTargetByName(GetDefault<UKzDialogueSettings>()->LocalizationTargetName, /*bIsEngineTarget=*/false);
+	if (!Target)
+	{
+		FNotificationInfo Info(LOCTEXT("NoLocTargetPanel", "Localization target not found. Create it once in the Localization Dashboard (Tools menu)."));
+		Info.ExpireDuration = 6.0f;
+		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+		{
+			Item->SetCompletionState(SNotificationItem::CS_Fail);
+		}
+		return;
+	}
+
+	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
+	if (!Window.IsValid()) { Window = FSlateApplication::Get().GetActiveTopLevelWindow(); }
+	if (!Window.IsValid()) { return; }
+
+	// Compile only writes this culture's .locres; the archives the panel reads stay valid.
+	LocalizationCommandletTasks::CompileTextForCulture(Window.ToSharedRef(), Target, Culture);
 }
 
 void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation, TArray<FString> FocusAfter)
