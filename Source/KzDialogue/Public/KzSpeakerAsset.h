@@ -94,11 +94,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Speaker")
 	FText GetResolvedDisplayName() const;
 
-	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. bWithFamily covers both surname components. */
-	FText ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily = true) const;
+	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. bWithFamily covers both surname components. Overridden atoms flow into the composition. */
+	FText ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily = true, const FKzNamedTokenOverride* Overrides = nullptr) const;
 
 	//~ UKzNamedAsset: parts are given / family / family2 / nick / honorific / qualifier / gender / display / fullname (structured composition even when DisplayName is set) / no-honorific / no-qualifier / no-family (composition without either surname: "Teen Kirzo"); None or unknown = GetResolvedDisplayName.
-	virtual FText ResolveName(FName Part = NAME_None) const override;
+	virtual FText ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const override;
 
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;

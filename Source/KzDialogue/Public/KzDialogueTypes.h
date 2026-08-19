@@ -52,8 +52,8 @@ struct KZDIALOGUE_API FKzDialogueSpeaker
 	bool IsValid() const { return Asset != nullptr; }
 	bool operator==(const FKzDialogueSpeaker& Other) const { return Asset == Other.Asset; }
 
-	/** Human-readable label: the asset's resolved name, its asset name as editor fallback, or "<Narration>" when null. */
-	FText GetDisplayLabel() const;
+	/** Human-readable label: the asset's resolved name, its asset name as editor fallback, or "<Narration>" when null. With a world context, runtime token overrides (player-chosen names) win over the authored fields. */
+	FText GetDisplayLabel(const UObject* WorldContextObject = nullptr) const;
 };
 
 /**

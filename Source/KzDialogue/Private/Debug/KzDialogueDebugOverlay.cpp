@@ -202,7 +202,7 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 			const FKzDialogueLine& Line = Player->GetCurrentLine();
 			const FString LineDesc = FString::Printf(
 				TEXT("(%s) \"%s\""),
-				*Line.Speaker.GetDisplayLabel().ToString(),
+				*Line.Speaker.GetDisplayLabel(Player).ToString(),
 				*Line.Text.ToString());
 
 			DrawLabeled(Canvas, X + Indent, Y, TEXT("Line:"), LineDesc);

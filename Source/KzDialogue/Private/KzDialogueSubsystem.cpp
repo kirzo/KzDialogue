@@ -7,6 +7,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
 #include "KzNamedAsset.h"
+#include "KzNamedTokenSubsystem.h"
 #include "KzSpeakerAsset.h"
 #include "Settings/KzDialogueSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -599,7 +600,7 @@ bool UKzDialogueSubsystem::TryResolveNamedText(const FString& TokenAndModifier, 
 	const UKzNamedAsset* Thing = Cast<UKzNamedAsset>(Path->TryLoad());
 	if (!Thing) { return false; }
 
-	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier));
+	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier), UKzNamedTokenSubsystem::FindOverrideFor(this, FName(*Token)));
 	return true;
 }
 
@@ -621,10 +622,13 @@ bool UKzDialogueSubsystem::TryResolveNamedArgument(const FString& TokenAndModifi
 		const FSoftObjectPath* Path = FindNamedAssetPath(FName(*Token));
 		if (const UKzSpeakerAsset* Speaker = Path ? Cast<UKzSpeakerAsset>(Path->TryLoad()) : nullptr)
 		{
+			const FKzNamedTokenOverride* Override = UKzNamedTokenSubsystem::FindOverrideFor(this, FName(*Token));
+			const EKzGender Gender = (Override && Override->bOverrideGender) ? Override->Gender : Speaker->Gender;
+
 			// Unspecified maps to Neuter, the |gender() fallback form.
 			const ETextGender TextGender =
-				Speaker->Gender == EKzGender::Masculine ? ETextGender::Masculine :
-				Speaker->Gender == EKzGender::Feminine ? ETextGender::Feminine : ETextGender::Neuter;
+				Gender == EKzGender::Masculine ? ETextGender::Masculine :
+				Gender == EKzGender::Feminine ? ETextGender::Feminine : ETextGender::Neuter;
 			OutValue = FFormatArgumentValue(TextGender);
 			return true;
 		}
