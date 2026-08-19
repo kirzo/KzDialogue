@@ -1599,6 +1599,9 @@ bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, c
 	TArray<TPair<FString, FString>> ToRewrite = Identities;
 	ToRewrite.RemoveAt(CanonicalIndex);
 
+	// One undoable step: the rewrite Modify()s every touched object.
+	const FScopedTransaction Transaction(LOCTEXT("MergeTextsTrans", "Merge Identical Texts"));
+
 	RewriteAuthoredTextOccurrences(Query, ToRewrite, SourceText,
 		[&CanonicalNamespace, &CanonicalKey](const FText& Text) { return FText::ChangeKey(CanonicalNamespace, CanonicalKey, Text); },
 		[&CanonicalNamespace, &CanonicalKey, &SourceText](const FText& Text)
@@ -1628,6 +1631,9 @@ bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceTex
 
 	FKzLocQuery Query;
 	if (!Query.Load(OutError)) { return false; }
+
+	// One undoable step: the rewrite Modify()s every touched object.
+	const FScopedTransaction Transaction(LOCTEXT("NonLocTexts", "Make Texts Non-Localizable"));
 
 	RewriteAuthoredTextOccurrences(Query, Identities, SourceText,
 		[](const FText& Text)
