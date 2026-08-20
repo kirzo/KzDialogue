@@ -24,6 +24,7 @@
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Input/SMenuAnchor.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
@@ -251,6 +252,41 @@ void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuil
 		];
 	*ComboHolder = Combo;
 
+	// The custom text editor replaced the stock FText widget, so the localization toggle it
+	// carried comes back as a globe button. Keys are plugin-managed: localizable texts are
+	// re-anchored to their stable key by the asset's metadata refresh, so the toggle only
+	// flips culture invariance. Reads go through the SOURCE string: the display string of a
+	// keyed text can be a resolved translation.
+	TSharedRef<SCheckBox> LocToggle = SNew(SCheckBox)
+		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+		.ToolTipText_Lambda([TextHandle]()
+		{
+			FText Current;
+			TextHandle->GetValue(Current);
+			return Current.IsCultureInvariant()
+				? LOCTEXT("LineNotLocalizableTip", "Not localizable: this line is skipped by the localization gather. Click to make it localizable.")
+				: LOCTEXT("LineLocalizableTip", "Localizable: this line is gathered for translation. Click to exclude it.");
+		})
+		.IsChecked_Lambda([TextHandle]()
+		{
+			FText Current;
+			TextHandle->GetValue(Current);
+			return Current.IsCultureInvariant() ? ECheckBoxState::Unchecked : ECheckBoxState::Checked;
+		})
+		.OnCheckStateChanged_Lambda([TextHandle](ECheckBoxState NewState)
+		{
+			FText Current;
+			TextHandle->GetValue(Current);
+			const FString* Source = FTextInspector::GetSourceString(Current);
+			const FString SourceString = Source ? *Source : FString();
+			TextHandle->SetValue(NewState == ECheckBoxState::Checked ? FText::FromString(SourceString) : FText::AsCultureInvariant(SourceString));
+		})
+		[
+			SNew(SImage)
+				.Image(FAppStyle::GetBrush("Icons.Localization"))
+				.ColorAndOpacity(FSlateColor::UseForeground())
+		];
+
 	StructBuilder.AddProperty(TextHandle).CustomWidget()
 		.NameContent()
 		[
@@ -268,6 +304,10 @@ void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuil
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 			[
 				Combo
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				LocToggle
 			]
 		];
 }
