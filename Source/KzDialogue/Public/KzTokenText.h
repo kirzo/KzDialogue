@@ -22,7 +22,16 @@ struct KZDIALOGUE_API FKzTokenText
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Text")
 	FText Text;
 
+	/** Named assets the text references by token, as soft references so token-only referenced things cook. Refreshed by the editor customization whenever the text changes. */
+	UPROPERTY()
+	TArray<TSoftObjectPtr<UObject>> TokenReferences;
+
 	bool SerializeFromMismatchedTag(const struct FPropertyTag& Tag, FStructuredArchive::FSlot Slot);
+
+#if WITH_EDITOR
+	/** Rescan Text for named-asset tokens and rebuild TokenReferences. Kept as-is while the registry startup scan runs. True when the list changed. */
+	bool RefreshTokenReferences();
+#endif
 };
 
 template<>

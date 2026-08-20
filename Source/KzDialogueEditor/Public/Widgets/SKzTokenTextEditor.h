@@ -21,7 +21,11 @@ class SMultiLineEditableTextBox;
 class KZDIALOGUEEDITOR_API SKzTokenTextEditor : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SKzTokenTextEditor) {}
+	SLATE_BEGIN_ARGS(SKzTokenTextEditor)
+		: _bManagedLocalizationKeys(false)
+		{}
+		/** True when the host manages the localization identity itself (dialogue lines re-anchor to stable keys): the loc control is a bare on/off toggle. False offers the stock FText identity editing (namespace and key) in a flyout. */
+		SLATE_ARGUMENT(bool, bManagedLocalizationKeys)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, TSharedRef<IPropertyHandle> InTextHandle);
@@ -33,6 +37,15 @@ private:
 	void AcceptTokenAutocomplete(const FString& TokenText);
 	void CancelTokenAutocomplete();
 
+	/** The globe control: a bare toggle when the host manages keys, a flyout with the stock identity editing otherwise. */
+	TSharedRef<SWidget> MakeLocalizationControl();
+	bool IsLocalizable() const;
+	void SetLocalizable(bool bLocalizable);
+	FText GetNamespaceValue() const;
+	FText GetKeyValue() const;
+	void OnNamespaceCommitted(const FText& NewText, ETextCommit::Type CommitType);
+	void OnKeyCommitted(const FText& NewText, ETextCommit::Type CommitType);
+
 	TSharedPtr<IPropertyHandle> TextHandle;
 	TSharedPtr<SMultiLineEditableTextBox> TextEditor;
 	TSharedPtr<SMenuAnchor> TokenMenuAnchor;
@@ -43,4 +56,6 @@ private:
 	/** Index of the session's "{" in the text; INDEX_NONE = no session. */
 	int32 AutocompleteBraceIndex = INDEX_NONE;
 	int32 AutocompleteFragmentLen = 0;
+
+	bool bManagedLocalizationKeys = false;
 };
