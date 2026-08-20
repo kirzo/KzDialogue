@@ -170,6 +170,16 @@ public:
 	static FText ResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier);
 
 	/**
+	 * Resolve every named-asset token inside a full text ("Open the door, {Kirzo}."): each
+	 * "{Token}" / "{Token:part}" argument some named asset claims becomes its resolved name,
+	 * runtime overrides included; ":gender" feeds |gender(...) in translations. Unclaimed
+	 * arguments stay literal for the caller's own formatting. Localizable texts translate
+	 * first (tokens survive in translations) and resolve at display time.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (WorldContext = "WorldContextObject"))
+	static FText ResolveTextTokens(const UObject* WorldContextObject, FText Text);
+
+	/**
 	 * Like TryResolveNamedText, but producing a format ARGUMENT: a speaker's ":gender" part
 	 * resolves to an ETextGender value, so translations can decline the text around the token
 	 * with the standard |gender(masculine, feminine, neuter) modifier. Everything else
