@@ -203,6 +203,28 @@ FText UKzDialogueFunctionLibrary::ResolveNamedText(const UObject* WorldContextOb
 	return Result;
 }
 
+FText UKzDialogueFunctionLibrary::ResolveTextTokens(const UObject* WorldContextObject, FText Text)
+{
+	TArray<FString> ArgumentNames;
+	FTextFormat(Text).GetFormatArgumentNames(ArgumentNames);
+	if (ArgumentNames.Num() == 0) { return Text; }
+
+	// Named-asset tier only: unclaimed arguments are left out of the map, and the formatter
+	// keeps their placeholders literal for the caller's own formatting pass.
+	FFormatNamedArguments Arguments;
+	for (const FString& ArgumentName : ArgumentNames)
+	{
+		FFormatArgumentValue Value;
+		if (TryResolveNamedArgument(WorldContextObject, ArgumentName, Value))
+		{
+			Arguments.Add(ArgumentName, Value);
+		}
+	}
+	if (Arguments.Num() == 0) { return Text; }
+
+	return FText::Format(FTextFormat(Text), Arguments);
+}
+
 bool UKzDialogueFunctionLibrary::TryResolveNamedArgument(const UObject* WorldContextObject, const FString& TokenAndModifier, FFormatArgumentValue& OutValue)
 {
 	FString Token = TokenAndModifier;
