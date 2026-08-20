@@ -38,14 +38,8 @@ private:
 	/** Waveform strip + play button inside the Audio group, when the line's audio is a plain wave. */
 	void AddAudioRangeRow(IDetailGroup& AudioGroup);
 
-	/** The Text row with our own multiline editor (it owns the caret, so picker inserts land at the cursor) plus the "{}" token browser button and the inline "{" autocomplete session. */
+	/** The Text row hosting SKzTokenTextEditor (multiline editor, "{}" browser, "{" autocomplete, localization toggle). */
 	void AddTextRowWithTokenPicker(class IDetailChildrenBuilder& StructBuilder, TSharedRef<class IPropertyHandle> TextHandle);
-
-	/** Inline "{" autocomplete: a typed "{" opens the token list under the editor; the fragment after it filters live; Enter/Tab completes, Esc cancels. Tracked by diffing text changes, so anything unusual (paste, selection edits) just ends the session. */
-	void OnLineTextChanged(const FText& NewText);
-	FReply OnLineTextKeyDown(const FKeyEvent& KeyEvent);
-	void AcceptTokenAutocomplete(const FString& TokenText, TSharedRef<class IPropertyHandle> TextHandle);
-	void CancelTokenAutocomplete();
 
 	/** Auditions exactly what the game will play: Play(AudioStartTime) plus a cut at AudioEndTime. */
 	FReply OnPlayRangeClicked();
@@ -54,16 +48,6 @@ private:
 
 	TSharedPtr<IPropertyHandle> StructHandle;
 	TSharedPtr<IPropertyUtilities> PropertyUtilities;
-
-	/** Our Text editor and the autocomplete plumbing around it. */
-	TSharedPtr<class SMultiLineEditableTextBox> LineTextEditor;
-	TSharedPtr<class SMenuAnchor> TokenMenuAnchor;
-	TSharedPtr<class SKzTokenPicker> AutocompletePicker;
-	/** Diff baseline for detecting the typed "{" and tracking the fragment. */
-	FString LineTextSnapshot;
-	/** Index of the session's "{" in the text; INDEX_NONE = no session. */
-	int32 AutocompleteBraceIndex = INDEX_NONE;
-	int32 AutocompleteFragmentLen = 0;
 
 	/** Editor preview of the audio range; the ticker cuts it at AudioEndTime. */
 	TWeakObjectPtr<UAudioComponent> RangePreviewAudio;
