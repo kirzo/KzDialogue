@@ -162,6 +162,7 @@ void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuil
 		.MaxDesiredWidth(600.0f)
 		[
 			SNew(SKzTokenTextEditor, TextHandle)
+				.bManagedLocalizationKeys(true)
 		];
 }
 

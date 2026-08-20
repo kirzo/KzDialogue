@@ -5,21 +5,54 @@
 
 #include "Framework/Application/SlateApplication.h"
 #include "InputCoreTypes.h"
+#include "Internationalization/TextNamespaceUtil.h"
 #include "PropertyHandle.h"
+#include "STextPropertyEditableTextBox.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SComboButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Input/SMenuAnchor.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SKzTokenTextEditor"
 
+namespace KzTokenTextEditorInternal
+{
+	/** StaticStableTextId is protected on IEditableTextProperty; this derived shim exposes it. */
+	class FStableTextIdShim : public IEditableTextProperty
+	{
+	public:
+		static void GetStable(UObject* TextOuter, ETextPropertyEditAction EditAction, const FString& InSource, const FString& ProposedNamespace, const FString& ProposedKey, FString& OutNamespace, FString& OutKey)
+		{
+			StaticStableTextId(TextOuter, EditAction, InSource, ProposedNamespace, ProposedKey, OutNamespace, OutKey);
+		}
+	};
+
+	/** Stable identity through the property's outer package; without one, the proposals pass through (key falling back to a fresh GUID). */
+	static void GetStableTextId(const TSharedPtr<IPropertyHandle>& TextHandle, IEditableTextProperty::ETextPropertyEditAction EditAction, const FString& InSource, const FString& ProposedNamespace, const FString& ProposedKey, FString& OutNamespace, FString& OutKey)
+	{
+		TArray<UObject*> Outers;
+		TextHandle->GetOuterObjects(Outers);
+		if (Outers.Num() > 0 && Outers[0])
+		{
+			FStableTextIdShim::GetStable(Outers[0], EditAction, InSource, ProposedNamespace, ProposedKey, OutNamespace, OutKey);
+			return;
+		}
+
+		OutNamespace = ProposedNamespace;
+		OutKey = ProposedKey.IsEmpty() ? FGuid::NewGuid().ToString() : ProposedKey;
+	}
+}
+
 void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropertyHandle> InTextHandle)
 {
 	TextHandle = InTextHandle;
+	bManagedLocalizationKeys = InArgs._bManagedLocalizationKeys;
 
 	FText InitialText;
 	InTextHandle->GetValue(InitialText);
@@ -108,40 +141,6 @@ void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropert
 		];
 	*ComboHolder = Combo;
 
-	// The localization toggle the stock FText widget carried. It only flips culture
-	// invariance: keys are managed by the host (the dialogue asset's refresh, the engine's
-	// gather). Reads go through the SOURCE string: the display string of a keyed text can be
-	// a resolved translation.
-	TSharedRef<SCheckBox> LocToggle = SNew(SCheckBox)
-		.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
-		.ToolTipText_Lambda([this]()
-		{
-			FText Current;
-			TextHandle->GetValue(Current);
-			return Current.IsCultureInvariant()
-				? LOCTEXT("NotLocalizableTip", "Not localizable: this text is skipped by the localization gather. Click to make it localizable.")
-				: LOCTEXT("LocalizableTip", "Localizable: this text is gathered for translation. Click to exclude it.");
-		})
-		.IsChecked_Lambda([this]()
-		{
-			FText Current;
-			TextHandle->GetValue(Current);
-			return Current.IsCultureInvariant() ? ECheckBoxState::Unchecked : ECheckBoxState::Checked;
-		})
-		.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState)
-		{
-			FText Current;
-			TextHandle->GetValue(Current);
-			const FString* Source = FTextInspector::GetSourceString(Current);
-			const FString SourceString = Source ? *Source : FString();
-			TextHandle->SetValue(NewState == ECheckBoxState::Checked ? FText::FromString(SourceString) : FText::AsCultureInvariant(SourceString));
-		})
-		[
-			SNew(SImage)
-				.Image(FAppStyle::GetBrush("Icons.Localization"))
-				.ColorAndOpacity(FSlateColor::UseForeground())
-		];
-
 	ChildSlot
 	[
 		SNew(SHorizontalBox)
@@ -155,9 +154,183 @@ void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropert
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
 		[
-			LocToggle
+			MakeLocalizationControl()
 		]
 	];
+}
+
+TSharedRef<SWidget> SKzTokenTextEditor::MakeLocalizationControl()
+{
+	TSharedRef<SWidget> Globe = SNew(SImage)
+		.Image(FAppStyle::GetBrush("Icons.Localization"))
+		.ColorAndOpacity(FSlateColor::UseForeground());
+
+	if (bManagedLocalizationKeys)
+	{
+		// Keys are the host's business (the dialogue asset re-anchors them to stable keys),
+		// so the control is a bare gather on/off toggle.
+		return SNew(SCheckBox)
+			.Style(FAppStyle::Get(), "ToggleButtonCheckbox")
+			.ToolTipText_Lambda([this]()
+			{
+				return IsLocalizable()
+					? LOCTEXT("LocalizableTip", "Localizable: this text is gathered for translation. Click to exclude it.")
+					: LOCTEXT("NotLocalizableTip", "Not localizable: this text is skipped by the localization gather. Click to make it localizable.");
+			})
+			.IsChecked_Lambda([this]() { return IsLocalizable() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+			.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetLocalizable(NewState == ECheckBoxState::Checked); })
+			[
+				Globe
+			];
+	}
+
+	// Free keys: the stock FText widget's identity controls in a flyout.
+	return SNew(SComboButton)
+		.ToolTipText(LOCTEXT("LocMenuTip", "Localization: toggle gathering and edit this text's namespace and key."))
+		.OnGetMenuContent_Lambda([this]()
+		{
+			return SNew(SBox).WidthOverride(320.0f).Padding(8.0f)
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight()
+					[
+						SNew(SCheckBox)
+							.IsChecked_Lambda([this]() { return IsLocalizable() ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
+							.OnCheckStateChanged_Lambda([this](ECheckBoxState NewState) { SetLocalizable(NewState == ECheckBoxState::Checked); })
+							[
+								SNew(STextBlock).Text(LOCTEXT("LocalizableLabel", "Localizable"))
+							]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 8.0f, 0.0f, 0.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+						[
+							SNew(SBox).WidthOverride(70.0f)
+							[
+								SNew(STextBlock).Text(LOCTEXT("NamespaceLabel", "Namespace"))
+							]
+						]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SEditableTextBox)
+								.Text(this, &SKzTokenTextEditor::GetNamespaceValue)
+								.OnTextCommitted(this, &SKzTokenTextEditor::OnNamespaceCommitted)
+								.IsEnabled_Lambda([this]() { return IsLocalizable(); })
+								.SelectAllTextWhenFocused(true)
+						]
+					]
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 4.0f, 0.0f, 0.0f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+						[
+							SNew(SBox).WidthOverride(70.0f)
+							[
+								SNew(STextBlock).Text(LOCTEXT("KeyLabel", "Key"))
+							]
+						]
+						+ SHorizontalBox::Slot().FillWidth(1.0f)
+						[
+							SNew(SEditableTextBox)
+								.Text(this, &SKzTokenTextEditor::GetKeyValue)
+								.OnTextCommitted(this, &SKzTokenTextEditor::OnKeyCommitted)
+								.IsEnabled_Lambda([this]() { return IsLocalizable(); })
+								.SelectAllTextWhenFocused(true)
+						]
+					]
+				];
+		})
+		.ButtonContent()
+		[
+			Globe
+		];
+}
+
+bool SKzTokenTextEditor::IsLocalizable() const
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	return !Current.IsCultureInvariant();
+}
+
+void SKzTokenTextEditor::SetLocalizable(bool bLocalizable)
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	if (bLocalizable == !Current.IsCultureInvariant()) { return; }
+
+	// Reads go through the SOURCE string: the display string of a keyed text can be a
+	// resolved translation.
+	const FString* Source = FTextInspector::GetSourceString(Current);
+	const FString SourceString = Source ? *Source : FString();
+
+	if (!bLocalizable)
+	{
+		TextHandle->SetValue(FText::AsCultureInvariant(SourceString));
+		return;
+	}
+
+	if (bManagedLocalizationKeys)
+	{
+		// Keyless on purpose: the host re-anchors it to its stable key.
+		TextHandle->SetValue(FText::FromString(SourceString));
+		return;
+	}
+
+	// Stock behavior: a stable package-bound identity right away.
+	FString NewNamespace;
+	FString NewKey;
+	KzTokenTextEditorInternal::GetStableTextId(TextHandle, IEditableTextProperty::ETextPropertyEditAction::EditedKey, SourceString, FString(), FString(), NewNamespace, NewKey);
+	TextHandle->SetValue(FText::AsLocalizable_Advanced(NewNamespace, NewKey, SourceString));
+}
+
+FText SKzTokenTextEditor::GetNamespaceValue() const
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	return FText::AsCultureInvariant(TextNamespaceUtil::StripPackageNamespace(FTextInspector::GetNamespace(Current).Get(FString())));
+}
+
+FText SKzTokenTextEditor::GetKeyValue() const
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	return FText::AsCultureInvariant(FTextInspector::GetKey(Current).Get(FString()));
+}
+
+void SKzTokenTextEditor::OnNamespaceCommitted(const FText& NewText, ETextCommit::Type /*CommitType*/)
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	if (Current.IsCultureInvariant()) { return; }
+
+	// Only apply an actual change, keeping the key stable where possible (stock behavior).
+	const FString ProposedNamespace = NewText.ToString();
+	const FString CurrentFullNamespace = FTextInspector::GetNamespace(Current).Get(FString());
+	if (TextNamespaceUtil::StripPackageNamespace(CurrentFullNamespace).Equals(ProposedNamespace, ESearchCase::CaseSensitive)) { return; }
+
+	const FString* Source = FTextInspector::GetSourceString(Current);
+	FString NewNamespace;
+	FString NewKey;
+	KzTokenTextEditorInternal::GetStableTextId(TextHandle, IEditableTextProperty::ETextPropertyEditAction::EditedNamespace, Source ? *Source : FString(), ProposedNamespace, FTextInspector::GetKey(Current).Get(FString()), NewNamespace, NewKey);
+	TextHandle->SetValue(FText::ChangeKey(NewNamespace, NewKey, Current));
+}
+
+void SKzTokenTextEditor::OnKeyCommitted(const FText& NewText, ETextCommit::Type /*CommitType*/)
+{
+	FText Current;
+	TextHandle->GetValue(Current);
+	if (Current.IsCultureInvariant()) { return; }
+
+	const FString ProposedKey = NewText.ToString();
+	if (FTextInspector::GetKey(Current).Get(FString()).Equals(ProposedKey, ESearchCase::CaseSensitive)) { return; }
+
+	const FString* Source = FTextInspector::GetSourceString(Current);
+	FString NewNamespace;
+	FString NewKey;
+	KzTokenTextEditorInternal::GetStableTextId(TextHandle, IEditableTextProperty::ETextPropertyEditAction::EditedKey, Source ? *Source : FString(), FTextInspector::GetNamespace(Current).Get(FString()), ProposedKey, NewNamespace, NewKey);
+	TextHandle->SetValue(FText::ChangeKey(NewNamespace, NewKey, Current));
 }
 
 void SKzTokenTextEditor::OnTextChangedInternal(const FText& NewText)
