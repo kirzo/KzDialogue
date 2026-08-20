@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueSubsystem.h"
+#include "KzTokenText.h"
 #include "KzDialogueFunctionLibrary.generated.h"
 
 class UKzDialogueAsset;
@@ -186,4 +187,12 @@ public:
 	 * resolves as text. Used by the line players.
 	 */
 	static bool TryResolveNamedArgument(const UObject* WorldContextObject, const FString& TokenAndModifier, FFormatArgumentValue& OutValue);
+
+	/** The displayable form of a token text: translated for the active culture, named-asset tokens resolved (runtime overrides included). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (WorldContext = "WorldContextObject"))
+	static FText ResolveTokenText(const UObject* WorldContextObject, const FKzTokenText& TokenText);
+
+	/** Raw text with tokens unresolved. Autocast: plugging a token text into an FText pin converts through this; call ResolveTokenText for the displayable form. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens", meta = (BlueprintAutocast, CompactNodeTitle = "->", DisplayName = "To Text (Token Text)"))
+	static FText Conv_KzTokenTextToText(const FKzTokenText& TokenText);
 };

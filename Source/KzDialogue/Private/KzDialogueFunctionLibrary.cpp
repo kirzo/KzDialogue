@@ -225,6 +225,16 @@ FText UKzDialogueFunctionLibrary::ResolveTextTokens(const UObject* WorldContextO
 	return FText::Format(FTextFormat(Text), Arguments);
 }
 
+FText UKzDialogueFunctionLibrary::ResolveTokenText(const UObject* WorldContextObject, const FKzTokenText& TokenText)
+{
+	return ResolveTextTokens(WorldContextObject, TokenText.Text);
+}
+
+FText UKzDialogueFunctionLibrary::Conv_KzTokenTextToText(const FKzTokenText& TokenText)
+{
+	return TokenText.Text;
+}
+
 bool UKzDialogueFunctionLibrary::TryResolveNamedArgument(const UObject* WorldContextObject, const FString& TokenAndModifier, FFormatArgumentValue& OutValue)
 {
 	FString Token = TokenAndModifier;
