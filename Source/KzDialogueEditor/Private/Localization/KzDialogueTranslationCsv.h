@@ -237,6 +237,15 @@ public:
 	/** Reverts one line to its own localization identity, seeding it with the shared translation so no work is lost. Transacted; save + Gather afterwards. */
 	static bool UnmergeLineText(UKzDialogueAsset* Asset, const FGuid LineId, FText& OutError);
 
+	/**
+	 * Fills the pseudo culture's archive (KzDialogue settings) with machine-generated
+	 * translations of every gathered source: accented letters, ~40% length padding and
+	 * bracket delimiters, format arguments preserved. Adds the culture to the localization
+	 * target when missing (persisted like the Localization Dashboard does) and warns when it
+	 * is staged for packaging. Idempotent; re-run after each Gather, then compile the culture.
+	 */
+	static bool GeneratePseudoTranslations(int32& OutCount, FText& OutError);
+
 	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
 	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
 
