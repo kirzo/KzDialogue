@@ -30,6 +30,9 @@
 #include "Logging/MessageLog.h"
 #include "Logging/TokenizedMessage.h"
 #include "Internationalization/InternationalizationManifest.h"
+#include "LocalizationModule.h"
+#include "LocalizationSettings.h"
+#include "LocalizationTargetTypes.h"
 #include "LocTextHelper.h"
 #include "Misc/UObjectToken.h"
 #include "Misc/ConfigCacheIni.h"
@@ -327,6 +330,65 @@ namespace
 	bool SourceMatches(const FString& A, const FString& B)
 	{
 		return NormalizeNewlines(A).Equals(NormalizeNewlines(B), ESearchCase::CaseSensitive);
+	}
+
+	/** One accented look-alike per plain letter, so pseudo text stays readable while exercising fonts and encoding. */
+	TCHAR PseudoAccent(TCHAR Char)
+	{
+		// a e i o u y c n -> a-acute e-acute i-acute o-acute u-acute y-acute c-cedilla n-tilde (and uppercase).
+		static const FString Plain = TEXT("aeiouycnAEIOUYCN");
+		static const FString Accented = TEXT("\u00E1\u00E9\u00ED\u00F3\u00FA\u00FD\u00E7\u00F1\u00C1\u00C9\u00CD\u00D3\u00DA\u00DD\u00C7\u00D1");
+		int32 Index = INDEX_NONE;
+		return Plain.FindChar(Char, Index) ? Accented[Index] : Char;
+	}
+
+	/** Machine pseudo-translation: accented letters, ~40% length padding and bracket delimiters. Format syntax survives verbatim: "{...}" arguments, backtick escapes and the "|keyword" of modifiers, so runtime formatting keeps working. */
+	FString MakePseudoTranslation(const FString& Source)
+	{
+		FString Out;
+		Out.Reserve(Source.Len() * 2 + 8);
+		Out += TEXT("[");
+
+		int32 BraceDepth = 0;
+		for (int32 i = 0; i < Source.Len(); ++i)
+		{
+			const TCHAR Char = Source[i];
+
+			// Backtick escapes the next character in FText::Format patterns: copy both.
+			if (Char == TEXT('`') && i + 1 < Source.Len())
+			{
+				Out.AppendChar(Char);
+				Out.AppendChar(Source[++i]);
+				continue;
+			}
+
+			if (Char == TEXT('{')) { ++BraceDepth; }
+			else if (Char == TEXT('}')) { BraceDepth = FMath::Max(0, BraceDepth - 1); }
+
+			if (BraceDepth > 0 || Char == TEXT('}'))
+			{
+				Out.AppendChar(Char);
+				continue;
+			}
+			if (Char == TEXT('|'))
+			{
+				// "|gender(", "|plural(": the keyword is parser syntax, its arguments are not.
+				Out.AppendChar(Char);
+				while (i + 1 < Source.Len() && FChar::IsAlpha(Source[i + 1]))
+				{
+					Out.AppendChar(Source[++i]);
+				}
+				continue;
+			}
+
+			Out.AppendChar(PseudoAccent(Char));
+		}
+
+		// ~40% padding makes English-sized UI reveal German-sized overflow.
+		const int32 Padding = FMath::Max(2, Source.Len() * 2 / 5);
+		for (int32 i = 0; i < Padding; ++i) { Out.AppendChar(TEXT('~')); }
+		Out += TEXT("]");
+		return Out;
 	}
 
 	/** Archives synced from source control are often read-only on disk and the JSON save just fails; imports write them directly, so drop the flag (logged) instead of failing. */
@@ -2018,6 +2080,75 @@ bool FKzDialogueTranslationCsv::UnmergeLineText(UKzDialogueAsset* Asset, const F
 	}
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Unmerged line text from '%s,%s'. Save the dirty asset and re-run Gather."), *SharedIdentity.Key, *SharedIdentity.Value);
+	return true;
+}
+
+bool FKzDialogueTranslationCsv::GeneratePseudoTranslations(int32& OutCount, FText& OutError)
+{
+	OutCount = 0;
+
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	const FString PseudoCulture = Settings ? Settings->PseudoCulture : FString();
+	if (PseudoCulture.IsEmpty())
+	{
+		OutError = LOCTEXT("PseudoDisabled", "No pseudo culture set in the KzDialogue settings.");
+		return false;
+	}
+
+	// The culture must live in the localization target so gather/compile know it; added here
+	// and persisted the way the Localization Dashboard does (settings mirror + default ini).
+	if (ULocalizationTarget* Target = ILocalizationModule::Get().GetLocalizationTargetByName(Settings->LocalizationTargetName, /*bIsEngineTarget=*/false))
+	{
+		const bool bKnown = Target->Settings.SupportedCulturesStatistics.ContainsByPredicate([&PseudoCulture](const FCultureStatistics& Stats) { return Stats.CultureName == PseudoCulture; });
+		if (!bKnown)
+		{
+			Target->Settings.SupportedCulturesStatistics.Add(FCultureStatistics(PseudoCulture));
+			FPropertyChangedEvent Event(nullptr);
+			GetMutableDefault<ULocalizationSettings>()->PostEditChangeProperty(Event);
+			UE_LOG(LogKzDialogueL10N, Log, TEXT("Added pseudo culture '%s' to localization target '%s'."), *PseudoCulture, *Target->Settings.Name);
+		}
+	}
+
+	// Belt and braces: pseudo data must never ride into packaged builds unnoticed.
+	TArray<FString> CulturesToStage;
+	GConfig->GetArray(TEXT("/Script/UnrealEd.ProjectPackagingSettings"), TEXT("CulturesToStage"), CulturesToStage, GGameIni);
+	if (CulturesToStage.Contains(PseudoCulture))
+	{
+		UE_LOG(LogKzDialogueL10N, Warning, TEXT("Pseudo culture '%s' is in the packaging CulturesToStage and would ship with packaged builds. Remove it there; QA builds opt in with -CookCultures."), *PseudoCulture);
+	}
+
+	FKzLocTargetInfo LocTarget;
+	if (!ReadLocTargetInfo(LocTarget, OutError)) { return false; }
+
+	// The step inis may not list a freshly added culture until the next Gather; the helper
+	// gets it explicitly so the archive can be created right away.
+	TArray<FString> Cultures = LocTarget.ForeignCultures;
+	Cultures.AddUnique(PseudoCulture);
+
+	FLocTextHelper LocHelper(LocTarget.TargetPath, LocTarget.ManifestName, LocTarget.ArchiveName, LocTarget.NativeCulture, Cultures, nullptr);
+	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
+	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+	if (!LocHelper.LoadForeignArchive(PseudoCulture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+
+	int32 Count = 0;
+	LocHelper.EnumerateSourceTexts([&LocHelper, &PseudoCulture, &Count](TSharedRef<FManifestEntry> Entry)
+	{
+		const FString Pseudo = MakePseudoTranslation(Entry->Source.Text);
+		for (const FManifestContext& Context : Entry->Contexts)
+		{
+			if (LocHelper.ImportTranslation(PseudoCulture, Entry->Namespace, Context.Key, Context.KeyMetadataObj, Entry->Source, FLocItem(Pseudo), Context.bIsOptional))
+			{
+				++Count;
+			}
+		}
+		return true;
+	}, /*bCheckDependencies=*/true);
+
+	EnsureArchiveWritable(LocTarget, PseudoCulture);
+	if (!LocHelper.SaveArchive(PseudoCulture, &OutError)) { return false; }
+
+	OutCount = Count;
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Generated %d pseudo-translations into '%s'. Compile the culture and switch to it in PIE."), Count, *PseudoCulture);
 	return true;
 }
 

@@ -42,6 +42,9 @@ private:
 	/** Compile Text for the whole target, or for one culture when given. */
 	void RunCompile(FString Culture);
 
+	/** Regenerates the pseudo culture's archive from the gathered manifest (overflow/font/hardcoded-text QA). */
+	FReply OnGeneratePseudoClicked();
+
 	void OnAssetRegistryChanged(const FAssetData& Data);
 	void OnAssetRenamed(const FAssetData& Data, const FString& OldPath);
 	void OnRegistryFilesLoaded();

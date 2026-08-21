@@ -59,6 +59,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Localization")
 	FString LocalizationTargetName = TEXT("Game");
 
+	/** Culture holding the machine-generated pseudo-localization (lengthened, accented, bracketed texts for overflow/font/hardcoded-text QA). Added to the target automatically on generate. Keep it OUT of the packaging CulturesToStage: QA builds opt in with -CookCultures. Empty disables the tool. */
+	UPROPERTY(Config, EditAnywhere, Category = "Localization")
+	FString PseudoCulture = TEXT("qps-ploc");
+
 	/** FText::Format named-arg pattern composing structured speaker names. Available args: {Qualifier}, {Honorific}, {Given}, {Family}, {Family2}, {Nick}. Default for cultures without an override. Plain FString on purpose: it is per-culture by construction and must not enter the localization gather. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
 	FString DefaultSpeakerNameFormat = TEXT("{Qualifier} {Honorific} {Given} {Family} {Family2}");

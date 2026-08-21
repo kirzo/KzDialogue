@@ -108,6 +108,13 @@ void SKzDialogueDashboard::RebuildPanel()
 			+ SHorizontalBox::Slot().AutoWidth()
 			[
 				SNew(SButton)
+					.Text(LOCTEXT("GeneratePseudo", "Pseudo"))
+					.ToolTipText(LOCTEXT("GeneratePseudoTip", "Fill the pseudo culture's archive with machine translations of every gathered text: lengthened, accented and bracketed. UI overflowing with the padding would overflow in real languages; on-screen text WITHOUT brackets escaped the gather. Re-run after each Gather, then compile the pseudo culture and switch to it in PIE. Editor-only data unless a build stages the culture explicitly."))
+					.OnClicked(this, &SKzDialogueDashboard::OnGeneratePseudoClicked)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f, 0.f, 0.f)
+			[
+				SNew(SButton)
 					.Text(LOCTEXT("GatherText", "Gather"))
 					.ToolTipText(LOCTEXT("GatherTextTip", "Run Gather Text on the localization target, same as the Localization Dashboard button. Refreshes manifest and archives from saved assets."))
 					.OnClicked(this, &SKzDialogueDashboard::OnGatherClicked)
@@ -123,6 +130,21 @@ void SKzDialogueDashboard::RebuildPanel()
 					]
 			]
 		]);
+}
+
+FReply SKzDialogueDashboard::OnGeneratePseudoClicked()
+{
+	int32 Count = 0;
+	FText Error;
+	const bool bRan = FKzDialogueTranslationCsv::GeneratePseudoTranslations(Count, Error);
+
+	ShowDashboardNotification(bRan
+		? FText::Format(LOCTEXT("PseudoDone", "Generated {0} pseudo-translations. Compile the pseudo culture and switch to it in PIE (run Gather first if the culture was just added, so it shows up in the lists)."), FText::AsNumber(Count))
+		: Error, bRan);
+
+	// A fresh archive changes the coverage the panel shows.
+	if (bRan) { RebuildPanel(); }
+	return FReply::Handled();
 }
 
 FReply SKzDialogueDashboard::OnGatherClicked()
