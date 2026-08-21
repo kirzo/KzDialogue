@@ -341,6 +341,66 @@ namespace
 		}
 	}
 
+	/**
+	 * Copies each culture's best existing translation among FromIdentities into ToIdentity,
+	 * creating ToIdentity's manifest entry when it is not gathered yet (the next Gather
+	 * regenerates the manifest anyway). Stale translations (made against a different source)
+	 * are not migrated. Used by the line-text merge/unmerge to keep finished work.
+	 */
+	bool CopyTranslationsToIdentity(const TArray<TPair<FString, FString>>& FromIdentities, const TPair<FString, FString>& ToIdentity, const FString& SourceText, FText& OutError)
+	{
+		FKzLocTargetInfo Target;
+		if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, OutError)) { return false; }
+
+		FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
+		if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
+		if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+		for (const FString& Culture : Target.ForeignCultures)
+		{
+			if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+		}
+
+		if (!LocHelper.FindSourceText(FLocKey(ToIdentity.Key), FLocKey(ToIdentity.Value)).IsValid())
+		{
+			FManifestContext Context;
+			Context.Key = FLocKey(ToIdentity.Value);
+			Context.SourceLocation = TEXT("KzDialogue line text");
+			if (!LocHelper.AddSourceText(FLocKey(ToIdentity.Key), FLocItem(SourceText), Context) || !LocHelper.SaveManifest(&OutError))
+			{
+				return false;
+			}
+		}
+
+		int32 CulturesWritten = 0;
+		for (const FString& Culture : Target.ForeignCultures)
+		{
+			FString Translation;
+			for (const TPair<FString, FString>& From : FromIdentities)
+			{
+				const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(From.Key), FLocKey(From.Value), nullptr);
+				if (Entry.IsValid() && !Entry->Translation.Text.IsEmpty() && SourceMatches(Entry->Source.Text, SourceText))
+				{
+					Translation = Entry->Translation.Text;
+					break;
+				}
+			}
+			if (Translation.IsEmpty()) { continue; }
+
+			if (LocHelper.ImportTranslation(Culture, FLocKey(ToIdentity.Key), FLocKey(ToIdentity.Value), nullptr, FLocItem(SourceText), FLocItem(Translation), false))
+			{
+				EnsureArchiveWritable(Target, Culture);
+				if (!LocHelper.SaveArchive(Culture, &OutError)) { return false; }
+				++CulturesWritten;
+			}
+		}
+
+		if (CulturesWritten > 0)
+		{
+			UE_LOG(LogKzDialogueL10N, Log, TEXT("Copied %d culture translation(s) into '%s,%s'."), CulturesWritten, *ToIdentity.Key, *ToIdentity.Value);
+		}
+		return true;
+	}
+
 	void ShowNotification(const FText& Message, bool bSuccess)
 	{
 		FNotificationInfo Info(Message);
@@ -595,6 +655,8 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 	};
 
 	int32 NumRows = 0;
+	// Texts sharing one localization identity (merged line texts) export once.
+	TSet<FString> EmittedIdentities;
 	for (const UKzDialogueAsset* Asset : Assets)
 	{
 		if (!Asset) { continue; }
@@ -615,6 +677,10 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 				const TOptional<FString> Key = FTextInspector::GetKey(Source);
 				const FString* SourceString = FTextInspector::GetSourceString(Source);
 				if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+
+				bool bAlreadyEmitted = false;
+				EmittedIdentities.Add(Namespace.GetValue() + TEXT(",") + Key.GetValue(), &bAlreadyEmitted);
+				if (bAlreadyEmitted) { return; }
 
 				FString Translation;
 				FString StaleTranslation;
@@ -1200,6 +1266,13 @@ namespace
 		const TOptional<FString> Key = FTextInspector::GetKey(Source);
 		const FString* SourceString = FTextInspector::GetSourceString(Source);
 		if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
+
+		// Texts sharing one localization identity (merged line texts) export once.
+		// ponytail: linear scan, switch to a TSet alongside Entries if exports ever crawl.
+		for (const FKzPoEntry& Existing : Entries)
+		{
+			if (Existing.Namespace == Namespace.GetValue() && Existing.Key == Key.GetValue()) { return; }
+		}
 
 		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
 		Entry.Comments = MoveTemp(Comments);
@@ -1832,6 +1905,119 @@ bool FKzDialogueTranslationCsv::MakeTextsNonLocalizable(const FString& SourceTex
 		OutRewritten, OutSkipped, OutHandled);
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Non-localizable: %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), OutRewritten, OutSkipped);
+	return true;
+}
+
+bool FKzDialogueTranslationCsv::MergeLineTexts(const TArray<FKzLineTextRef>& Lines, FText& OutError)
+{
+	// Resolve the participants: at least two localizable lines with identical SOURCE strings.
+	struct FResolved
+	{
+		UKzDialogueAsset* Asset = nullptr;
+		FKzDialogueLine* Line = nullptr;
+	};
+	TArray<FResolved> Resolved;
+	for (const FKzLineTextRef& Ref : Lines)
+	{
+		FKzDialogueLine* Line = Ref.Asset ? Ref.Asset->Lines.FindByPredicate([&Ref](const FKzDialogueLine& L) { return L.LineId == Ref.LineId; }) : nullptr;
+		if (Line) { Resolved.Add({ Ref.Asset, Line }); }
+	}
+	if (Resolved.Num() < 2)
+	{
+		OutError = LOCTEXT("MergeLinesNothing", "Nothing to merge: fewer than two lines.");
+		return false;
+	}
+
+	const FString* ReferenceSource = FTextInspector::GetSourceString(Resolved[0].Line->Text);
+	const FString SourceText = ReferenceSource ? *ReferenceSource : FString();
+	if (SourceText.IsEmpty())
+	{
+		OutError = LOCTEXT("MergeLinesEmpty", "Cannot merge empty texts.");
+		return false;
+	}
+	for (const FResolved& Entry : Resolved)
+	{
+		const FString* Source = FTextInspector::GetSourceString(Entry.Line->Text);
+		if (Entry.Line->Text.IsCultureInvariant() || !Source || !Source->Equals(SourceText, ESearchCase::CaseSensitive))
+		{
+			OutError = LOCTEXT("MergeLinesMismatch", "Cannot merge: the lines are not all localizable with identical source text.");
+			return false;
+		}
+	}
+
+	// The pre-merge identities feed the translation migration below.
+	TArray<TPair<FString, FString>> OldIdentities;
+	for (const FResolved& Entry : Resolved)
+	{
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Entry.Line->Text);
+		const TOptional<FString> Key = FTextInspector::GetKey(Entry.Line->Text);
+		if (Namespace.IsSet() && Key.IsSet()) { OldIdentities.Emplace(Namespace.GetValue(), Key.GetValue()); }
+	}
+
+	const FGuid SharedId = FGuid::NewGuid();
+	const uint32 SharedHash = KzComputeSourceTextHash(Resolved[0].Line->Text);
+	const TPair<FString, FString> SharedIdentity(FString(KzSharedTextNamespace), SharedId.ToString(EGuidFormats::Digits));
+
+	{
+		// One undoable step covering every touched asset; PostEditChange re-keys the texts
+		// through the metadata refresh.
+		const FScopedTransaction Transaction(LOCTEXT("MergeLineTextsTrans", "Merge Line Texts"));
+		TSet<UKzDialogueAsset*> Assets;
+		for (const FResolved& Entry : Resolved) { Assets.Add(Entry.Asset); }
+		for (UKzDialogueAsset* Asset : Assets) { Asset->Modify(); }
+		for (const FResolved& Entry : Resolved)
+		{
+			Entry.Line->SharedTextId = SharedId;
+			Entry.Line->SharedTextSourceHash = SharedHash;
+		}
+		for (UKzDialogueAsset* Asset : Assets) { Asset->PostEditChange(); }
+	}
+
+	// Keep finished work: each culture's best existing translation moves to the shared entry.
+	FText ArchiveError;
+	if (!CopyTranslationsToIdentity(OldIdentities, SharedIdentity, SourceText, ArchiveError))
+	{
+		UE_LOG(LogKzDialogueL10N, Warning, TEXT("Line texts merged, but migrating translations failed: %s"), *ArchiveError.ToString());
+	}
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Merged %d line texts into '%s,%s'. Save the dirty assets and re-run Gather."), Resolved.Num(), *SharedIdentity.Key, *SharedIdentity.Value);
+	return true;
+}
+
+bool FKzDialogueTranslationCsv::UnmergeLineText(UKzDialogueAsset* Asset, const FGuid LineId, FText& OutError)
+{
+	FKzDialogueLine* Line = Asset ? Asset->Lines.FindByPredicate([&LineId](const FKzDialogueLine& L) { return L.LineId == LineId; }) : nullptr;
+	if (!Line || !Line->SharedTextId.IsValid())
+	{
+		OutError = LOCTEXT("UnmergeNothing", "The line does not share its text.");
+		return false;
+	}
+
+	const TPair<FString, FString> SharedIdentity(FString(KzSharedTextNamespace), Line->SharedTextId.ToString(EGuidFormats::Digits));
+	const FString* Source = FTextInspector::GetSourceString(Line->Text);
+	const FString SourceText = Source ? *Source : FString();
+
+	{
+		const FScopedTransaction Transaction(LOCTEXT("UnmergeLineTextTrans", "Unmerge Line Text"));
+		Asset->Modify();
+		Line->SharedTextId.Invalidate();
+		Line->SharedTextSourceHash = 0;
+		Asset->PostEditChange();
+	}
+
+	// Seed the recovered own identity with the shared translation, so unmerging loses no work.
+	const TOptional<FString> OwnNamespace = FTextInspector::GetNamespace(Line->Text);
+	const TOptional<FString> OwnKey = FTextInspector::GetKey(Line->Text);
+	if (OwnNamespace.IsSet() && OwnKey.IsSet() && !SourceText.IsEmpty())
+	{
+		FText ArchiveError;
+		if (!CopyTranslationsToIdentity({ SharedIdentity }, TPair<FString, FString>(OwnNamespace.GetValue(), OwnKey.GetValue()), SourceText, ArchiveError))
+		{
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Line text unmerged, but seeding its translations failed: %s"), *ArchiveError.ToString());
+		}
+	}
+
+	UE_LOG(LogKzDialogueL10N, Log, TEXT("Unmerged line text from '%s,%s'. Save the dirty asset and re-run Gather."), *SharedIdentity.Key, *SharedIdentity.Value);
 	return true;
 }
 

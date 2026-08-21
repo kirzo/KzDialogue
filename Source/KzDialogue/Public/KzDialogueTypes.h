@@ -26,6 +26,9 @@ inline uint32 KzComputeSourceTextHash(const FText& Text)
 	const FString* Source = FTextInspector::GetSourceString(Text);
 	return Source ? FCrc::StrCrc32(**Source) : 0;
 }
+
+/** Namespace of shared line-text localization identities: no owning asset, key = SharedTextId digits. */
+inline const TCHAR* const KzSharedTextNamespace = TEXT("KzDialogue.Shared");
 #endif
 
 namespace Kz::Tags::Dialogue
@@ -254,6 +257,14 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio == nullptr"))
 	EKzLineVoicePolicy VoicePolicy = EKzLineVoicePolicy::Inherit;
 #endif
+
+	/** Shared localization identity of Text: when valid, the text keys under KzDialogue.Shared/<SharedTextId>, sharing ONE translation with every line carrying the same id. Text only; audio, timing and VO are per line and unrelated. Editing the text detaches automatically (SharedTextSourceHash). */
+	UPROPERTY()
+	FGuid SharedTextId;
+
+	/** Source hash captured when the shared identity was assigned; a mismatch means this line diverged from its group, and the metadata refresh clears the marker. */
+	UPROPERTY()
+	uint32 SharedTextSourceHash = 0;
 
 	/** CRC32 of Text's source string. Updated automatically. Used to detect drift between authored text and existing translations. */
 	UPROPERTY()
