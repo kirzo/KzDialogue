@@ -109,6 +109,11 @@ private:
 		TArray<TPair<FString, FString>> GroupIdentities;
 		FString GroupSource;
 
+		/** Identical-source dialogue lines across the loaded assets, this row included; more than one enables Merge texts (native card). */
+		TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>> LineMergeGroup;
+		/** This line's text shares its localization identity (SharedTextId set): shows the Unmerge action instead. */
+		bool bSharedText = false;
+
 		/** Where the project text is authored (manifest source locations: asset object paths or code sites); clicking the row navigates there. */
 		TArray<FString> SourceLocations;
 	};
@@ -142,6 +147,12 @@ private:
 
 	/** Accepts the current text for a stale take: re-stamps RecordedTextHash without re-recording. */
 	void AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
+
+	/** Collapses the localization identity of identical-source lines into one shared entry (text only; audio and timing stay per line). */
+	void MergeLineRowTexts(const TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>& Group);
+
+	/** Reverts one line to its own localization identity, seeded with the shared translation. */
+	void UnmergeLineRowText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
 
 	/** Writes an inline-edited translation into the culture's archive (every identity of the row) and refreshes on the next tick. FocusAfter: editor keys to focus after the rebuild (first one still present wins), for fluid Enter/Tab chains. */
 	void CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation, TArray<FString> FocusAfter = TArray<FString>());

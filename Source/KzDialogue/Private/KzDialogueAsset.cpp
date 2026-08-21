@@ -348,6 +348,19 @@ void UKzDialogueAsset::RefreshLineMetadata()
 	}
 	
 	// Re-anchor every FText to its stable (Namespace, Key).
+	// Shared-text self heal: a source that diverged from its merge-time hash detaches from
+	// the group, and the rebind below restores the line's own key. Editing a shared text can
+	// never corrupt the group by construction.
+	for (FKzDialogueLine& Line : Lines)
+	{
+		if (Line.SharedTextId.IsValid() && KzComputeSourceTextHash(Line.Text) != Line.SharedTextSourceHash)
+		{
+			Line.SharedTextId.Invalidate();
+			Line.SharedTextSourceHash = 0;
+			bDirty = true;
+		}
+	}
+
 	RebindFTextKeys();
 
 	// Refresh source text hashes. Compared on import to flag stale translations
@@ -491,6 +504,14 @@ void UKzDialogueAsset::RebindFTextKeys()
 		// A text the user marked as non-localizable (culture invariant) keeps that choice:
 		// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
 		if (Line.Text.IsCultureInvariant()) { continue; }
+
+		// A shared text keys under the asset-independent shared namespace: every line
+		// carrying this id resolves to the same entry, one translation for all of them.
+		if (Line.SharedTextId.IsValid())
+		{
+			Line.Text = FText::ChangeKey(KzSharedTextNamespace, Line.SharedTextId.ToString(EGuidFormats::Digits), Line.Text);
+			continue;
+		}
 
 		const FString LineGuid = Line.LineId.ToString(EGuidFormats::Digits);
 

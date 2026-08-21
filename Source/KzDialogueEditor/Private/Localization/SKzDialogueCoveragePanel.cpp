@@ -297,6 +297,20 @@ void SKzDialogueCoveragePanel::Refresh()
 		const EKzLineVoicePolicy DefaultVoicePolicy = Settings && Settings->DefaultVoicePolicy != EKzLineVoicePolicy::Inherit
 			? Settings->DefaultVoicePolicy : EKzLineVoicePolicy::VoiceExpected;
 
+		// Identical-source localizable lines across every loaded asset: candidates for the
+		// line-text merge (one shared localization identity; audio and timing stay per line).
+		TMap<FString, TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>> LinesBySource;
+		for (UKzDialogueAsset* AssetPtr : LiveAssets)
+		{
+			for (const FKzDialogueLine& Line : AssetPtr->Lines)
+			{
+				if (Line.Text.IsCultureInvariant()) { continue; }
+				const FString* Source = FTextInspector::GetSourceString(Line.Text);
+				if (!Source || Source->IsEmpty()) { continue; }
+				LinesBySource.FindOrAdd(*Source).Emplace(AssetPtr, Line.LineId);
+			}
+		}
+
 		int32 AudioDone = 0;
 		int32 AudioTotal = 0;
 		int32 PendingCount = 0;
@@ -317,6 +331,22 @@ void SKzDialogueCoveragePanel::Refresh()
 				FLineRow Row;
 				Row.LineId = Line.LineId;
 				Row.Label = FText::FromString(FlattenLabel(Line.GetDisplayLabel(0).ToString()));
+				Row.bSharedText = Line.SharedTextId.IsValid();
+				if (const FString* Source = FTextInspector::GetSourceString(Line.Text))
+				{
+					if (const TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>* SameSource = LinesBySource.Find(*Source))
+					{
+						if (SameSource->Num() > 1) { Row.LineMergeGroup = *SameSource; }
+					}
+				}
+				if (Row.bSharedText)
+				{
+					Row.Label = FText::Format(LOCTEXT("SharedLineLabel", "{0} (shared)"), Row.Label);
+				}
+				else if (Row.LineMergeGroup.Num() > 1)
+				{
+					Row.Label = FText::Format(LOCTEXT("MergeableLineLabel", "{0} (x{1})"), Row.Label, FText::AsNumber(Row.LineMergeGroup.Num()));
+				}
 				if (bVoiced)
 				{
 					Row.AudioPath = Line.Audio.ToSoftObjectPath();
@@ -1311,6 +1341,54 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			];
 	}
 
+	// Line-text merge actions join the state chip (the play column may hold a take): merge
+	// collapses identical-source lines into one shared localization identity, unmerge gives
+	// this line its own back. Text only; audio and timing are per line and unrelated.
+	if (Entry.bSharedText || Entry.LineMergeGroup.Num() > 1)
+	{
+		TSharedRef<SWidget> Action = Entry.bSharedText
+			? SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(1.0f))
+				.ToolTipText(LOCTEXT("UnmergeLineTip", "Unmerge: give this line its own localization identity again, seeded with the shared translation. Save the dirty asset and re-run Gather afterwards."))
+				.OnClicked_Lambda([this, InAsset, LineId = Entry.LineId]()
+				{
+					UnmergeLineRowText(InAsset, LineId);
+					return FReply::Handled();
+				})
+				[
+					SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("Icons.Unlink")).ColorAndOpacity(FSlateColor::UseForeground())
+					]
+				]
+			: SNew(SButton)
+				.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+				.ContentPadding(FMargin(1.0f))
+				.ToolTipText(LOCTEXT("MergeLinesTip", "Merge texts: these identical lines share ONE localization identity and translation. The lines stay separate (audio and timing untouched); editing one of the texts detaches it again automatically. Save the dirty assets and re-run Gather afterwards."))
+				.OnClicked_Lambda([this, Group = Entry.LineMergeGroup]()
+				{
+					MergeLineRowTexts(Group);
+					return FReply::Handled();
+				})
+				[
+					SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("Icons.Merge")).ColorAndOpacity(FSlateColor::UseForeground())
+					]
+				];
+
+		ChipContent = SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+			[
+				ChipContent
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.0f, 0.0f, 6.0f, 0.0f)
+			[
+				Action
+			];
+	}
+
 	// Collapsed identical-source project texts reuse the (empty for them) play column for
 	// the Merge action, keeping every label aligned.
 	if (Entry.GroupIdentities.Num() > 1)
@@ -1656,6 +1734,49 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
 	{
 		Item->SetCompletionState(bRan && (Rewritten > 0 || Handled.Num() > 0) ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+	}
+
+	Refresh();
+}
+
+void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>& Group)
+{
+	TArray<FKzDialogueTranslationCsv::FKzLineTextRef> Lines;
+	for (const TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>& Entry : Group)
+	{
+		if (UKzDialogueAsset* Asset = Entry.Key.Get())
+		{
+			Lines.Add({ Asset, Entry.Value });
+		}
+	}
+
+	FText Error;
+	const bool bRan = FKzDialogueTranslationCsv::MergeLineTexts(Lines, Error);
+
+	FNotificationInfo Info(bRan
+		? FText::Format(LOCTEXT("MergeLinesDone", "Merged {0} line texts into one shared identity. Save the dirty assets and run Gather to see them as one text."), FText::AsNumber(Lines.Num()))
+		: Error);
+	Info.ExpireDuration = 8.0f;
+	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+	{
+		Item->SetCompletionState(bRan ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+	}
+
+	Refresh();
+}
+
+void SKzDialogueCoveragePanel::UnmergeLineRowText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
+{
+	FText Error;
+	const bool bRan = FKzDialogueTranslationCsv::UnmergeLineText(InAsset.Get(), LineId, Error);
+
+	FNotificationInfo Info(bRan
+		? LOCTEXT("UnmergeLineDone", "The line has its own localization identity again. Save the dirty asset and re-run Gather.")
+		: Error);
+	Info.ExpireDuration = 8.0f;
+	if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
+	{
+		Item->SetCompletionState(bRan ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
 	Refresh();

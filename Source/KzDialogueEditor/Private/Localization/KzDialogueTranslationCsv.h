@@ -217,6 +217,26 @@ public:
 	 */
 	static bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
 
+	/** One dialogue line participating in a text merge. */
+	struct FKzLineTextRef
+	{
+		UKzDialogueAsset* Asset = nullptr;
+		FGuid LineId;
+	};
+
+	/**
+	 * Collapses the LOCALIZATION IDENTITY of two or more identical-source line texts into one
+	 * shared entry (KzDialogue.Shared namespace, fresh guid key): one translation serves them
+	 * all. Lines stay separate entities; audio, timing and VO are unrelated. Assigns the
+	 * SharedTextId marker (transacted), re-keys through the asset refresh, and migrates each
+	 * culture's best existing translation into the shared identity. Editing a merged text
+	 * detaches that line automatically. Dirty assets must be saved and Gather re-run.
+	 */
+	static bool MergeLineTexts(const TArray<FKzLineTextRef>& Lines, FText& OutError);
+
+	/** Reverts one line to its own localization identity, seeding it with the shared translation so no work is lost. Transacted; save + Gather afterwards. */
+	static bool UnmergeLineText(UKzDialogueAsset* Asset, const FGuid LineId, FText& OutError);
+
 	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
 	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
 
