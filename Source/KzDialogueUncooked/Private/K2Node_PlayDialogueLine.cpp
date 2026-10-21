@@ -16,7 +16,6 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 
 #include "GameplayTagContainer.h"
-#include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_PlayDialogueLine"
 
@@ -105,7 +104,7 @@ FText UK2Node_PlayDialogueLine::GetTooltipText() const
 FSlateIcon UK2Node_PlayDialogueLine::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment");
+	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
 }
 
 // =======================================================================================

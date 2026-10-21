@@ -6,7 +6,6 @@
 #include "BlueprintActionDatabaseRegistrar.h"
 #include "BlueprintNodeSpawner.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
-#include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_KzDialogueAsyncAction"
 
@@ -21,7 +20,7 @@ UK2Node_KzDialogueAsyncAction::UK2Node_KzDialogueAsyncAction(const FObjectInitia
 FSlateIcon UK2Node_KzDialogueAsyncAction::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment");
+	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
 }
 
 FText UK2Node_KzDialogueAsyncAction::GetMenuCategory() const

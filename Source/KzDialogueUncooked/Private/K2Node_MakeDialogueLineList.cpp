@@ -15,7 +15,6 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "ToolMenu.h"
 
-#include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_MakeDialogueLineList"
 
@@ -73,7 +72,7 @@ FText UK2Node_MakeDialogueLineList::GetTooltipText() const
 FSlateIcon UK2Node_MakeDialogueLineList::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FColor::FromHex(TEXT("#4A6EB6"));
-	return FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment");
+	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
 }
 
 // =======================================================================================

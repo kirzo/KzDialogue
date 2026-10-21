@@ -5,7 +5,6 @@
 #include "KzDialogueAsyncActions.h"
 
 #include "Kismet/BlueprintAsyncActionBase.h"
-#include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_PlayDialogueLineAsync"
 
@@ -52,7 +51,7 @@ FText UK2Node_PlayDialogueLineAsync::GetTooltipText() const
 FSlateIcon UK2Node_PlayDialogueLineAsync::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Comment");
+	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
 }
 
 FText UK2Node_PlayDialogueLineAsync::GetMenuCategory() const
