@@ -21,8 +21,9 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 		Set(*FString::Printf(TEXT("ClassThumbnail.Kz%s"), Asset), new FSlateVectorImageBrush(Icon(*(FString(Asset) + TEXT("Color"))), ThumbnailSize));
 	}
 
-	// Components, the subtitle widget and the timeline notifies only show the small icon
+	// Components, the subtitle widget, providers and the timeline notifies only show the small icon
 	const TCHAR* const ClassIcons[][2] = {
+		{ TEXT("KzDialogueProvider"), TEXT("DialogueAsset") },
 		{ TEXT("KzDialogueSpeakerComponent"), TEXT("SpeakerAsset") },
 		{ TEXT("KzBarkComponent"), TEXT("BarkComponent") },
 		{ TEXT("KzSubtitleWidget"), TEXT("SubtitleWidget") },
