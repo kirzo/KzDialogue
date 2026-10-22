@@ -531,27 +531,19 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		OutIssues.Add(Issue);
 	};
 
-	// Every localizable FText must sit on its stable GUID-derived key, or gather produces
-	// throwaway keys and existing translations orphan. Self-heals on resave.
-	const FString ExpectedNamespace = FString::Printf(TEXT("KzDialogue.%s"), *Dialogue->AssetId.ToString(EGuidFormats::Digits));
+	// Every localizable FText must sit on its stable key, or gather produces throwaway keys and
+	// existing translations orphan. Flags exactly what the resave rebind would change.
 	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
 	{
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
-		auto CheckKey = [&](const FText& Source, const TCHAR* Suffix)
+		const TPair<FString, FString> TextId = Dialogue->GetLineTextId(Line);
+		FText Anchored = Line.Text;
+		if (KzAnchorText(Anchored, TextId.Key, TextId.Value))
 		{
-			// Culture-invariant = deliberately non-localizable; it carries no key on purpose.
-			if (Source.IsEmpty() || Source.IsCultureInvariant()) { return; }
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-			const TOptional<FString> Key = FTextInspector::GetKey(Source);
-			const FString ExpectedKey = Line.LineId.ToString(EGuidFormats::Digits) + Suffix;
-			if (!Namespace.IsSet() || !Key.IsSet() || Namespace.GetValue() != ExpectedNamespace || Key.GetValue() != ExpectedKey)
-			{
-				AddIssue(EKzValidationSeverity::Warning,
-					FText::Format(LOCTEXT("UnstableKey", "Line {0}: text is not anchored to its stable localization key; resave the asset to rebind it."), FText::AsNumber(i + 1)),
-					Line.LineId, i);
-			}
-		};
-		CheckKey(Line.Text, TEXT("-Text"));
+			AddIssue(EKzValidationSeverity::Warning,
+				FText::Format(LOCTEXT("UnstableKey", "Line {0}: text is not anchored to its stable localization key; resave the asset to rebind it."), FText::AsNumber(i + 1)),
+				Line.LineId, i);
+		}
 	}
 
 	// Named-asset token references. A ":part" modifier states the intent unambiguously, so a

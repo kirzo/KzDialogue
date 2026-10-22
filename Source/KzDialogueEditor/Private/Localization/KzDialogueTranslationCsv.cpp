@@ -947,19 +947,13 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			Asset = LoadObject<UObject>(nullptr, *AssetPath);
 		}
 
-		// Resolve the row to its source text + drift hash. Dialogue rows key by
-		// "<LineIdDigits>-Text"; speaker-asset rows key by field name.
+		// Resolve the row to its source text + drift hash; speaker-asset rows key by field name.
 		const FText* SourceText = nullptr;
 		uint32 CurrentHash = 0;
 
 		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
 		{
-			FString GuidPart, FieldPart;
-			FGuid LineId;
-			const bool bKeyParsed = Key.Split(TEXT("-"), &GuidPart, &FieldPart, ESearchCase::CaseSensitive, ESearchDir::FromEnd)
-				&& FGuid::ParseExact(GuidPart, EGuidFormats::Digits, LineId)
-				&& FieldPart == TEXT("Text");
-			const int32 LineIdx = bKeyParsed ? Dialogue->IndexOfLine(LineId) : INDEX_NONE;
+			const int32 LineIdx = Dialogue->IndexOfLineByTextId(Cell(NamespaceCol), Key);
 			if (LineIdx != INDEX_NONE)
 			{
 				SourceText = &Dialogue->Lines[LineIdx].Text;
@@ -998,10 +992,12 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			}
 		}
 
-		// Hash matched, so the asset's current source string equals the one this row was translated against.
+		// Into the text's current identity, so a row exported before a merge or unmerge lands where the line lives now.
+		const TOptional<FString> CurrentNamespace = FTextInspector::GetNamespace(*SourceText);
+		const TOptional<FString> CurrentKey = FTextInspector::GetKey(*SourceText);
 		const FString* SourceString = FTextInspector::GetSourceString(*SourceText);
-
-		if (Writer.Write(Culture, FLocKey(Cell(NamespaceCol)), FLocKey(Key), nullptr, FLocItem(SourceString ? *SourceString : FString()), FLocItem(Translation)))
+		if (CurrentNamespace.IsSet() && CurrentKey.IsSet() && SourceString
+			&& Writer.Write(Culture, FLocKey(CurrentNamespace.GetValue()), FLocKey(CurrentKey.GetValue()), nullptr, FLocItem(*SourceString), FLocItem(Translation)))
 		{
 			++OutStats.Imported;
 		}
@@ -1902,7 +1898,6 @@ bool FKzDialogueTranslationCsv::MergeLineTexts(const TArray<FKzLineTextRef>& Lin
 
 	const FGuid SharedId = FGuid::NewGuid();
 	const uint32 SharedHash = KzComputeSourceTextHash(Resolved[0].Line->Text);
-	const TPair<FString, FString> SharedIdentity(FString(KzSharedTextNamespace), SharedId.ToString(EGuidFormats::Digits));
 
 	{
 		// One undoable step covering every touched asset; PostEditChange re-keys the texts
@@ -1920,6 +1915,7 @@ bool FKzDialogueTranslationCsv::MergeLineTexts(const TArray<FKzLineTextRef>& Lin
 	}
 
 	// Keep finished work: each culture's best existing translation moves to the shared entry.
+	const TPair<FString, FString> SharedIdentity = Resolved[0].Asset->GetLineTextId(*Resolved[0].Line);
 	FText ArchiveError;
 	if (!CopyTranslationsToIdentity(OldIdentities, SharedIdentity, SourceText, /*bKeepCurrent=*/false, ArchiveError))
 	{
@@ -1939,7 +1935,7 @@ bool FKzDialogueTranslationCsv::UnmergeLineText(UKzDialogueAsset* Asset, const F
 		return false;
 	}
 
-	const TPair<FString, FString> SharedIdentity(FString(KzSharedTextNamespace), Line->SharedTextId.ToString(EGuidFormats::Digits));
+	const TPair<FString, FString> SharedIdentity = Asset->GetLineTextId(*Line);
 	const FString* Source = FTextInspector::GetSourceString(Line->Text);
 	const FString SourceText = Source ? *Source : FString();
 
@@ -1952,12 +1948,10 @@ bool FKzDialogueTranslationCsv::UnmergeLineText(UKzDialogueAsset* Asset, const F
 	}
 
 	// Seed the recovered own identity with the shared translation, so unmerging loses no work.
-	const TOptional<FString> OwnNamespace = FTextInspector::GetNamespace(Line->Text);
-	const TOptional<FString> OwnKey = FTextInspector::GetKey(Line->Text);
-	if (OwnNamespace.IsSet() && OwnKey.IsSet() && !SourceText.IsEmpty())
+	if (!SourceText.IsEmpty())
 	{
 		FText ArchiveError;
-		if (!CopyTranslationsToIdentity({ SharedIdentity }, TPair<FString, FString>(OwnNamespace.GetValue(), OwnKey.GetValue()), SourceText, /*bKeepCurrent=*/false, ArchiveError))
+		if (!CopyTranslationsToIdentity({ SharedIdentity }, Asset->GetLineTextId(*Line), SourceText, /*bKeepCurrent=*/false, ArchiveError))
 		{
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Line text unmerged, but seeding its translations failed: %s"), *ArchiveError.ToString());
 		}
@@ -2142,19 +2136,20 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 			Asset = LoadObject<UObject>(nullptr, *AssetPath);
 		}
 
-		// Same row resolution as the translation import: dialogue lines by "<LineIdDigits>-Text"
-		// keys, speaker-asset fields by name; here the resolved text is the WRITE target.
+		// Same row resolution as the translation import; here the resolved text is the WRITE target.
 		FText* TargetText = nullptr;
 		uint32 CurrentHash = 0;
 
 		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
 		{
-			FString GuidPart, FieldPart;
-			FGuid LineId;
-			const bool bKeyParsed = Key.Split(TEXT("-"), &GuidPart, &FieldPart, ESearchCase::CaseSensitive, ESearchDir::FromEnd)
-				&& FGuid::ParseExact(GuidPart, EGuidFormats::Digits, LineId)
-				&& FieldPart == TEXT("Text");
-			const int32 LineIdx = bKeyParsed ? Dialogue->IndexOfLine(LineId) : INDEX_NONE;
+			const int32 LineIdx = Dialogue->IndexOfLineByTextId(Namespace, Key);
+			if (LineIdx != INDEX_NONE && Dialogue->Lines[LineIdx].SharedTextId.IsValid())
+			{
+				// Editing one line would detach it from the others; the fix is a decision for the editor.
+				++OutStats.Conflicted;
+				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is a shared text; fix it in the editor or unmerge it first."), RowIdx + 1, *AssetPath, *Key);
+				continue;
+			}
 			if (LineIdx != INDEX_NONE)
 			{
 				TargetText = &Dialogue->Lines[LineIdx].Text;

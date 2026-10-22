@@ -514,19 +514,39 @@ bool UKzDialogueAsset::RebindFTextKeys()
 {
 	if (!AssetId.IsValid()) { return false; }
 
-	const FString Namespace = FString::Printf(TEXT("KzDialogue.%s"), *AssetId.ToString(EGuidFormats::Digits));
-
 	bool bChanged = false;
 	for (FKzDialogueLine& Line : Lines)
 	{
 		if (!Line.LineId.IsValid()) { continue; }
-
-		// A shared text keys under the asset-independent shared namespace: one translation for every line carrying the id.
-		bChanged |= Line.SharedTextId.IsValid()
-			? KzAnchorText(Line.Text, KzSharedTextNamespace, Line.SharedTextId.ToString(EGuidFormats::Digits))
-			: KzAnchorText(Line.Text, Namespace, Line.LineId.ToString(EGuidFormats::Digits) + TEXT("-Text"));
+		const TPair<FString, FString> TextId = GetLineTextId(Line);
+		bChanged |= KzAnchorText(Line.Text, TextId.Key, TextId.Value);
 	}
 	return bChanged;
+}
+
+namespace
+{
+	constexpr TCHAR SharedTextNamespace[] = TEXT("KzDialogue.Shared");
+	constexpr TCHAR LineTextKeySuffix[] = TEXT("-Text");
+}
+
+TPair<FString, FString> UKzDialogueAsset::GetLineTextId(const FKzDialogueLine& Line) const
+{
+	if (Line.SharedTextId.IsValid())
+	{
+		return { SharedTextNamespace, Line.SharedTextId.ToString(EGuidFormats::Digits) };
+	}
+	return { FString::Printf(TEXT("KzDialogue.%s"), *AssetId.ToString(EGuidFormats::Digits)), Line.LineId.ToString(EGuidFormats::Digits) + LineTextKeySuffix };
+}
+
+int32 UKzDialogueAsset::IndexOfLineByTextId(const FString& Namespace, const FString& Key) const
+{
+	FGuid Id;
+	if (TextNamespaceUtil::StripPackageNamespace(Namespace) == SharedTextNamespace)
+	{
+		return FGuid::ParseExact(Key, EGuidFormats::Digits, Id) ? Lines.IndexOfByPredicate([&Id](const FKzDialogueLine& Line) { return Line.SharedTextId == Id; }) : INDEX_NONE;
+	}
+	return Key.EndsWith(LineTextKeySuffix, ESearchCase::CaseSensitive) && FGuid::ParseExact(Key.LeftChop(UE_ARRAY_COUNT(LineTextKeySuffix) - 1), EGuidFormats::Digits, Id) ? IndexOfLine(Id) : INDEX_NONE;
 }
 
 #endif

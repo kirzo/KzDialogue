@@ -26,9 +26,6 @@ inline uint32 KzComputeSourceTextHash(const FText& Text)
 	const FString* Source = FTextInspector::GetSourceString(Text);
 	return Source ? FCrc::StrCrc32(**Source) : 0;
 }
-
-/** Namespace of shared line-text localization identities: no owning asset, key = SharedTextId digits. */
-inline const TCHAR* const KzSharedTextNamespace = TEXT("KzDialogue.Shared");
 #endif
 
 namespace Kz::Tags::Dialogue

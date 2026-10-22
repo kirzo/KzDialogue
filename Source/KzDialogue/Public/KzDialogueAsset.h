@@ -140,6 +140,12 @@ public:
 	static const FName TagSpeakers;
 	static const FName TagDisplayName;
 
+	/** The (Namespace, Key) a line's Text anchors to: KzDialogue.Shared/<SharedTextId> when shared, else KzDialogue.<AssetId>/<LineId>-Text. */
+	TPair<FString, FString> GetLineTextId(const FKzDialogueLine& Line) const;
+
+	/** The line a localization identity belongs to, by its shared id or by its own key (still valid after a merge). INDEX_NONE if none. */
+	int32 IndexOfLineByTextId(const FString& Namespace, const FString& Key) const;
+
 private:
 	/** Editor-only invariant pass: ensures unique GUIDs, anchors FText keys, and refreshes source text hashes. Idempotent. */
 	void RefreshLineMetadata();
