@@ -16,12 +16,10 @@ class UKzDialogueAssetSession;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzAsyncDialogueLineEvent, UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 
 /**
- * Shared plumbing for the dialogue async actions: channel player acquisition, specific-line
- * binding bookkeeping, cancellation detection and teardown.
- * Order matters twice here: the specific-line binding is created BEFORE playback is requested
- * (a line can never finish in the gap between playing and subscribing), while the
- * dialogue-finished watchdog is subscribed AFTER (launching may interrupt previous content on
- * the channel, which broadcasts OnDialogueFinished during the play call).
+ * Shared plumbing for the dialogue async actions: channel player acquisition, binding bookkeeping,
+ * cancellation detection and teardown. Every binding is made AFTER playback is requested: launching
+ * may end previous content on the channel (an interrupt, or a hot-swap ending the previous line),
+ * which broadcasts on the player during the play call, and no game time passes before the bind.
  */
 UCLASS(Abstract)
 class KZDIALOGUE_API UKzAsyncDialogueAction : public UBlueprintAsyncActionBase
@@ -61,14 +59,17 @@ protected:
 	/** Subscribes the dialogue-finished watchdog. Call only after playback has been requested. */
 	void SubscribeDialogueFinished();
 
-	/** Removes the specific-line binding and the dialogue-finished watchdog. */
+	/** Removes every binding this action made on the player. */
 	void CleanupBindings();
+
+	/** False when the action already resolved: every Finished / Cancelled goes through it, so each fires at most once. */
+	bool MarkResolved();
 
 	UFUNCTION()
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) {}
 
 	UFUNCTION()
-	void HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
+	virtual void HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
 
 	/** The dialogue ended before the awaited line(s) completed. Leaf actions broadcast Cancelled and tear down. */
 	virtual void NotifyCancelled() {}
@@ -92,6 +93,7 @@ protected:
 	FGameplayTag Channel;
 	int32 Priority = -1;
 	bool bStartImmediately = true;
+	bool bResolved = false;
 	FGuid LineBindingHandle;
 };
 
@@ -150,10 +152,9 @@ public:
 };
 
 /**
- * Shared logic for the multi-entry async actions: plays a sequence as one dialogue and completes
- * when the LAST entry finishes. LineFinished fires once per completed entry. Entries are awaited
- * one at a time in playback order, so repeated ids and aliases resolve correctly. Cancelled fires
- * when the dialogue ends before the sequence completed.
+ * Shared logic for the multi-entry async actions: plays a sequence as one dialogue on one channel,
+ * fires LineFinished for each line it plays and Finished when that dialogue completes. Cancelled fires
+ * when it is stopped, aborted or interrupted, or nothing could play.
  */
 UCLASS(Abstract)
 class KZDIALOGUE_API UKzAsyncDialogueSequenceAction : public UKzAsyncDialogueAction
@@ -165,11 +166,11 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Started;
 
-	/** Fired every time one entry of the sequence finishes playing. */
+	/** Fired every time one line of the sequence finishes playing. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent LineFinished;
 
-	/** Fired when the last entry of the sequence finishes playing. */
+	/** Fired when the sequence's dialogue completes. Carries its last line. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Finished;
 
@@ -188,18 +189,18 @@ protected:
 	/** Requests playback of the whole sequence. Returns the playing channel player on success. */
 	virtual UKzDialoguePlayer* LaunchPlayback() { return nullptr; }
 
-	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
+	virtual void HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason) override;
 	virtual void NotifyCancelled() override;
 	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const override;
 
-	/** Binds the next awaitable entry starting at CurrentIndex, skipping unresolvable ones. False when none is left. */
-	bool BindNextEntry();
+	UFUNCTION()
+	void HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line);
 
 	/** Per-entry refs, in playback order. */
 	TArray<FKzDialogueLineRef> EntryRefs;
 
-	/** Entry currently awaited. */
-	int32 CurrentIndex = 0;
+	UPROPERTY(Transient)
+	FKzDialogueLine LastFinishedLine;
 };
 
 /** Plays a FKzDialogueLineList (one asset, several ids) as one sequential dialogue. */

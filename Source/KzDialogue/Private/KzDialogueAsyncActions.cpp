@@ -65,8 +65,16 @@ void UKzAsyncDialogueAction::CleanupBindings()
 	{
 		DialoguePlayer->UnbindSpecificLine(LineBindingHandle);
 		DialoguePlayer->OnDialogueFinished.RemoveAll(this);
+		DialoguePlayer->OnLineFinished.RemoveAll(this);
 	}
 	LineBindingHandle.Invalidate();
+}
+
+bool UKzAsyncDialogueAction::MarkResolved()
+{
+	if (bResolved) { return false; }
+	bResolved = true;
+	return true;
 }
 
 void UKzAsyncDialogueAction::HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
@@ -155,8 +163,7 @@ void UKzAsyncPlayDialogueLine::Activate()
 		return;
 	}
 
-	// Bind BEFORE playing so the line cannot finish in between.
-	if (!BindSpecificLineFinished(LaunchRef))
+	if (DialoguePlayer->ResolveLineRefToMatchSet(LaunchRef).IsEmpty())
 	{
 		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: line ref does not resolve in '%s'."), *GetName(), *LaunchRef.Asset.ToString());
 		NotifyCancelled();
@@ -170,8 +177,8 @@ void UKzAsyncPlayDialogueLine::Activate()
 		return;
 	}
 
-	// Watchdog AFTER playing: launching may interrupt previous channel content, which
-	// broadcasts OnDialogueFinished during the call above.
+	// After playing: an alias hot-swap ends the previous line of the same alias inside the call above.
+	BindSpecificLineFinished(LaunchRef);
 	SubscribeDialogueFinished();
 	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
 }
@@ -180,6 +187,7 @@ void UKzAsyncPlayDialogueLine::HandleSpecificLineFinished(UKzDialoguePlayer* Pla
 {
 	// The binding auto-unbound on dispatch.
 	LineBindingHandle.Invalidate();
+	if (!MarkResolved()) { return; }
 
 	Finished.Broadcast(Player, Line);
 	SetReadyToDestroy();
@@ -187,6 +195,8 @@ void UKzAsyncPlayDialogueLine::HandleSpecificLineFinished(UKzDialoguePlayer* Pla
 
 void UKzAsyncPlayDialogueLine::NotifyCancelled()
 {
+	if (!MarkResolved()) { return; }
+
 	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
 	SetReadyToDestroy();
 }
@@ -235,18 +245,9 @@ void UKzAsyncDialogueSequenceAction::Activate()
 	Super::Activate();
 
 	GatherEntryRefs(EntryRefs);
-	CurrentIndex = 0;
 
 	if (!WorldContext || EntryRefs.IsEmpty() || !AcquirePlayer())
 	{
-		NotifyCancelled();
-		return;
-	}
-
-	// Bind BEFORE playing so the first line cannot finish in between.
-	if (!BindNextEntry())
-	{
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no entry of the sequence resolves."), *GetName());
 		NotifyCancelled();
 		return;
 	}
@@ -258,48 +259,36 @@ void UKzAsyncDialogueSequenceAction::Activate()
 		return;
 	}
 
-	// Watchdog AFTER playing: launching may interrupt previous channel content, which
-	// broadcasts OnDialogueFinished during the call above.
+	// The sequence is the player's whole dialogue from here until it finishes, so every line it
+	// finishes is ours; entries skipped at launch (alias cooldowns) simply never show up.
+	DialoguePlayer->OnLineFinished.AddDynamic(this, &UKzAsyncDialogueSequenceAction::HandleLineFinished);
 	SubscribeDialogueFinished();
 	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
 }
 
-bool UKzAsyncDialogueSequenceAction::BindNextEntry()
+void UKzAsyncDialogueSequenceAction::HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
 {
-	// Unresolvable entries never play, so they would never fire: skip them like playback does.
-	while (CurrentIndex < EntryRefs.Num())
-	{
-		if (BindSpecificLineFinished(EntryRefs[CurrentIndex]))
-		{
-			return true;
-		}
-
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: skipping unresolvable sequence entry %d."), *GetName(), CurrentIndex);
-		++CurrentIndex;
-	}
-	return false;
+	LastFinishedLine = Line;
+	LineFinished.Broadcast(Player, Line);
 }
 
-void UKzAsyncDialogueSequenceAction::HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+void UKzAsyncDialogueSequenceAction::HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
-	// The binding auto-unbound on dispatch.
-	LineBindingHandle.Invalidate();
-
-	LineFinished.Broadcast(Player, Line);
-
-	++CurrentIndex;
-	if (CurrentIndex < EntryRefs.Num() && BindNextEntry())
+	if (Reason != EKzDialogueFinishReason::Completed)
 	{
+		NotifyCancelled();
 		return;
 	}
 
-	// Every playable entry completed (trailing unresolvable entries are skipped, like playback does).
-	Finished.Broadcast(Player, Line);
+	if (!MarkResolved()) { return; }
+	Finished.Broadcast(Player, LastFinishedLine);
 	SetReadyToDestroy();
 }
 
 void UKzAsyncDialogueSequenceAction::NotifyCancelled()
 {
+	if (!MarkResolved()) { return; }
+
 	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
 	SetReadyToDestroy();
 }
@@ -353,7 +342,7 @@ UKzDialoguePlayer* UKzAsyncPlayDialogueLineList::LaunchPlayback()
 	UKzDialogueAsset* Loaded = LaunchList.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, bStartImmediately);
+	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, bStartImmediately, Subsystem->ResolveAdvanceMode(EKzDialogueAdvanceMode::Inherit, Loaded));
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -439,6 +428,8 @@ void UKzAsyncPlayDialogueAsset::Activate()
 
 void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
+	if (!MarkResolved()) { return; }
+
 	if (Reason == EKzDialogueFinishReason::Completed)
 	{
 		Finished.Broadcast(Player, FKzDialogueLine());
@@ -482,6 +473,8 @@ void UKzAsyncPlayDialogueAsset::SetReadyToDestroy()
 
 void UKzAsyncPlayDialogueAsset::NotifyCancelled()
 {
+	if (!MarkResolved()) { return; }
+
 	Cancelled.Broadcast(Session ? Session->GetCurrentPlayer() : nullptr, FKzDialogueLine());
 	SetReadyToDestroy();
 }
