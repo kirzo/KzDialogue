@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "K2Node_KzDialogueAsyncAction.h"
+#include "KzDialogueK2Nodes.h"
 #include "KzDialogueAsyncActions.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
@@ -19,8 +20,7 @@ UK2Node_KzDialogueAsyncAction::UK2Node_KzDialogueAsyncAction(const FObjectInitia
 
 FSlateIcon UK2Node_KzDialogueAsyncAction::GetIconAndTint(FLinearColor& OutColor) const
 {
-	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
+	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
 FText UK2Node_KzDialogueAsyncAction::GetMenuCategory() const

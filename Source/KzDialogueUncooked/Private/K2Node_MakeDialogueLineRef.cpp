@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "K2Node_MakeDialogueLineRef.h"
+#include "KzDialogueK2Nodes.h"
 
 #include "KzDialogueAsset.h"
 #include "KzDialogueTypes.h"
@@ -11,13 +12,9 @@
 #include "EdGraphSchema_K2.h"
 #include "K2Node_MakeStruct.h"
 #include "KismetCompiler.h"
-#include "Kismet2/BlueprintEditorUtils.h"
-
 
 #define LOCTEXT_NAMESPACE "K2Node_MakeDialogueLineRef"
 
-const FName UK2Node_MakeDialogueLineRef::PN_Asset = TEXT("Asset");
-const FName UK2Node_MakeDialogueLineRef::PN_LineId = TEXT("LineId");
 const FName UK2Node_MakeDialogueLineRef::PN_ReturnValue = TEXT("ReturnValue");
 
 // =======================================================================================
@@ -26,18 +23,14 @@ const FName UK2Node_MakeDialogueLineRef::PN_ReturnValue = TEXT("ReturnValue");
 
 void UK2Node_MakeDialogueLineRef::AllocateDefaultPins()
 {
-	const UEdGraphSchema_K2* K2 = GetDefault<UEdGraphSchema_K2>();
-
-	// Asset — soft reference, matches the struct's Asset member type.
-	UEdGraphPin* AssetPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_SoftObject, UKzDialogueAsset::StaticClass(), PN_Asset);
+	// Asset: a soft reference, matching the struct's Asset member type.
+	UEdGraphPin* AssetPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_SoftObject, UKzDialogueAsset::StaticClass(), KzDialogueK2Nodes::PN_Asset);
 	AssetPin->PinFriendlyName = LOCTEXT("AssetPin", "Asset");
 
-	// LineId — typed as FGuid struct, always connectable. The pin factory in the
-	// editor module replaces its default widget with the dropdown when appropriate.
-	UEdGraphPin* LineIdPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct, TBaseStructure<FGuid>::Get(), PN_LineId);
+	// LineId: an FGuid struct, always connectable. The editor's pin factory gives it the line dropdown.
+	UEdGraphPin* LineIdPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct, TBaseStructure<FGuid>::Get(), KzDialogueK2Nodes::PN_LineId);
 	LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line / Alias");
 
-	// Return value — FKzDialogueLineRef.
 	UEdGraphPin* ReturnPin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FKzDialogueLineRef::StaticStruct(), PN_ReturnValue);
 	ReturnPin->PinFriendlyName = LOCTEXT("ReturnPin", "Line Ref");
 
@@ -63,34 +56,7 @@ FText UK2Node_MakeDialogueLineRef::GetTooltipText() const
 
 FSlateIcon UK2Node_MakeDialogueLineRef::GetIconAndTint(FLinearColor& OutColor) const
 {
-	OutColor = FColor::FromHex(TEXT("#4A6EB6"));
-	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
-}
-
-// =======================================================================================
-// Reactions
-// =======================================================================================
-
-void UK2Node_MakeDialogueLineRef::PinConnectionListChanged(UEdGraphPin* Pin)
-{
-	Super::PinConnectionListChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// The pin factory's widget reads ShouldShowLineDropdown() so a refresh is enough.
-		GetGraph()->NotifyGraphChanged();
-	}
-}
-
-void UK2Node_MakeDialogueLineRef::PinDefaultValueChanged(UEdGraphPin* Pin)
-{
-	Super::PinDefaultValueChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// Literal asset changed: the dropdown's option list depends on it.
-		GetGraph()->NotifyGraphChanged();
-	}
+	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
 // =======================================================================================
@@ -114,34 +80,6 @@ FText UK2Node_MakeDialogueLineRef::GetMenuCategory() const
 }
 
 // =======================================================================================
-// Pin accessors
-// =======================================================================================
-
-UEdGraphPin* UK2Node_MakeDialogueLineRef::GetAssetPin() const { return FindPin(PN_Asset); }
-UEdGraphPin* UK2Node_MakeDialogueLineRef::GetLineIdPin() const { return FindPin(PN_LineId); }
-
-bool UK2Node_MakeDialogueLineRef::ShouldShowLineDropdown() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return false; }
-	return GetLiteralAsset() != nullptr;
-}
-
-UKzDialogueAsset* UK2Node_MakeDialogueLineRef::GetLiteralAsset() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return nullptr; }
-
-	// PC_SoftObject pins store the path as DefaultValue. Resolve it synchronously —
-	// this only runs in the editor while the user is inspecting/editing the node.
-	const FString& Path = AssetPin->DefaultValue;
-	if (Path.IsEmpty()) { return nullptr; }
-
-	const FSoftObjectPath SoftPath(Path);
-	return Cast<UKzDialogueAsset>(SoftPath.TryLoad());
-}
-
-// =======================================================================================
 // Compilation: expand to a MakeStruct
 // =======================================================================================
 
@@ -157,7 +95,7 @@ void UK2Node_MakeDialogueLineRef::ExpandNode(FKismetCompilerContext& CompilerCon
 	// Asset.
 	if (UEdGraphPin* MakeAssetPin = MakeStructNode->FindPin(GET_MEMBER_NAME_CHECKED(FKzDialogueLineRef, Asset)))
 	{
-		UEdGraphPin* OurAssetPin = GetAssetPin();
+		UEdGraphPin* OurAssetPin = FindPin(KzDialogueK2Nodes::PN_Asset);
 		CompilerContext.MovePinLinksToIntermediate(*OurAssetPin, *MakeAssetPin);
 		if (OurAssetPin->LinkedTo.Num() == 0)
 		{
@@ -168,7 +106,7 @@ void UK2Node_MakeDialogueLineRef::ExpandNode(FKismetCompilerContext& CompilerCon
 	// LineId.
 	if (UEdGraphPin* MakeLineIdPin = MakeStructNode->FindPin(GET_MEMBER_NAME_CHECKED(FKzDialogueLineRef, LineId)))
 	{
-		UEdGraphPin* OurLineIdPin = GetLineIdPin();
+		UEdGraphPin* OurLineIdPin = FindPin(KzDialogueK2Nodes::PN_LineId);
 		CompilerContext.MovePinLinksToIntermediate(*OurLineIdPin, *MakeLineIdPin);
 		if (OurLineIdPin->LinkedTo.Num() == 0)
 		{
@@ -176,7 +114,7 @@ void UK2Node_MakeDialogueLineRef::ExpandNode(FKismetCompilerContext& CompilerCon
 		}
 	}
 
-	// Return value — connect MakeStruct's struct output to our return pin's targets.
+	// The MakeStruct's output takes over our return pin's links.
 	if (UEdGraphPin* MakeStructReturnPin = MakeStructNode->FindPin(FKzDialogueLineRef::StaticStruct()->GetFName()))
 	{
 		CompilerContext.MovePinLinksToIntermediate(*FindPin(PN_ReturnValue), *MakeStructReturnPin);

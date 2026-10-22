@@ -1,15 +1,12 @@
 // Copyright 2026 kirzo
 
 #include "K2Node_PlayDialogueLineAsync.h"
-#include "KzDialogueAsset.h"
+#include "KzDialogueK2Nodes.h"
 #include "KzDialogueAsyncActions.h"
 
 #include "Kismet/BlueprintAsyncActionBase.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_PlayDialogueLineAsync"
-
-const FName UK2Node_PlayDialogueLineAsync::PN_Asset(TEXT("Asset"));
-const FName UK2Node_PlayDialogueLineAsync::PN_LineId(TEXT("LineId"));
 
 UK2Node_PlayDialogueLineAsync::UK2Node_PlayDialogueLineAsync(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
@@ -27,7 +24,7 @@ void UK2Node_PlayDialogueLineAsync::AllocateDefaultPins()
 {
 	Super::AllocateDefaultPins();
 
-	if (UEdGraphPin* LineIdPin = GetLineIdPin())
+	if (UEdGraphPin* LineIdPin = FindPin(KzDialogueK2Nodes::PN_LineId))
 	{
 		LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line / Alias");
 	}
@@ -50,52 +47,12 @@ FText UK2Node_PlayDialogueLineAsync::GetTooltipText() const
 
 FSlateIcon UK2Node_PlayDialogueLineAsync::GetIconAndTint(FLinearColor& OutColor) const
 {
-	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
+	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
 FText UK2Node_PlayDialogueLineAsync::GetMenuCategory() const
 {
 	return LOCTEXT("MenuCategory", "Dialogue");
-}
-
-void UK2Node_PlayDialogueLineAsync::PinConnectionListChanged(UEdGraphPin* Pin)
-{
-	Super::PinConnectionListChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// The pin factory's widget reads ShouldShowLineDropdown() so a refresh is enough.
-		GetGraph()->NotifyGraphChanged();
-	}
-}
-
-void UK2Node_PlayDialogueLineAsync::PinDefaultValueChanged(UEdGraphPin* Pin)
-{
-	Super::PinDefaultValueChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// Literal asset changed: the dropdown's option list depends on it.
-		GetGraph()->NotifyGraphChanged();
-	}
-}
-
-UEdGraphPin* UK2Node_PlayDialogueLineAsync::GetAssetPin() const { return FindPin(PN_Asset); }
-UEdGraphPin* UK2Node_PlayDialogueLineAsync::GetLineIdPin() const { return FindPin(PN_LineId); }
-
-bool UK2Node_PlayDialogueLineAsync::ShouldShowLineDropdown() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return false; }
-	return GetLiteralAsset() != nullptr;
-}
-
-UKzDialogueAsset* UK2Node_PlayDialogueLineAsync::GetLiteralAsset() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return nullptr; }
-	return Cast<UKzDialogueAsset>(AssetPin->DefaultObject);
 }
 
 #undef LOCTEXT_NAMESPACE

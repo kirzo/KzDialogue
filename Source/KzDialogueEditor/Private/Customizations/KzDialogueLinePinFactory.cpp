@@ -5,10 +5,7 @@
 #include "Widgets/SKzTokenPicker.h"
 
 #include "K2Node_CallFunction.h"
-#include "K2Node_PlayDialogueLine.h"
-#include "K2Node_PlayDialogueLineAsync.h"
-#include "K2Node_MakeDialogueLineRef.h"
-#include "K2Node_MakeDialogueLineList.h"
+#include "KzDialogueK2Nodes.h"
 #include "KzDialogueAsset.h"
 #include "KzNamedAsset.h"
 
@@ -28,60 +25,6 @@
 
 namespace KzDialogueLinePinFactoryInternal
 {
-	/**
-	 * Resolves a node into its dialogue-aware accessors. Returns true if the node is
-	 * one of our K2Nodes and fills the out parameters; false otherwise.
-	 *
-	 * We pattern-match here instead of introducing a shared interface because UE's
-	 * K2Node hierarchy doesn't play well with multiple inheritance, and the surface
-	 * area we need is tiny (two queries).
-	 */
-	static bool TryResolveDialogueNode(UEdGraphNode* Node, bool& bOutShowDropdown, UKzDialogueAsset*& OutLiteralAsset)
-	{
-		if (UK2Node_PlayDialogueLine* Play = Cast<UK2Node_PlayDialogueLine>(Node))
-		{
-			bOutShowDropdown = Play->ShouldShowLineDropdown();
-			OutLiteralAsset = Play->GetLiteralAsset();
-			return true;
-		}
-
-		if (UK2Node_MakeDialogueLineRef* Make = Cast<UK2Node_MakeDialogueLineRef>(Node))
-		{
-			bOutShowDropdown = Make->ShouldShowLineDropdown();
-			OutLiteralAsset = Make->GetLiteralAsset();
-			return true;
-		}
-
-		if (UK2Node_PlayDialogueLineAsync* PlayAsync = Cast<UK2Node_PlayDialogueLineAsync>(Node))
-		{
-			bOutShowDropdown = PlayAsync->ShouldShowLineDropdown();
-			OutLiteralAsset = PlayAsync->GetLiteralAsset();
-			return true;
-		}
-
-		if (UK2Node_MakeDialogueLineList* MakeList = Cast<UK2Node_MakeDialogueLineList>(Node))
-		{
-			bOutShowDropdown = MakeList->ShouldShowLineDropdown();
-			OutLiteralAsset = MakeList->GetLiteralAsset();
-			return true;
-		}
-
-		return false;
-	}
-
-	/** True when Pin is a line-id pin of one of our K2Nodes (some nodes carry several). */
-	static bool IsLineIdPin(UEdGraphNode* Node, const UEdGraphPin* Pin)
-	{
-		if (!Pin) { return false; }
-
-		if (Cast<UK2Node_PlayDialogueLine>(Node)) { return Pin->PinName == UK2Node_PlayDialogueLine::PN_LineId; }
-		if (Cast<UK2Node_MakeDialogueLineRef>(Node)) { return Pin->PinName == UK2Node_MakeDialogueLineRef::PN_LineId; }
-		if (Cast<UK2Node_PlayDialogueLineAsync>(Node)) { return Pin->PinName == UK2Node_PlayDialogueLineAsync::PN_LineId; }
-		if (const UK2Node_MakeDialogueLineList* MakeList = Cast<UK2Node_MakeDialogueLineList>(Node)) { return MakeList->IsLinePin(Pin); }
-
-		return false;
-	}
-
 	/** Named-token pin opt-in metadata: KzTokenPin names the token parameter, KzTokenPartPin a part parameter whose choices depend on the token pin's value. */
 	static const FName MD_KzTokenPin(TEXT("KzTokenPin"));
 	static const FName MD_KzTokenPartPin(TEXT("KzTokenPartPin"));
@@ -157,52 +100,28 @@ protected:
 	}
 
 private:
-	bool ResolveNodeState(bool& bOutShowDropdown, UKzDialogueAsset*& OutLiteralAsset) const
-	{
-		using namespace KzDialogueLinePinFactoryInternal;
-		if (!GraphPinObj) { return false; }
-		return TryResolveDialogueNode(GraphPinObj->GetOwningNode(), bOutShowDropdown, OutLiteralAsset);
-	}
-
+	/** The literal asset of the owning node, or null when the Asset pin is connected or empty. */
 	UKzDialogueAsset* GetCurrentAsset() const
 	{
-		bool bDropdown = false;
-		UKzDialogueAsset* Asset = nullptr;
-		ResolveNodeState(bDropdown, Asset);
-		return Asset;
+		return GraphPinObj ? KzDialogueK2Nodes::GetLiteralAsset(GraphPinObj->GetOwningNode()) : nullptr;
 	}
 
+	/** Needs a literal asset and an unconnected line pin. */
 	bool IsDropdownAvailable() const
 	{
-		bool bDropdown = false;
-		UKzDialogueAsset* Asset = nullptr;
-		if (!ResolveNodeState(bDropdown, Asset)) { return false; }
-
-		// Disabled when:
-		//   - Asset pin is connected (LineId must come from caller).
-		//   - LineId pin itself is connected (caller is providing the GUID).
-		//   - No literal asset is selected.
-		if (!bDropdown) { return false; }
-		if (GraphPinObj && GraphPinObj->LinkedTo.Num() > 0) { return false; }
-		return true;
+		return GetCurrentAsset() && GraphPinObj->LinkedTo.Num() == 0;
 	}
 
 	FText GetCurrentLineLabel() const
 	{
 		if (!GraphPinObj) { return LOCTEXT("InvalidPin", "(invalid)"); }
 
-		bool bDropdown = false;
-		UKzDialogueAsset* Asset = nullptr;
-		if (!ResolveNodeState(bDropdown, Asset))
-		{
-			return LOCTEXT("InvalidNode", "(invalid)");
-		}
-
-		if (!bDropdown)
+		UKzDialogueAsset* Asset = GetCurrentAsset();
+		if (!Asset)
 		{
 			if (GraphPinObj->LinkedTo.Num() > 0)
 			{
-				return LOCTEXT("ConnectedHint", "Connected — set externally");
+				return LOCTEXT("ConnectedHint", "Connected: set externally");
 			}
 			const FString DefaultStr = GraphPinObj->GetDefaultAsString();
 			return DefaultStr.IsEmpty()
@@ -213,7 +132,7 @@ private:
 		FGuid Id;
 		FGuid::Parse(GraphPinObj->GetDefaultAsString(), Id);
 
-		if (!Asset || !Id.IsValid())
+		if (!Id.IsValid())
 		{
 			return LOCTEXT("PickLineOrAlias", "Select line or alias...");
 		}
@@ -454,7 +373,7 @@ TSharedPtr<SGraphPin> FKzDialogueLinePinFactory::CreatePin(UEdGraphPin* InPin) c
 	if (!InPin) { return nullptr; }
 
 	// Line-id pins of our K2Nodes.
-	if (IsLineIdPin(InPin->GetOwningNode(), InPin)) { return SNew(SKzDialogueLineGraphPin, InPin); }
+	if (KzDialogueK2Nodes::IsLineIdPin(InPin)) { return SNew(SKzDialogueLineGraphPin, InPin); }
 
 	// Token and part parameters of functions marked with KzTokenPin / KzTokenPartPin metadata.
 	if (IsMetaMarkedPin(InPin, MD_KzTokenPin)) { return SNew(SKzTokenGraphPin, InPin); }

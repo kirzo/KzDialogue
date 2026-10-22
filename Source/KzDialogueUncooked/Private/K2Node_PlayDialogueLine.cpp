@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "K2Node_PlayDialogueLine.h"
+#include "KzDialogueK2Nodes.h"
 
 #include "KzDialogueAsset.h"
 #include "KzDialogueFunctionLibrary.h"
@@ -11,16 +12,12 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_CallFunction.h"
-#include "K2Node_MakeStruct.h"
 #include "KismetCompiler.h"
-#include "Kismet2/BlueprintEditorUtils.h"
 
 #include "GameplayTagContainer.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_PlayDialogueLine"
 
-const FName UK2Node_PlayDialogueLine::PN_Asset = TEXT("Asset");
-const FName UK2Node_PlayDialogueLine::PN_LineId = TEXT("LineId");
 const FName UK2Node_PlayDialogueLine::PN_Channel = TEXT("Channel");
 const FName UK2Node_PlayDialogueLine::PN_Priority = TEXT("Priority");
 const FName UK2Node_PlayDialogueLine::PN_StartImmediately = TEXT("bStartImmediately");
@@ -41,13 +38,12 @@ void UK2Node_PlayDialogueLine::AllocateDefaultPins()
 
 	// Asset (always connectable).
 	UEdGraphPin* AssetPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Object,
-		UKzDialogueAsset::StaticClass(), PN_Asset);
+		UKzDialogueAsset::StaticClass(), KzDialogueK2Nodes::PN_Asset);
 	AssetPin->PinFriendlyName = LOCTEXT("AssetPin", "Asset");
 
-	// LineId — typed as FGuid struct, always connectable. The pin factory in the
-	// editor module replaces its default widget with the dropdown when appropriate.
+	// LineId: an FGuid struct, always connectable. The editor's pin factory gives it the line dropdown.
 	UEdGraphPin* LineIdPin = CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Struct,
-		TBaseStructure<FGuid>::Get(), PN_LineId);
+		TBaseStructure<FGuid>::Get(), KzDialogueK2Nodes::PN_LineId);
 	LineIdPin->PinFriendlyName = LOCTEXT("LineIdPin", "Line / Alias");
 
 	// Channel (advanced). Left empty by default so the line/asset/settings chain resolves it.
@@ -103,34 +99,7 @@ FText UK2Node_PlayDialogueLine::GetTooltipText() const
 
 FSlateIcon UK2Node_PlayDialogueLine::GetIconAndTint(FLinearColor& OutColor) const
 {
-	OutColor = FColor::FromHex(TEXT("#4A6EB6")); // Match the dialogue asset color.
-	return FSlateIcon(TEXT("KzDialogueEditorStyle"), TEXT("Kz.Dialogue.Icon"));
-}
-
-// =======================================================================================
-// Reactions
-// =======================================================================================
-
-void UK2Node_PlayDialogueLine::PinConnectionListChanged(UEdGraphPin* Pin)
-{
-	Super::PinConnectionListChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// The pin factory's widget reads ShouldShowLineDropdown() so a refresh is enough.
-		GetGraph()->NotifyGraphChanged();
-	}
-}
-
-void UK2Node_PlayDialogueLine::PinDefaultValueChanged(UEdGraphPin* Pin)
-{
-	Super::PinDefaultValueChanged(Pin);
-
-	if (Pin == GetAssetPin())
-	{
-		// Literal asset changed: the dropdown's option list depends on it.
-		GetGraph()->NotifyGraphChanged();
-	}
+	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
 FString UK2Node_PlayDialogueLine::GetPinMetaData(FName InPinName, FName InKey)
@@ -164,37 +133,6 @@ FText UK2Node_PlayDialogueLine::GetMenuCategory() const
 }
 
 // =======================================================================================
-// Pin accessors
-// =======================================================================================
-
-UEdGraphPin* UK2Node_PlayDialogueLine::GetAssetPin() const { return FindPin(PN_Asset); }
-UEdGraphPin* UK2Node_PlayDialogueLine::GetLineIdPin() const { return FindPin(PN_LineId); }
-
-bool UK2Node_PlayDialogueLine::ShouldShowLineDropdown() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return false; }
-	return GetLiteralAsset() != nullptr;
-}
-
-UKzDialogueAsset* UK2Node_PlayDialogueLine::GetLiteralAsset() const
-{
-	const UEdGraphPin* AssetPin = GetAssetPin();
-	if (!AssetPin || AssetPin->LinkedTo.Num() > 0) { return nullptr; }
-	return Cast<UKzDialogueAsset>(AssetPin->DefaultObject);
-}
-
-FGuid UK2Node_PlayDialogueLine::GetLineIdValue() const
-{
-	const UEdGraphPin* LineIdPin = GetLineIdPin();
-	if (!LineIdPin) { return FGuid(); }
-
-	FGuid LineId;
-	FGuid::Parse(LineIdPin->GetDefaultAsString(), LineId);
-	return LineId;
-}
-
-// =======================================================================================
 // Compilation: expand to a function call
 // =======================================================================================
 
@@ -224,7 +162,7 @@ void UK2Node_PlayDialogueLine::ExpandNode(FKismetCompilerContext& CompilerContex
 	// Asset.
 	if (UEdGraphPin* CallAssetPin = Call->FindPin(TEXT("Asset")))
 	{
-		UEdGraphPin* OurAssetPin = FindPin(PN_Asset);
+		UEdGraphPin* OurAssetPin = FindPin(KzDialogueK2Nodes::PN_Asset);
 		CompilerContext.MovePinLinksToIntermediate(*OurAssetPin, *CallAssetPin);
 		if (OurAssetPin->LinkedTo.Num() == 0)
 		{
@@ -232,10 +170,10 @@ void UK2Node_PlayDialogueLine::ExpandNode(FKismetCompilerContext& CompilerContex
 		}
 	}
 
-	// LineId — same name on both sides, just a regular pin move + default preservation.
+	// LineId: same name on both sides, a regular pin move plus the default.
 	if (UEdGraphPin* CallLineIdPin = Call->FindPin(TEXT("LineId")))
 	{
-		UEdGraphPin* OurLineIdPin = GetLineIdPin();
+		UEdGraphPin* OurLineIdPin = FindPin(KzDialogueK2Nodes::PN_LineId);
 		CompilerContext.MovePinLinksToIntermediate(*OurLineIdPin, *CallLineIdPin);
 		if (OurLineIdPin->LinkedTo.Num() == 0)
 		{
