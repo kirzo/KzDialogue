@@ -129,6 +129,26 @@ struct FKzTranslationImportStats
 	int32 Untranslated = 0;
 };
 
+/** One localizable text of the dialogue set: a line, a speaker name field or a shared word form. */
+struct FKzLocText
+{
+	FString Namespace;
+	FString Key;
+	FString Source;
+
+	/** The dialogue asset, speaker or word authoring the text. */
+	const UObject* Owner = nullptr;
+
+	/** Set for line texts. */
+	const FKzDialogueLine* Line = nullptr;
+
+	/** Speaker field key or word form name ("Text" for a word's default form); empty for lines. */
+	FString Field;
+
+	/** Drift hash the CSV round-trips; 0 for words, which the manifest validates instead. */
+	uint32 SourceHash = 0;
+};
+
 /**
  * CSV translation round-trip for dialogue assets.
  *
@@ -145,6 +165,9 @@ class FKzDialogueTranslationCsv
 public:
 	/** Adds the Export / Import entries to the content browser context menu of UKzDialogueAsset. */
 	static void RegisterMenus();
+
+	/** The texts of Assets' lines passing LineFilter, of their speakers (and the aliases' when unfiltered) and of those speakers' words, each identity once. bAllSpeakers / bAllWords add every speaker / word asset of the project. */
+	static void CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, const FKzExportLineFilter& LineFilter, bool bAllSpeakers, bool bAllWords, TArray<FKzLocText>& Out);
 
 	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. OtherIdentities appends those gathered project texts ("Namespace,Key") as asset-less rows validated by the manifest at import. TranslationCulture pre-fills the Translation column with that culture's current translations (stale ones land in StaleTranslation as reference only). */
 	static bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const TSet<FString>* OtherIdentities = nullptr, const FString& TranslationCulture = FString());

@@ -417,67 +417,15 @@ void SKzDialogueCoveragePanel::Refresh()
 		return;
 	}
 
-	// Speaker assets referenced by the hosted assets: their name fields are localizable and
-	// belong to the coverage the same way the CSV export ships them.
-	TArray<UKzSpeakerAsset*> Speakers;
+	// Speaker name fields and shared words, the same set the exports ship. Project scope adds
+	// every speaker and word; the speaker filter narrows both to that speaker's.
+	TArray<FKzLocText> OwnedTexts;
 	{
-		TSet<UKzSpeakerAsset*> SpeakerSet;
-		for (UKzDialogueAsset* AssetPtr : LiveAssets)
-		{
-			for (const FKzDialogueLine& Line : AssetPtr->Lines)
-			{
-				if (Line.Speaker.Asset) { SpeakerSet.Add(Line.Speaker.Asset); }
-			}
-			for (const FKzDialogueAlias& Alias : AssetPtr->Aliases)
-			{
-				if (Alias.Speaker.Asset) { SpeakerSet.Add(Alias.Speaker.Asset); }
-			}
-		}
-		// Project scope: every speaker must be translatable, including the ones referenced
-		// only by line tokens (or not referenced yet).
-		if (bIncludeProjectTexts)
-		{
-			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-			TArray<FAssetData> SpeakerAssets;
-			Registry.GetAssetsByClass(UKzSpeakerAsset::StaticClass()->GetClassPathName(), SpeakerAssets, /*bSearchSubClasses=*/true);
-			for (const FAssetData& Data : SpeakerAssets)
-			{
-				if (UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Data.GetAsset())) { SpeakerSet.Add(Speaker); }
-			}
-		}
-
-		Speakers = SpeakerSet.Array();
-		Speakers.Sort([](const UKzSpeakerAsset& A, const UKzSpeakerAsset& B) { return A.GetName() < B.GetName(); });
-	}
-
-	// Shared word assets referenced by those speakers' name fields; the speaker filter
-	// narrows to the words the filtered speaker actually uses.
-	TArray<UKzWordAsset*> Words;
-	{
-		TSet<UKzWordAsset*> WordSet;
-		for (UKzSpeakerAsset* Speaker : Speakers)
-		{
-			if (bSpeakerFilterActive && Speaker->GetName() != SpeakerFilter) { continue; }
-			Speaker->ForEachLocalizedField([&WordSet](const TCHAR*, const FText&, uint32, FKzWordText* WordText)
-			{
-				if (WordText && WordText->Word) { WordSet.Add(WordText->Word); }
-			});
-		}
-
-		// Project scope without a speaker filter: every word asset, token-referenced or not.
-		if (bIncludeProjectTexts && !bSpeakerFilterActive)
-		{
-			const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-			TArray<FAssetData> WordAssets;
-			Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
-			for (const FAssetData& Data : WordAssets)
-			{
-				if (UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset())) { WordSet.Add(Word); }
-			}
-		}
-
-		Words = WordSet.Array();
-		Words.Sort([](const UKzWordAsset& A, const UKzWordAsset& B) { return A.GetName() < B.GetName(); });
+		FKzExportLineFilter SpeakerLines;
+		if (bSpeakerFilterActive) { SpeakerLines = [&PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); }; }
+		const bool bProjectWide = bIncludeProjectTexts && !bSpeakerFilterActive;
+		FKzDialogueTranslationCsv::CollectLocTexts(LiveAssets, SpeakerLines, bProjectWide, bProjectWide, OwnedTexts);
+		OwnedTexts.RemoveAll([](const FKzLocText& Text) { return Text.Line != nullptr; });
 	}
 
 	// Non-dialogue gathered texts (UI, menus...), collected once and evaluated per culture.
@@ -654,34 +602,28 @@ void SKzDialogueCoveragePanel::Refresh()
 		}
 
 		// Asset-owned texts (speaker name fields, shared words): same text pipeline as the
-		// lines (state, stale diff, inline translation), counted into the Text bar like the
-		// CSV export and coverage do. Click opens the owning asset. Emptiness is judged by
-		// the SOURCE string: a keyed empty text can display a stale translation and lie.
-		auto AddAssetTextRow = [&](FAssetLines& RowGroup, UObject* OwnerAsset, const FString& LabelPrefix, const FText& Value, const FText& ClickTip)
+		// lines (state, stale diff, inline translation), counted into the Text bar. Click
+		// opens the owning asset.
+		auto AddAssetTextRow = [&](FAssetLines& RowGroup, const FKzLocText& Text, const FText& ClickTip)
 		{
-			const TOptional<FString> FieldNamespace = FTextInspector::GetNamespace(Value);
-			const TOptional<FString> FieldKey = FTextInspector::GetKey(Value);
-			const FString* FieldSource = FTextInspector::GetSourceString(Value);
-			if (!FieldNamespace.IsSet() || !FieldKey.IsSet() || !FieldSource || FieldSource->IsEmpty()) { return; }
-
 			FString ArchiveSource;
 			FString ArchiveTranslation;
-			const bool bHasEntry = Query.GetArchiveEntry(FieldNamespace.GetValue(), FieldKey.GetValue(), Culture, ArchiveSource, ArchiveTranslation);
+			const bool bHasEntry = Query.GetArchiveEntry(Text.Namespace, Text.Key, Culture, ArchiveSource, ArchiveTranslation);
 
 			// The search matches the source text OR this culture's translation.
-			if (!TextFilter.IsEmpty() && !FieldSource->Contains(TextFilter, ESearchCase::IgnoreCase) && !(bHasEntry && ArchiveTranslation.Contains(TextFilter, ESearchCase::IgnoreCase))) { return; }
+			if (!TextFilter.IsEmpty() && !Text.Source.Contains(TextFilter, ESearchCase::IgnoreCase) && !(bHasEntry && ArchiveTranslation.Contains(TextFilter, ESearchCase::IgnoreCase))) { return; }
 
 			++TextTotal;
 
 			FLineRow Row;
-			Row.Label = FText::FromString(FlattenLabel(FString::Printf(TEXT("%s: %s"), *LabelPrefix, **FieldSource)));
+			Row.Label = FText::FromString(FlattenLabel(FString::Printf(TEXT("(%s) %s: %s"), *Text.Owner->GetName(), *Text.Field, *Text.Source)));
 			Row.Translation = FText::FromString(bHasEntry ? ArchiveTranslation : FString());
 			Row.TranslationCulture = Culture;
-			Row.TranslationIdentities.Emplace(FieldNamespace.GetValue(), FieldKey.GetValue());
-			Row.TranslationSource = *FieldSource;
-			Row.SourceLocations.Add(OwnerAsset->GetPathName());
+			Row.TranslationIdentities.Emplace(Text.Namespace, Text.Key);
+			Row.TranslationSource = Text.Source;
+			Row.SourceLocations.Add(Text.Owner->GetPathName());
 
-			switch (Query.GetTextState(FieldNamespace.GetValue(), FieldKey.GetValue(), *FieldSource, Culture))
+			switch (Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture))
 			{
 			case EKzTranslationState::Translated:
 				++TextDone;
@@ -691,7 +633,7 @@ void SKzDialogueCoveragePanel::Refresh()
 			case EKzTranslationState::Stale:
 				++TextStale;
 				++PendingCount;
-				PendingWords += CountWords(*FieldSource);
+				PendingWords += CountWords(Text.Source);
 				Row.bPending = true;
 				Row.State = LOCTEXT("PendingStale", "stale");
 				Row.StateColor = KzStaleColor;
@@ -699,12 +641,12 @@ void SKzDialogueCoveragePanel::Refresh()
 				{
 					Row.Tooltip = FText::Format(
 						LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
-						FText::FromString(ArchiveSource), FText::FromString(*FieldSource), FText::FromString(ArchiveTranslation));
+						FText::FromString(ArchiveSource), FText::FromString(Text.Source), FText::FromString(ArchiveTranslation));
 				}
 				break;
 			default:
 				++PendingCount;
-				PendingWords += CountWords(*FieldSource);
+				PendingWords += CountWords(Text.Source);
 				Row.bPending = true;
 				Row.State = LOCTEXT("PendingMissing", "text");
 				Row.StateColor = KzMissingColor;
@@ -718,38 +660,21 @@ void SKzDialogueCoveragePanel::Refresh()
 			RowGroup.Lines.Add(MoveTemp(Row));
 		};
 
-		if (bShowDialogueLines && !Speakers.IsEmpty())
+		if (bShowDialogueLines)
 		{
-			FAssetLines& SpeakerGroup = Groups.AddDefaulted_GetRef();
+			FAssetLines SpeakerGroup;
 			SpeakerGroup.bSpeakerGroup = true;
-			const FText SpeakerClickTip = LOCTEXT("SpeakerRowClickTip", "Click: open the speaker asset.");
-
-			for (UKzSpeakerAsset* Speaker : Speakers)
-			{
-				if (bSpeakerFilterActive && Speaker->GetName() != SpeakerFilter) { continue; }
-
-				Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
-				{
-					AddAssetTextRow(SpeakerGroup, Speaker, FString::Printf(TEXT("(%s) %s"), *Speaker->GetName(), Key), Text, SpeakerClickTip);
-				});
-			}
-		}
-
-		// Shared words referenced by those speakers: the default form plus each gender form.
-		if (bShowDialogueLines && !Words.IsEmpty())
-		{
-			FAssetLines& WordGroup = Groups.AddDefaulted_GetRef();
+			FAssetLines WordGroup;
 			WordGroup.bWordGroup = true;
+			const FText SpeakerClickTip = LOCTEXT("SpeakerRowClickTip", "Click: open the speaker asset.");
 			const FText WordClickTip = LOCTEXT("WordRowClickTip", "Click: open the word asset.");
-
-			for (UKzWordAsset* Word : Words)
+			for (const FKzLocText& Text : OwnedTexts)
 			{
-				AddAssetTextRow(WordGroup, Word, FString::Printf(TEXT("(%s) Text"), *Word->GetName()), Word->Text, WordClickTip);
-				for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
-				{
-					AddAssetTextRow(WordGroup, Word, FString::Printf(TEXT("(%s) %s"), *Word->GetName(), *StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key))), Form.Value, WordClickTip);
-				}
+				const bool bSpeaker = Text.Owner->IsA<UKzSpeakerAsset>();
+				AddAssetTextRow(bSpeaker ? SpeakerGroup : WordGroup, Text, bSpeaker ? SpeakerClickTip : WordClickTip);
 			}
+			Groups.Add(MoveTemp(SpeakerGroup));
+			Groups.Add(MoveTemp(WordGroup));
 		}
 
 		// Project texts, as their own group at the end of the culture's list. Identical

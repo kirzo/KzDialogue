@@ -327,6 +327,83 @@ namespace
 		return Out;
 	}
 
+	template <typename AssetType>
+	void AddAllAssetsOfClass(TSet<AssetType*>& Out)
+	{
+		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		TArray<FAssetData> Found;
+		Registry.GetAssetsByClass(AssetType::StaticClass()->GetClassPathName(), Found, /*bSearchSubClasses=*/true);
+		for (const FAssetData& Data : Found)
+		{
+			if (AssetType* Asset = Cast<AssetType>(Data.GetAsset())) { Out.Add(Asset); }
+		}
+	}
+
+	/** A CSV with its columns indexed by header name, so reordered or extended files keep importing. */
+	struct FKzCsvTable
+	{
+		TUniquePtr<FCsvParser> Parser;
+		TMap<FString, int32> Columns;
+	};
+
+	bool ParseTranslationCsv(const FString& CsvPath, std::initializer_list<const TCHAR*> RequiredColumns, FKzCsvTable& Out, FText& OutError)
+	{
+		FString Content;
+		if (!FFileHelper::LoadFileToString(Content, *CsvPath))
+		{
+			OutError = FText::Format(LOCTEXT("ImportReadFailed", "Could not read {0}."), FText::FromString(CsvPath));
+			return false;
+		}
+
+		Out.Parser = MakeUnique<FCsvParser>(MoveTemp(Content));
+		const FCsvParser::FRows& Rows = Out.Parser->GetRows();
+		if (Rows.Num() < 2)
+		{
+			OutError = LOCTEXT("ImportEmpty", "The CSV has no data rows.");
+			return false;
+		}
+
+		for (int32 i = 0; i < Rows[0].Num(); ++i)
+		{
+			Out.Columns.Add(FString(Rows[0][i]), i);
+		}
+		for (const TCHAR* Column : RequiredColumns)
+		{
+			if (!Out.Columns.Contains(Column))
+			{
+				OutError = FText::Format(LOCTEXT("ImportMissingColumn", "The CSV is missing the required column '{0}'."), FText::FromString(Column));
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** The dialogue line text or speaker field a CSV row targets, with its drift hash; null when the asset, line or field is gone. */
+	FText* ResolveAuthoredText(UObject* Asset, const FString& Namespace, const FString& Key, uint32& OutHash, bool& bOutSharedLine)
+	{
+		bOutSharedLine = false;
+		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
+		{
+			const int32 LineIdx = Dialogue->IndexOfLineByTextId(Namespace, Key);
+			if (LineIdx == INDEX_NONE) { return nullptr; }
+
+			FKzDialogueLine& Line = Dialogue->Lines[LineIdx];
+			OutHash = Line.SourceTextHash;
+			bOutSharedLine = Line.SharedTextId.IsValid();
+			return &Line.Text;
+		}
+
+		FText* Found = nullptr;
+		if (UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Asset))
+		{
+			Speaker->ForEachLocalizedField([&](const TCHAR* FieldKey, FText& Text, uint32 Hash, FKzWordText*)
+			{
+				if (Key == FieldKey) { Found = &Text; OutHash = Hash; }
+			});
+		}
+		return Found;
+	}
+
 	/** Localization files synced from source control are often read-only on disk and the JSON save just fails: drop the flag (logged) instead. */
 	void EnsureFileWritable(const FString& Path)
 	{
@@ -606,6 +683,71 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 	}));
 }
 
+void FKzDialogueTranslationCsv::CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, const FKzExportLineFilter& LineFilter, bool bAllSpeakers, bool bAllWords, TArray<FKzLocText>& Out)
+{
+	// Texts sharing one localization identity (merged line texts) appear once.
+	TSet<FString> Identities;
+	auto Add = [&Out, &Identities](const FText& Text, const UObject* Owner, const FKzDialogueLine* Line, const FString& Field, uint32 SourceHash)
+	{
+		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Text);
+		const TOptional<FString> Key = FTextInspector::GetKey(Text);
+		const FString* Source = FTextInspector::GetSourceString(Text);
+		if (!Namespace.IsSet() || !Key.IsSet() || !Source || Source->IsEmpty()) { return; }
+
+		bool bAlreadyAdded = false;
+		Identities.Add(Namespace.GetValue() + TEXT(",") + Key.GetValue(), &bAlreadyAdded);
+		if (!bAlreadyAdded)
+		{
+			Out.Add({ Namespace.GetValue(), Key.GetValue(), *Source, Owner, Line, Field, SourceHash });
+		}
+	};
+
+	TSet<UKzSpeakerAsset*> SpeakerSet;
+	for (const UKzDialogueAsset* Asset : Assets)
+	{
+		if (!Asset) { continue; }
+		for (const FKzDialogueLine& Line : Asset->Lines)
+		{
+			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
+			Add(Line.Text, Asset, &Line, FString(), Line.SourceTextHash);
+			if (Line.Speaker.Asset) { SpeakerSet.Add(Line.Speaker.Asset); }
+		}
+		if (!LineFilter)
+		{
+			for (const FKzDialogueAlias& Alias : Asset->Aliases)
+			{
+				if (Alias.Speaker.Asset) { SpeakerSet.Add(Alias.Speaker.Asset); }
+			}
+		}
+	}
+	if (bAllSpeakers) { AddAllAssetsOfClass(SpeakerSet); }
+
+	TArray<UKzSpeakerAsset*> Speakers = SpeakerSet.Array();
+	Speakers.Sort([](const UKzSpeakerAsset& A, const UKzSpeakerAsset& B) { return A.GetName() < B.GetName(); });
+
+	TSet<UKzWordAsset*> WordSet;
+	for (const UKzSpeakerAsset* Speaker : Speakers)
+	{
+		Speaker->ForEachLocalizedField([&](const TCHAR* Field, const FText& Text, uint32 SourceHash, const FKzWordText* WordText)
+		{
+			Add(Text, Speaker, nullptr, Field, SourceHash);
+			if (WordText && WordText->Word) { WordSet.Add(WordText->Word); }
+		});
+	}
+	if (bAllWords) { AddAllAssetsOfClass(WordSet); }
+
+	TArray<UKzWordAsset*> Words = WordSet.Array();
+	Words.Sort([](const UKzWordAsset& A, const UKzWordAsset& B) { return A.GetName() < B.GetName(); });
+	for (const UKzWordAsset* Word : Words)
+	{
+		Add(Word->Text, Word, nullptr, TEXT("Text"), 0);
+		for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
+		{
+			Add(Form.Value, Word, nullptr, StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key)), 0);
+		}
+	}
+}
+
 bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities, const FString& TranslationCulture)
 {
 	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation");
@@ -647,173 +789,59 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 	};
 
 	int32 NumRows = 0;
-	// Texts sharing one localization identity (merged line texts) export once.
-	TSet<FString> EmittedIdentities;
-	for (const UKzDialogueAsset* Asset : Assets)
-	{
-		if (!Asset) { continue; }
-		const FString AssetPath = Asset->GetPathName();
-
-		for (const FKzDialogueLine& Line : Asset->Lines)
-		{
-			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
-			// Empty for narration lines; GetDisplayLabel's "<Narration>" placeholder is editor UI, not translator context.
-			const FString Speaker = Line.Speaker.IsValid() ? Line.Speaker.GetDisplayLabel().ToString() : FString();
-			const FString Audio = Line.Audio.ToSoftObjectPath().ToString();
-			// "no" tells the studio this take deliberately plays in every culture; empty otherwise.
-			const FString LocalizeAudio = !Line.Audio.IsNull() && !Line.bLocalizeAudio ? TEXT("no") : TEXT("");
-
-			auto AddRow = [&](const FText& Source, const FString& Notes, int32 MaxChars, uint32 SourceHash)
-			{
-				const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-				const TOptional<FString> Key = FTextInspector::GetKey(Source);
-				const FString* SourceString = FTextInspector::GetSourceString(Source);
-				if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
-
-				bool bAlreadyEmitted = false;
-				EmittedIdentities.Add(Namespace.GetValue() + TEXT(",") + Key.GetValue(), &bAlreadyEmitted);
-				if (bAlreadyEmitted) { return; }
-
-				FString Translation;
-				FString StaleTranslation;
-				FillCultureCells(Namespace.GetValue(), Key.GetValue(), *SourceString, Translation, StaleTranslation);
-
-				Csv += CsvEscape(AssetPath) + TEXT(",");
-				Csv += CsvEscape(Namespace.GetValue()) + TEXT(",");
-				Csv += CsvEscape(Key.GetValue()) + TEXT(",");
-				Csv += CsvEscape(Speaker) + TEXT(",");
-				Csv += CsvEscape(*SourceString) + TEXT(",");
-				Csv += CsvEscape(Translation) + TEXT(",");
-				Csv += CsvEscape(Notes) + TEXT(",");
-				Csv += FString::FromInt(MaxChars) + TEXT(",");
-				Csv += CsvEscape(Audio) + TEXT(",");
-				Csv += LocalizeAudio + TEXT(",");
-				Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
-				Csv += CsvEscape(StaleTranslation);
-				Csv += LINE_TERMINATOR;
-				++NumRows;
-			};
-
-			AddRow(Line.Text, Line.TranslatorNotes, Line.MaxCharacters, Line.SourceTextHash);
-		}
-	}
-
-	// Speaker assets referenced by the exported lines/aliases: a character's name fields are
-	// localized once on its asset, so they export as their own rows (deduped across assets).
-	// A filtered export only carries the speakers of the included lines.
-	TSet<const UKzSpeakerAsset*> Speakers;
-	for (const UKzDialogueAsset* Asset : Assets)
-	{
-		if (!Asset) { continue; }
-		for (const FKzDialogueLine& Line : Asset->Lines)
-		{
-			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
-			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
-		}
-		if (!LineFilter)
-		{
-			for (const FKzDialogueAlias& Alias : Asset->Aliases)
-			{
-				if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
-			}
-		}
-	}
-
-	for (const UKzSpeakerAsset* Speaker : Speakers)
-	{
-		const FString SpeakerPath = Speaker->GetPathName();
-		const FString SpeakerLabel = Speaker->GetResolvedDisplayName().ToString();
-
-		Speaker->ForEachLocalizedField([&](const TCHAR*, const FText& Source, uint32 SourceHash, const FKzWordText*)
-		{
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-			const TOptional<FString> Key = FTextInspector::GetKey(Source);
-			const FString* SourceString = FTextInspector::GetSourceString(Source);
-			if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
-
-			FString Translation;
-			FString StaleTranslation;
-			FillCultureCells(Namespace.GetValue(), Key.GetValue(), *SourceString, Translation, StaleTranslation);
-
-			Csv += CsvEscape(SpeakerPath) + TEXT(",");
-			Csv += CsvEscape(Namespace.GetValue()) + TEXT(",");
-			Csv += CsvEscape(Key.GetValue()) + TEXT(",");
-			Csv += CsvEscape(SpeakerLabel) + TEXT(",");
-			Csv += CsvEscape(*SourceString) + TEXT(",");
-			Csv += CsvEscape(Translation) + TEXT(",");
-			Csv += TEXT(",");
-			Csv += TEXT("0,");
-			Csv += TEXT(",");
-			Csv += TEXT(",");
-			Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
-			Csv += CsvEscape(StaleTranslation);
-			Csv += LINE_TERMINATOR;
-			++NumRows;
-		});
-	}
-
-	// Asset-less rows (empty Asset column marks them): the manifest validates them at
-	// import instead of an asset hash. Used by shared words and project texts.
-	auto AddAssetlessRow = [&Csv, &NumRows, &FillCultureCells](const FString& Namespace, const FString& Key, const FString& Source)
+	auto AddRow = [&](const FString& AssetPath, const FString& Namespace, const FString& Key, const FString& Speaker, const FString& Source, const FString& Notes, int32 MaxChars, const FString& Audio, const TCHAR* LocalizeAudio, uint32 SourceHash)
 	{
 		FString Translation;
 		FString StaleTranslation;
 		FillCultureCells(Namespace, Key, Source, Translation, StaleTranslation);
 
-		Csv += TEXT(",");
+		Csv += CsvEscape(AssetPath) + TEXT(",");
 		Csv += CsvEscape(Namespace) + TEXT(",");
 		Csv += CsvEscape(Key) + TEXT(",");
-		Csv += TEXT(",");
+		Csv += CsvEscape(Speaker) + TEXT(",");
 		Csv += CsvEscape(Source) + TEXT(",");
 		Csv += CsvEscape(Translation) + TEXT(",");
-		Csv += TEXT(",");
-		Csv += TEXT("0,");
-		Csv += TEXT(",");
-		Csv += TEXT(",");
-		Csv += TEXT("0,");
+		Csv += CsvEscape(Notes) + TEXT(",");
+		Csv += FString::FromInt(MaxChars) + TEXT(",");
+		Csv += CsvEscape(Audio) + TEXT(",");
+		Csv += FString(LocalizeAudio) + TEXT(",");
+		Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
 		Csv += CsvEscape(StaleTranslation);
 		Csv += LINE_TERMINATOR;
 		++NumRows;
 	};
 
-	// Shared word assets: global vocabulary, present in every export so the glossary
-	// travels with the file and translates exactly once.
+	// Word and project-text rows leave Asset empty: the manifest validates them at import instead of an asset hash.
+	TArray<FKzLocText> Texts;
+	CollectLocTexts(Assets, LineFilter, /*bAllSpeakers=*/false, /*bAllWords=*/true, Texts);
+	for (const FKzLocText& Text : Texts)
 	{
-		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-		TArray<FAssetData> WordAssets;
-		Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
-		WordAssets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetObjectPathString() < B.GetObjectPathString(); });
-
-		auto AddWordText = [&AddAssetlessRow](const FText& Value)
+		if (const FKzDialogueLine* Line = Text.Line)
 		{
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Value);
-			const TOptional<FString> Key = FTextInspector::GetKey(Value);
-			const FString* Source = FTextInspector::GetSourceString(Value);
-			if (!Namespace.IsSet() || !Key.IsSet() || !Source || Source->IsEmpty()) { return; }
-			AddAssetlessRow(Namespace.GetValue(), Key.GetValue(), *Source);
-		};
-
-		for (const FAssetData& Data : WordAssets)
+			// Empty for narration lines; GetDisplayLabel's "<Narration>" placeholder is editor UI, not translator context.
+			const FString Speaker = Line->Speaker.IsValid() ? Line->Speaker.GetDisplayLabel().ToString() : FString();
+			// "no" tells the studio this take deliberately plays in every culture; empty otherwise.
+			const TCHAR* LocalizeAudio = !Line->Audio.IsNull() && !Line->bLocalizeAudio ? TEXT("no") : TEXT("");
+			AddRow(Text.Owner->GetPathName(), Text.Namespace, Text.Key, Speaker, Text.Source, Line->TranslatorNotes, Line->MaxCharacters, Line->Audio.ToSoftObjectPath().ToString(), LocalizeAudio, Text.SourceHash);
+		}
+		else if (const UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Text.Owner))
 		{
-			const UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset());
-			if (!Word) { continue; }
-
-			AddWordText(Word->Text);
-			for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
-			{
-				AddWordText(Form.Value);
-			}
+			AddRow(Speaker->GetPathName(), Text.Namespace, Text.Key, Speaker->GetResolvedDisplayName().ToString(), Text.Source, FString(), 0, FString(), TEXT(""), Text.SourceHash);
+		}
+		else
+		{
+			AddRow(FString(), Text.Namespace, Text.Key, FString(), Text.Source, FString(), 0, FString(), TEXT(""), 0);
 		}
 	}
 
 	// Project texts ride along the same way when requested.
 	if (OtherIdentities && !OtherIdentities->IsEmpty() && bQueryLoaded)
 	{
-		Query.EnumerateOtherTexts([&AddAssetlessRow, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
+		Query.EnumerateOtherTexts([&AddRow, OtherIdentities](const FString& Namespace, const FString& Key, const FString& Source)
 		{
 			if (OtherIdentities->Contains(Namespace + TEXT(",") + Key))
 			{
-				AddAssetlessRow(Namespace, Key, Source);
+				AddRow(FString(), Namespace, Key, FString(), Source, FString(), 0, FString(), TEXT(""), 0);
 			}
 		});
 	}
@@ -836,38 +864,15 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 
 bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError)
 {
-	FString CsvContent;
-	if (!FFileHelper::LoadFileToString(CsvContent, *CsvPath))
-	{
-		OutError = FText::Format(LOCTEXT("ImportReadFailed", "Could not read {0}."), FText::FromString(CsvPath));
-		return false;
-	}
-
-	const FCsvParser Parser(CsvContent);
-	const FCsvParser::FRows& Rows = Parser.GetRows();
-	if (Rows.Num() < 2)
-	{
-		OutError = LOCTEXT("ImportEmpty", "The CSV has no data rows.");
-		return false;
-	}
-
-	// Resolve columns by header name so reordered or extended CSVs keep importing.
-	TMap<FString, int32> Columns;
-	for (int32 i = 0; i < Rows[0].Num(); ++i)
-	{
-		Columns.Add(FString(Rows[0][i]), i);
-	}
-	const int32* AssetCol = Columns.Find(TEXT("Asset"));
-	const int32* NamespaceCol = Columns.Find(TEXT("Namespace"));
-	const int32* KeyCol = Columns.Find(TEXT("Key"));
-	const int32* SourceTextCol = Columns.Find(TEXT("SourceText"));
-	const int32* TranslationCol = Columns.Find(TEXT("Translation"));
-	const int32* HashCol = Columns.Find(TEXT("SourceHash"));
-	if (!AssetCol || !NamespaceCol || !KeyCol || !TranslationCol || !HashCol)
-	{
-		OutError = LOCTEXT("ImportBadHeader", "The CSV is missing one of the required columns: Asset, Namespace, Key, Translation, SourceHash.");
-		return false;
-	}
+	FKzCsvTable Table;
+	if (!ParseTranslationCsv(CsvPath, { TEXT("Asset"), TEXT("Namespace"), TEXT("Key"), TEXT("Translation"), TEXT("SourceHash") }, Table, OutError)) { return false; }
+	const FCsvParser::FRows& Rows = Table.Parser->GetRows();
+	const int32* AssetCol = Table.Columns.Find(TEXT("Asset"));
+	const int32* NamespaceCol = Table.Columns.Find(TEXT("Namespace"));
+	const int32* KeyCol = Table.Columns.Find(TEXT("Key"));
+	const int32* SourceTextCol = Table.Columns.Find(TEXT("SourceText"));
+	const int32* TranslationCol = Table.Columns.Find(TEXT("Translation"));
+	const int32* HashCol = Table.Columns.Find(TEXT("SourceHash"));
 
 	FKzLocTargetInfo Target;
 	if (!ReadLocTargetInfo(Target, OutError))
@@ -939,27 +944,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			Asset = LoadObject<UObject>(nullptr, *AssetPath);
 		}
 
-		// Resolve the row to its source text + drift hash; speaker-asset rows key by field name.
-		const FText* SourceText = nullptr;
 		uint32 CurrentHash = 0;
-
-		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
-		{
-			const int32 LineIdx = Dialogue->IndexOfLineByTextId(Cell(NamespaceCol), Key);
-			if (LineIdx != INDEX_NONE)
-			{
-				SourceText = &Dialogue->Lines[LineIdx].Text;
-				CurrentHash = Dialogue->Lines[LineIdx].SourceTextHash;
-			}
-		}
-		else if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
-		{
-			SpeakerAsset->ForEachLocalizedField([&](const TCHAR* FieldKey, const FText& Text, uint32 Hash, const FKzWordText*)
-			{
-				if (Key == FieldKey) { SourceText = &Text; CurrentHash = Hash; }
-			});
-		}
-
+		bool bSharedLine = false;
+		const FText* SourceText = ResolveAuthoredText(Asset, Cell(NamespaceCol), Key, CurrentHash, bSharedLine);
 		if (!SourceText)
 		{
 			++OutStats.Unresolved;
@@ -1196,26 +1183,6 @@ namespace
 		return Out;
 	}
 
-	void AppendPoText(TArray<FKzPoEntry>& Entries, const FText& Source, TArray<FString>&& Comments)
-	{
-		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-		const TOptional<FString> Key = FTextInspector::GetKey(Source);
-		const FString* SourceString = FTextInspector::GetSourceString(Source);
-		if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
-
-		// Texts sharing one localization identity (merged line texts) export once.
-		for (const FKzPoEntry& Existing : Entries)
-		{
-			if (Existing.Namespace == Namespace.GetValue() && Existing.Key == Key.GetValue()) { return; }
-		}
-
-		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
-		Entry.Comments = MoveTemp(Comments);
-		Entry.Namespace = Namespace.GetValue();
-		Entry.Key = Key.GetValue();
-		Entry.Source = *SourceString;
-	}
-
 	/** One .po per foreign culture (<Directory>/<Culture>/<Target><FileNameSuffix>.po): existing translations fill msgstr, stale ones get the standard fuzzy flag. OnlyCulture narrows the set to that culture. */
 	bool WriteKzPoFiles(const TArray<FKzPoEntry>& Entries, const FKzLocQuery& Query, const FString& Directory, const FString& FileNameSuffix, const FString& OnlyCulture, FText& OutError)
 	{
@@ -1275,61 +1242,31 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 	FKzLocQuery Query;
 	if (!Query.Load(OutError)) { return false; }
 
-	// Same text set as the CSV export: line texts plus the name fields of the involved
-	// speaker assets (only the speakers of included lines when filtering).
+	TArray<FKzLocText> Texts;
+	CollectLocTexts(Assets, LineFilter, /*bAllSpeakers=*/false, /*bAllWords=*/true, Texts);
+
 	TArray<FKzPoEntry> Entries;
-	TSet<const UKzSpeakerAsset*> Speakers;
-	for (const UKzDialogueAsset* Asset : Assets)
+	for (const FKzLocText& Text : Texts)
 	{
-		if (!Asset) { continue; }
-		for (const FKzDialogueLine& Line : Asset->Lines)
+		FKzPoEntry& Entry = Entries.AddDefaulted_GetRef();
+		Entry.Namespace = Text.Namespace;
+		Entry.Key = Text.Key;
+		Entry.Source = Text.Source;
+
+		if (const FKzDialogueLine* Line = Text.Line)
 		{
-			if (LineFilter && !LineFilter(*Asset, Line)) { continue; }
-
-			TArray<FString> Comments;
-			if (Line.Speaker.IsValid()) { Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line.Speaker.GetDisplayLabel().ToString())); }
-			if (!Line.TranslatorNotes.IsEmpty()) { Comments.Add(FString::Printf(TEXT("Notes: %s"), *Line.TranslatorNotes)); }
-			if (Line.MaxCharacters > 0) { Comments.Add(FString::Printf(TEXT("MaxCharacters: %d"), Line.MaxCharacters)); }
-			if (!Line.Audio.IsNull() && !Line.bLocalizeAudio) { Comments.Add(TEXT("Audio: do not localize (the source take plays in every culture)")); }
-			AppendPoText(Entries, Line.Text, MoveTemp(Comments));
-
-			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
+			if (Line->Speaker.IsValid()) { Entry.Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line->Speaker.GetDisplayLabel().ToString())); }
+			if (!Line->TranslatorNotes.IsEmpty()) { Entry.Comments.Add(FString::Printf(TEXT("Notes: %s"), *Line->TranslatorNotes)); }
+			if (Line->MaxCharacters > 0) { Entry.Comments.Add(FString::Printf(TEXT("MaxCharacters: %d"), Line->MaxCharacters)); }
+			if (!Line->Audio.IsNull() && !Line->bLocalizeAudio) { Entry.Comments.Add(TEXT("Audio: do not localize (the source take plays in every culture)")); }
 		}
-		if (!LineFilter)
+		else if (Text.Owner->IsA<UKzSpeakerAsset>())
 		{
-			for (const FKzDialogueAlias& Alias : Asset->Aliases)
-			{
-				if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
-			}
+			Entry.Comments.Add(FString::Printf(TEXT("Speaker asset: %s"), *Text.Owner->GetName()));
 		}
-	}
-	for (const UKzSpeakerAsset* Speaker : Speakers)
-	{
-		const TArray<FString> Comments = { FString::Printf(TEXT("Speaker asset: %s"), *Speaker->GetName()) };
-		Speaker->ForEachLocalizedField([&Entries, &Comments](const TCHAR*, const FText& Text, uint32, const FKzWordText*)
+		else
 		{
-			AppendPoText(Entries, Text, CopyTemp(Comments));
-		});
-	}
-
-	// Shared word assets: global vocabulary, present in every export so the glossary
-	// travels with the file and translates exactly once.
-	{
-		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
-		TArray<FAssetData> WordAssets;
-		Registry.GetAssetsByClass(UKzWordAsset::StaticClass()->GetClassPathName(), WordAssets, /*bSearchSubClasses=*/true);
-		WordAssets.Sort([](const FAssetData& A, const FAssetData& B) { return A.GetObjectPathString() < B.GetObjectPathString(); });
-
-		for (const FAssetData& Data : WordAssets)
-		{
-			const UKzWordAsset* Word = Cast<UKzWordAsset>(Data.GetAsset());
-			if (!Word) { continue; }
-
-			AppendPoText(Entries, Word->Text, { FString::Printf(TEXT("Word asset: %s"), *Word->GetName()) });
-			for (const TPair<EKzGender, FText>& Form : Word->GenderForms)
-			{
-				AppendPoText(Entries, Form.Value, { FString::Printf(TEXT("Word asset: %s (%s form)"), *Word->GetName(), *StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key))) });
-			}
+			Entry.Comments.Add(Text.Field == TEXT("Text") ? FString::Printf(TEXT("Word asset: %s"), *Text.Owner->GetName()) : FString::Printf(TEXT("Word asset: %s (%s form)"), *Text.Owner->GetName(), *Text.Field));
 		}
 	}
 
@@ -2008,36 +1945,14 @@ bool FKzDialogueTranslationCsv::GeneratePseudoTranslations(int32& OutCount, FTex
 
 bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError)
 {
-	FString CsvContent;
-	if (!FFileHelper::LoadFileToString(CsvContent, *CsvPath))
-	{
-		OutError = FText::Format(LOCTEXT("ImportReadFailed", "Could not read {0}."), FText::FromString(CsvPath));
-		return false;
-	}
-
-	const FCsvParser Parser(CsvContent);
-	const FCsvParser::FRows& Rows = Parser.GetRows();
-	if (Rows.Num() < 2)
-	{
-		OutError = LOCTEXT("ImportEmpty", "The CSV has no data rows.");
-		return false;
-	}
-
-	TMap<FString, int32> Columns;
-	for (int32 i = 0; i < Rows[0].Num(); ++i)
-	{
-		Columns.Add(FString(Rows[0][i]), i);
-	}
-	const int32* AssetCol = Columns.Find(TEXT("Asset"));
-	const int32* NamespaceCol = Columns.Find(TEXT("Namespace"));
-	const int32* KeyCol = Columns.Find(TEXT("Key"));
-	const int32* SourceTextCol = Columns.Find(TEXT("SourceText"));
-	const int32* HashCol = Columns.Find(TEXT("SourceHash"));
-	if (!AssetCol || !NamespaceCol || !KeyCol || !SourceTextCol || !HashCol)
-	{
-		OutError = LOCTEXT("SourceFixBadHeader", "The CSV is missing one of the required columns: Asset, Namespace, Key, SourceText, SourceHash.");
-		return false;
-	}
+	FKzCsvTable Table;
+	if (!ParseTranslationCsv(CsvPath, { TEXT("Asset"), TEXT("Namespace"), TEXT("Key"), TEXT("SourceText"), TEXT("SourceHash") }, Table, OutError)) { return false; }
+	const FCsvParser::FRows& Rows = Table.Parser->GetRows();
+	const int32* AssetCol = Table.Columns.Find(TEXT("Asset"));
+	const int32* NamespaceCol = Table.Columns.Find(TEXT("Namespace"));
+	const int32* KeyCol = Table.Columns.Find(TEXT("Key"));
+	const int32* SourceTextCol = Table.Columns.Find(TEXT("SourceText"));
+	const int32* HashCol = Table.Columns.Find(TEXT("SourceHash"));
 
 	// Project-text rows rewrite their authored occurrences through the manifest.
 	FKzLocQuery Query;
@@ -2123,33 +2038,16 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		}
 
 		// Same row resolution as the translation import; here the resolved text is the WRITE target.
-		FText* TargetText = nullptr;
 		uint32 CurrentHash = 0;
-
-		if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset))
+		bool bSharedLine = false;
+		FText* TargetText = ResolveAuthoredText(Asset, Namespace, Key, CurrentHash, bSharedLine);
+		if (bSharedLine)
 		{
-			const int32 LineIdx = Dialogue->IndexOfLineByTextId(Namespace, Key);
-			if (LineIdx != INDEX_NONE && Dialogue->Lines[LineIdx].SharedTextId.IsValid())
-			{
-				// Editing one line would detach it from the others; the fix is a decision for the editor.
-				++OutStats.Conflicted;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is a shared text; fix it in the editor or unmerge it first."), RowIdx + 1, *AssetPath, *Key);
-				continue;
-			}
-			if (LineIdx != INDEX_NONE)
-			{
-				TargetText = &Dialogue->Lines[LineIdx].Text;
-				CurrentHash = Dialogue->Lines[LineIdx].SourceTextHash;
-			}
+			// Editing one line would detach it from the others; the fix is a decision for the editor.
+			++OutStats.Conflicted;
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is a shared text; fix it in the editor or unmerge it first."), RowIdx + 1, *AssetPath, *Key);
+			continue;
 		}
-		else if (UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
-		{
-			SpeakerAsset->ForEachLocalizedField([&](const TCHAR* FieldKey, FText& Text, uint32 Hash, FKzWordText*)
-			{
-				if (Key == FieldKey) { TargetText = &Text; CurrentHash = Hash; }
-			});
-		}
-
 		if (!TargetText)
 		{
 			++OutStats.Unresolved;
