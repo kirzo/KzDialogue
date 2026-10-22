@@ -9,12 +9,7 @@
 
 class UKzDialogueAsset;
 
-/**
- * Abstract source of dialogue lines. The player consumes lines through this contract,
- * oblivious to how they're authored: data asset, manual push, branching graph, runtime
- * generation, etc. Subclasses are EditInlineNew + Instanced so they can be embedded in
- * blueprint variables when needed.
- */
+/** Abstract source of the lines a player consumes, whatever their origin (asset, manual push, runtime generation). */
 UCLASS(Abstract, Blueprintable, EditInlineNew, DefaultToInstanced)
 class KZDIALOGUE_API UKzDialogueProvider : public UObject
 {
@@ -50,16 +45,6 @@ public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
 	void Reset();
 	virtual void Reset_Implementation() { CursorIndex = INDEX_NONE; }
-
-	/** Choices presented at the current branching point. Empty for linear providers. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
-	TArray<FKzDialogueChoice> GetChoices() const;
-	virtual TArray<FKzDialogueChoice> GetChoices_Implementation() const { return {}; }
-
-	/** Resolve a player-selected choice, advancing into the corresponding branch. */
-	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
-	void SelectChoice(int32 ChoiceIndex);
-	virtual void SelectChoice_Implementation(int32 /*ChoiceIndex*/) {}
 
 protected:
 	/** Index into the currently active line list. INDEX_NONE means "before first". */

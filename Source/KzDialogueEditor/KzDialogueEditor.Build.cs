@@ -44,7 +44,6 @@ public class KzDialogueEditor : ModuleRules
 				"DesktopPlatform",
 				"Localization",
 				"LocalizationCommandletExecution",
-				"MessageLog",
 				"WorkspaceMenuStructure",
 			});
 	}

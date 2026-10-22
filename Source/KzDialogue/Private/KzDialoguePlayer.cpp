@@ -245,17 +245,7 @@ void UKzDialoguePlayer::StopAllAudio(float FadeTime)
 	StopReleasedAudios(FadeTime);
 }
 
-void UKzDialoguePlayer::Skip()
-{
-	AdvanceCurrentLine();
-}
-
 void UKzDialoguePlayer::Next()
-{
-	AdvanceCurrentLine();
-}
-
-void UKzDialoguePlayer::AdvanceCurrentLine()
 {
 	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{

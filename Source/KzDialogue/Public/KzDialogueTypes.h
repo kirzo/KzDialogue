@@ -632,23 +632,6 @@ struct FKzDialogueChannelDefinition
 	float DuckFadeTime = 0.2f;
 };
 
-/** A choice presented to the player at a branching point. */
-USTRUCT(BlueprintType)
-struct KZDIALOGUE_API FKzDialogueChoice
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Choice")
-	FText Text;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Choice")
-	FGameplayTagContainer Tags;
-
-	/** Provider-specific payload (e.g. node id in a branching graph). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Choice")
-	FName Payload;
-};
-
 /** High-level state of a dialogue player. */
 UENUM(BlueprintType)
 enum class EKzDialogueState : uint8

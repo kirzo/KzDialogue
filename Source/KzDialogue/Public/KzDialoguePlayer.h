@@ -198,15 +198,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void StopAllAudio(float FadeTime = 0.1f);
 
-	/** Skip the current line (cancel its timer and immediately enter LineExiting). */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
-	void Skip();
-
-	/**
-	 * Advance to the next line. The driver of progression in Manual advance mode; in Automatic
-	 * mode it advances early, like Skip. No-op unless a line is showing. The player stays
-	 * input-agnostic: callers decide when to call this.
-	 */
+	/** End the showing line now and move on: drives Manual mode, cuts the line short in Automatic mode. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Next();
 
@@ -314,9 +306,6 @@ private:
 	/** Presentation half of Enter_LineEntering, deferred by LineStartDelay: line-started events, audio kick-off, view enter requests. */
 	void PresentLine();
 	void HandleLineStartDelayElapsed();
-
-	/** Shared by Skip() and Next(): cancel the line timer and move the showing line to LineExiting. */
-	void AdvanceCurrentLine();
 
 	/** OnLineFinished + advance to the next line or Exiting. Shared by the LineExiting auto-advance and NotifyLineExitFinished. */
 	void AdvanceAfterLineExit();

@@ -27,14 +27,11 @@
 #include "ScopedTransaction.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
-#include "Logging/MessageLog.h"
-#include "Logging/TokenizedMessage.h"
 #include "Internationalization/InternationalizationManifest.h"
 #include "LocalizationModule.h"
 #include "LocalizationSettings.h"
 #include "LocalizationTargetTypes.h"
 #include "LocTextHelper.h"
-#include "Misc/UObjectToken.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Misc/FileHelper.h"
 #include "Misc/MessageDialog.h"
@@ -207,107 +204,6 @@ TArray<FString> FKzLocQuery::GetSourceLocations(const FString& Namespace, const 
 		}
 	}
 	return Locations;
-}
-
-bool FKzDialogueTranslationCsv::BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError)
-{
-	FKzLocQuery Query;
-	if (!Query.Load(OutError)) { return false; }
-
-	// Same per-text unit as the CSV export: line texts plus referenced speaker-asset name fields.
-	struct FKzCoverageText
-	{
-		UObject* Asset = nullptr;
-		int32 LineIndex = INDEX_NONE;
-		FString Namespace;
-		FString Key;
-		FString Source;
-	};
-	TArray<FKzCoverageText> Texts;
-	TArray<FString> VoicedPackages;
-	TSet<UKzSpeakerAsset*> Speakers;
-	for (UKzDialogueAsset* Asset : Assets)
-	{
-		if (!Asset) { continue; }
-		for (int32 i = 0; i < Asset->Lines.Num(); ++i)
-		{
-			const FKzDialogueLine& Line = Asset->Lines[i];
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
-			const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
-			const FString* SourceString = FTextInspector::GetSourceString(Line.Text);
-			if (!Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet() && SourceString)
-			{
-				Texts.Add({ Asset, i, Namespace.GetValue(), Key.GetValue(), *SourceString });
-			}
-
-			if (Line.Speaker.Asset) { Speakers.Add(Line.Speaker.Asset); }
-
-			// Audio localization is plain data, no project policy: subtitles-only projects read
-			// 0/N and move on. Lines opted out via bLocalizeAudio do not count at all.
-			if (!Line.Audio.IsNull() && Line.bLocalizeAudio)
-			{
-				VoicedPackages.Add(Line.Audio.ToSoftObjectPath().GetLongPackageName());
-			}
-		}
-		for (const FKzDialogueAlias& Alias : Asset->Aliases)
-		{
-			if (Alias.Speaker.Asset) { Speakers.Add(Alias.Speaker.Asset); }
-		}
-	}
-
-	for (UKzSpeakerAsset* Speaker : Speakers)
-	{
-		auto AddSpeakerText = [&](const FText& Source)
-		{
-			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
-			const TOptional<FString> Key = FTextInspector::GetKey(Source);
-			const FString* SourceString = FTextInspector::GetSourceString(Source);
-			if (Source.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !SourceString) { return; }
-			Texts.Add({ Speaker, INDEX_NONE, Namespace.GetValue(), Key.GetValue(), *SourceString });
-		};
-		AddSpeakerText(Speaker->DisplayName);
-		AddSpeakerText(Speaker->GivenName.Text);
-		AddSpeakerText(Speaker->FamilyName.Text);
-		AddSpeakerText(Speaker->SecondFamilyName.Text);
-		AddSpeakerText(Speaker->Honorific.Text);
-		AddSpeakerText(Speaker->Qualifier.Text);
-		AddSpeakerText(Speaker->NickName.Text);
-	}
-
-	for (const FString& Culture : Query.GetTarget().ForeignCultures)
-	{
-		FKzCultureCoverage& Coverage = OutCultures.AddDefaulted_GetRef();
-		Coverage.Culture = Culture;
-		Coverage.Total = Texts.Num();
-		Coverage.VoicedLines = VoicedPackages.Num();
-
-		for (const FKzCoverageText& Text : Texts)
-		{
-			switch (Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture))
-			{
-			case EKzTranslationState::Translated:
-				++Coverage.Translated;
-				break;
-			case EKzTranslationState::Stale:
-				++Coverage.Stale;
-				OutStale.Add({ Text.Asset, Text.LineIndex, Text.Key, Culture });
-				break;
-			default:
-				break;
-			}
-		}
-		Coverage.Missing = Coverage.Total - Coverage.Translated - Coverage.Stale;
-
-		for (const FString& SourcePackage : VoicedPackages)
-		{
-			if (Query.IsAudioLocalized(SourcePackage, Culture))
-			{
-				++Coverage.LocalizedAudio;
-			}
-		}
-	}
-
-	return true;
 }
 
 namespace
@@ -572,50 +468,6 @@ namespace
 			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
 		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0);
 	}
-
-	void OnCoverageClicked(TArray<FAssetData> SelectedAssets)
-	{
-		TArray<UKzDialogueAsset*> Assets;
-		for (const FAssetData& Data : SelectedAssets)
-		{
-			if (UKzDialogueAsset* Asset = Cast<UKzDialogueAsset>(Data.GetAsset()))
-			{
-				Assets.Add(Asset);
-			}
-		}
-		if (Assets.IsEmpty()) { return; }
-
-		TArray<FKzCultureCoverage> Cultures;
-		TArray<FKzStaleTranslation> Stale;
-		FText Error;
-		if (!FKzDialogueTranslationCsv::BuildCoverage(Assets, Cultures, Stale, Error))
-		{
-			ShowNotification(Error, false);
-			return;
-		}
-
-		FMessageLog Log(TEXT("KzDialogueL10N"));
-		Log.NewPage(LOCTEXT("CoveragePageTitle", "Translation coverage"));
-		Log.Info(FText::Format(LOCTEXT("CoverageHeader", "{0} asset(s), {1} localizable text(s)."), Assets.Num(), Cultures.Num() > 0 ? Cultures[0].Total : 0));
-
-		for (const FKzCultureCoverage& Coverage : Cultures)
-		{
-			FText CultureLine = FText::Format(LOCTEXT("CoverageCulture", "{0}: {1}/{2} translated, {3} missing, {4} stale."),
-				FText::FromString(Coverage.Culture), Coverage.Translated, Coverage.Total, Coverage.Missing, Coverage.Stale);
-
-			if (Coverage.VoicedLines > 0)
-			{
-				CultureLine = FText::Format(LOCTEXT("CoverageCultureAudio", "{0} Audio: {1}/{2} localized."), CultureLine, Coverage.LocalizedAudio, Coverage.VoicedLines);
-			}
-
-			Log.Info(CultureLine);
-		}
-
-		// Stale entries are the actionable ones: translated against an older source, need review.
-		FKzDialogueTranslationCsv::LogStaleTranslations(Stale);
-
-		Log.Open(EMessageSeverity::Info, true);
-	}
 }
 
 void FKzDialogueTranslationCsv::RegisterMenus()
@@ -666,13 +518,6 @@ void FKzDialogueTranslationCsv::RegisterMenus()
 						FUIAction(FExecuteAction::CreateLambda([Culture]() { OnImportClicked(Culture); })));
 				}
 			}));
-
-		InSection.AddMenuEntry(
-			TEXT("TranslationCoverage"),
-			LOCTEXT("Coverage", "Translation Coverage Report"),
-			LOCTEXT("CoverageTip", "Show how many texts of the selected dialogue assets are translated, missing or stale per culture."),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([SelectedAssets = Context->SelectedAssets]() { OnCoverageClicked(SelectedAssets); })));
 	}));
 }
 
@@ -2386,23 +2231,6 @@ void FKzDialogueTranslationCsv::ImportPoInteractive(const FString& Culture)
 	else
 	{
 		ShowNotification(Error, false);
-	}
-}
-
-void FKzDialogueTranslationCsv::LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale)
-{
-	if (Stale.Num() == 0) { return; }
-
-	FMessageLog Log(TEXT("KzDialogueL10N"));
-	for (const FKzStaleTranslation& Entry : Stale)
-	{
-		const FText Detail = Entry.LineIndex != INDEX_NONE
-			? FText::Format(LOCTEXT("CoverageStaleLine", "line {0} ({1}): '{2}' translation predates the current source text; needs review."), Entry.LineIndex + 1, FText::FromString(Entry.Key), FText::FromString(Entry.Culture))
-			: FText::Format(LOCTEXT("CoverageStaleSpeaker", "{0}: '{1}' translation predates the current name; needs review."), FText::FromString(Entry.Key), FText::FromString(Entry.Culture));
-
-		Log.Warning()
-			->AddToken(FUObjectToken::Create(Entry.Asset))
-			->AddToken(FTextToken::Create(Detail));
 	}
 }
 

@@ -649,7 +649,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		{
 			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Namespace.GetValue()), FLocKey(Key.GetValue()), nullptr);
 
-			// Untranslated is the coverage report's business, not a per-save warning.
+			// Untranslated is the Localization tab's business, not a per-save warning.
 			if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
 
 			const FString& Translation = Entry->Translation.Text;

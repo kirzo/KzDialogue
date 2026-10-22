@@ -62,14 +62,12 @@ Each line has a stable `FGuid` ID, automatically generated and preserved across 
 * `UKzAssetDialogueProvider`: linear playback of a `UKzDialogueAsset`, with optional start/end line clamps.
 * `UKzManualDialogueProvider`: ad-hoc single line, ideal for system messages and barks.
 
-The contract supports branching (`GetChoices` / `SelectChoice`) for future graph-based providers.
-
 ### 🎬 Player (`UKzDialoguePlayer`)
 
 The engine of the system: a non-widget `UObject` with an explicit state machine (`Idle → Entering → LineEntering → LinePlaying → LineExiting → Exiting`), audio management, line timing, and a clean event API.
 
 * **Inversion of control**: views drive their own animations and notify the player when ready (`NotifyEnterFinished`, `NotifyLineEnterFinished`, ...). Views without animations skip those phases automatically.
-* **Commands**: `Play`, `Pause`, `Resume`, `Stop`, `Abort`, `Interrupt`, `Skip`.
+* **Commands**: `Play`, `Pause`, `Resume`, `Stop`, `Abort`, `Interrupt`, `Next`.
 * **Multicast events**: `OnDialogueStarted/Finished`, `OnLineStarted/Finished`, `OnPaused/Resumed`, plus per-phase view request events.
 
 ### 🎚️ Subsystem & Channels (`UKzDialogueSubsystem`)

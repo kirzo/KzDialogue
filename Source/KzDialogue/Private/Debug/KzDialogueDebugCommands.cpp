@@ -132,7 +132,7 @@ namespace KzDialogueCmd
 		}
 	}
 
-	static void HandleSkip(const TArray<FString>& Args)
+	static void HandleNext(const TArray<FString>& Args)
 	{
 		UKzDialogueSubsystem* Sub = ResolveSubsystem();
 		if (!Sub) { return; }
@@ -140,8 +140,8 @@ namespace KzDialogueCmd
 		const FGameplayTag Channel = ParseChannelArg(Args, 0);
 		if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel.IsValid() ? Channel : Sub->DefaultChannel))
 		{
-			Player->Skip();
-			LogToConsole(FString::Printf(TEXT("Skipped on channel '%s'"), *Player->Channel.ToString()));
+			Player->Next();
+			LogToConsole(FString::Printf(TEXT("Advanced channel '%s'"), *Player->Channel.ToString()));
 		}
 	}
 
@@ -334,7 +334,7 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 
 	Make(TEXT("Kz.Dialogue.Play"), TEXT("Play <AssetPath> [Channel]"), HandlePlay);
 	Make(TEXT("Kz.Dialogue.Stop"), TEXT("Stop [Channel] (no channel = all)"), HandleStop);
-	Make(TEXT("Kz.Dialogue.Skip"), TEXT("Skip [Channel]"), HandleSkip);
+	Make(TEXT("Kz.Dialogue.Next"), TEXT("Next [Channel]"), HandleNext);
 	Make(TEXT("Kz.Dialogue.Pause"), TEXT("Pause [Channel]"), HandlePause);
 	Make(TEXT("Kz.Dialogue.Resume"), TEXT("Resume [Channel]"), HandleResume);
 	Make(TEXT("Kz.Dialogue.SetSpeed"), TEXT("SetSpeed <factor> [Channel]"), HandleSetSpeed);
@@ -342,7 +342,7 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 	Make(TEXT("Kz.Dialogue.ListSpeakers"), TEXT("List speaker components in the active world"), HandleListSpeakers);
 	Make(TEXT("Kz.Dialogue.Status"), TEXT("Dump full dialogue state"), HandleStatus);
 	Make(TEXT("Kz.Dialogue.ResetAliasStates"), TEXT("Reset all cached alias playback states"), HandleResetAliasStates);
-	Make(TEXT("Kz.Dialogue.ResetAliasState"), TEXT("ResetAliasState <AliasGuid> — reset cached state for a single alias"), HandleResetAliasState);
+	Make(TEXT("Kz.Dialogue.ResetAliasState"), TEXT("ResetAliasState <AliasGuid>: reset cached state for a single alias"), HandleResetAliasState);
 }
 
 FKzDialogueDebugCommands::~FKzDialogueDebugCommands()

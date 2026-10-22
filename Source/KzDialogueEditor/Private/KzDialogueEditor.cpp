@@ -1,7 +1,5 @@
 // Copyright 2026 kirzo
 
-#pragma once
-
 #include "KzDialogueEditor.h"
 #include "KzDialogueEditorStyle.h"
 #include "KzDialogueTypes.h"
@@ -29,7 +27,6 @@
 
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
-#include "MessageLogModule.h"
 #include "Widgets/Input/SButton.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 #include "ToolMenus.h"
@@ -54,7 +51,6 @@ void FKzDialogueEditorModule::OnStartupModule()
 		INVTEXT("Alias"),
 		MakeShared<FKzDialogueAliasRowCustomizer>()));
 
-	// Extra non-array tab: per-culture localization coverage.
 	TArray<FKzCustomEditorTabConfig> DialogueCustomTabs;
 	{
 		FKzCustomEditorTabConfig& CoverageTab = DialogueCustomTabs.AddDefaulted_GetRef();
@@ -63,8 +59,6 @@ void FKzDialogueEditorModule::OnStartupModule()
 		CoverageTab.IconStyleName = TEXT("LevelEditor.Tabs.StatsViewer");
 		CoverageTab.MakeWidget = [](UObject* Asset) -> TSharedRef<SWidget>
 		{
-			// The shared localization panel with just this asset; the dashboard hosts the
-			// same widget with every dialogue asset in the project.
 			return SNew(SKzDialogueCoveragePanel, TArray<UKzDialogueAsset*>{ Cast<UKzDialogueAsset>(Asset) })
 				.ToolbarExtension()
 				[
@@ -88,14 +82,12 @@ void FKzDialogueEditorModule::OnStartupModule()
 		DialogueTabs,
 		DialogueCustomTabs);
 
-	// Speaker assets use the default simple editor: four name fields need no custom toolkit.
 	RegisterAssetTypeAction<UKzSpeakerAsset>(
 		KzAssetCategoryBit,
 		INVTEXT("Dialogue Speaker"),
 		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
 		{ INVTEXT("Dialogues") });
 
-	// Shared vocabulary words (family names, honorifics): plain data assets as well.
 	RegisterAssetTypeAction<UKzWordAsset>(
 		KzAssetCategoryBit,
 		INVTEXT("Word"),
@@ -121,9 +113,6 @@ void FKzDialogueEditorModule::OnStartupModule()
 	// Token renames refactor the lines and archives that reference the old token.
 	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&FKzDialogueTranslationCsv::RenameNamedTokenReferences);
 
-	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
-	MessageLogModule.RegisterLogListing(TEXT("KzDialogueL10N"), LOCTEXT("L10NLogLabel", "KzDialogue Localization"));
-
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		SKzDialogueDashboard::TabId,
 		FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
@@ -137,7 +126,6 @@ void FKzDialogueEditorModule::OnStartupModule()
 		}))
 		.SetDisplayName(LOCTEXT("DashboardTabName", "Dialogue Dashboard"))
 		.SetTooltipText(LOCTEXT("DashboardTabTip", "Localization status of every dialogue asset in the project: per-culture progress, per-line states, CSV round-trip and the Gather/Compile pipeline."))
-		// Production tool: straight under Tools (the Debug category is for debug-only viewers).
 		.SetGroup(FModuleManager::LoadModuleChecked<FWorkspaceMenuStructureModule>("WorkspaceMenuStructure").GetWorkspaceMenuStructure().GetToolsCategory())
 		.SetIcon(FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"));
 }
@@ -153,11 +141,6 @@ void FKzDialogueEditorModule::OnShutdownModule()
 	if (UToolMenus* ToolMenus = UToolMenus::TryGet())
 	{
 		ToolMenus->UnregisterOwner(TEXT("KzDialogueEditor"));
-	}
-
-	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
-	{
-		FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog").UnregisterLogListing(TEXT("KzDialogueL10N"));
 	}
 
 	if (FModuleManager::Get().IsModuleLoaded("Sequencer"))

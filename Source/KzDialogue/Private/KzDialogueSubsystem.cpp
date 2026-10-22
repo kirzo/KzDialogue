@@ -343,21 +343,16 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 
 	if (Player->IsPlaying())
 	{
-		// Hot-swap inside the existing manual provider when applicable. This avoids the
-		// Exiting/Entering cycle and lets the widget run a smooth LineFadeOut +
-		// LineFadeIn instead of the full StartFadeIn animation. Typical use case:
-		// Sequencer firing one line after another on the same track.
+		// Hot-swap inside the manual provider: a line fade instead of a full exit and enter (Sequencer lines back to back).
 		if (UKzManualDialogueProvider* ManualProv = Cast<UKzManualDialogueProvider>(Player->GetProvider()))
 		{
 			if (ManualProv->Line.LineId == Line.LineId)
 			{
-				// Anti-spam: same line fired twice in the same frame.
 				return Player;
 			}
 
 			if (Player->GetState() != EKzDialogueState::Exiting)
 			{
-				// Channel/asset interruption gating still applies, even on hot-swap.
 				const bool bChannelAllows = !ChannelDef || ChannelDef->bAllowInterruption;
 				const bool bAssetAllows = IsActiveDialogueInterruptible(Player);
 				if (!bChannelAllows || !bAssetAllows)
@@ -367,7 +362,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 
 				Player->CurrentPriority = ResolvedPriority;
 				ManualProv->SetLine(Line);
-				Player->Skip();
+				Player->Next();
 				return Player;
 			}
 		}

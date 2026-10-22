@@ -31,11 +31,7 @@ enum class EKzTranslationState : uint8
 	Translated
 };
 
-/**
- * Localization target, manifest and archives opened once, answering per-text and per-audio
- * questions cheaply afterwards. Used by BuildCoverage and by the dialogue dashboard's
- * per-line culture states.
- */
+/** Localization target, manifest and archives opened once, answering per-text and per-audio questions cheaply afterwards. */
 class FKzLocQuery
 {
 public:
@@ -66,43 +62,6 @@ private:
 	FKzLocTargetInfo Target;
 	TSharedPtr<FLocTextHelper> LocHelper;
 	TSet<FString> LoadedCultures;
-};
-
-/** Per-culture translation coverage counters. */
-struct FKzCultureCoverage
-{
-	FString Culture;
-
-	/** Localizable texts in the queried assets (line texts + speaker overrides). */
-	int32 Total = 0;
-
-	/** Texts with a translation matching the current source. */
-	int32 Translated = 0;
-
-	/** Texts with a translation that predates the current source; needs review. */
-	int32 Stale = 0;
-
-	/** Texts with no translation at all. */
-	int32 Missing = 0;
-
-	/** Lines with source audio. */
-	int32 VoicedLines = 0;
-
-	/** Voiced lines whose audio has a localized variant for this culture. */
-	int32 LocalizedAudio = 0;
-};
-
-/** One stale translation: it predates the current source text and needs review. */
-struct FKzStaleTranslation
-{
-	/** Owning UKzDialogueAsset or UKzSpeakerAsset. */
-	UObject* Asset = nullptr;
-
-	/** Line index for dialogue rows; INDEX_NONE for speaker-asset name rows. */
-	int32 LineIndex = INDEX_NONE;
-
-	FString Key;
-	FString Culture;
 };
 
 /** Result counters for a source-fix import (ImportSourceFixes). */
@@ -151,7 +110,7 @@ struct FKzTranslationImportStats
 class FKzDialogueTranslationCsv
 {
 public:
-	/** Adds Export / Import entries to the content browser context menu of UKzDialogueAsset. Owner: "KzDialogueEditor". */
+	/** Adds the Export / Import entries to the content browser context menu of UKzDialogueAsset. */
 	static void RegisterMenus();
 
 	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. OtherIdentities appends those gathered project texts ("Namespace,Key") as asset-less rows validated by the manifest at import. TranslationCulture pre-fills the Translation column with that culture's current translations (stale ones land in StaleTranslation as reference only). */
@@ -180,9 +139,6 @@ public:
 
 	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
 	static bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
-
-	/** Computes per-culture coverage counters plus the stale-translation list for the given assets. Fails when the localization target or its manifest cannot be read. */
-	static bool BuildCoverage(const TArray<UKzDialogueAsset*>& Assets, TArray<FKzCultureCoverage>& OutCultures, TArray<FKzStaleTranslation>& OutStale, FText& OutError);
 
 	/** Interactive export flow (load assets, dirty warning, save-file dialog, ExportAssets, notification). Shared by the content browser menu and the dashboard. OtherIdentities appends those project texts to the same CSV; TranslationCulture pre-fills its translations and suffixes the default file name ("_es"). */
 	static void ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& TranslationCulture = FString());
@@ -251,9 +207,6 @@ public:
 
 	/** Interactive per-culture PO import flow (open-file dialog, ImportPoFile, stats notification). */
 	static void ImportPoInteractive(const FString& Culture);
-
-	/** Writes one clickable warning per stale translation into the KzDialogueL10N message log. Does not open the log. */
-	static void LogStaleTranslations(const TArray<FKzStaleTranslation>& Stale);
 
 	/** "Spanish (es)" style label for a culture code, falling back to the bare code when the engine has no display name for it. */
 	static FText GetCultureDisplayLabel(const FString& Culture);
