@@ -319,7 +319,7 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		bDirty = true;
 	}
 
-	// Lines
+	// Lines. A duplicated line arrives carrying its source's id: it gets a fresh one and a copy of the source's timeline.
 	{
 		TSet<FGuid> Seen;
 		Seen.Reserve(Lines.Num());
@@ -327,8 +327,16 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		{
 			if (!Line.LineId.IsValid() || Seen.Contains(Line.LineId))
 			{
+				const FGuid SourceId = Line.LineId;
 				Line.LineId = FGuid::NewGuid();
 				bDirty = true;
+
+				if (UKzDialogueTimeline* SourceTimeline = SourceId.IsValid() ? FindTimelineForLine(SourceId) : nullptr)
+				{
+					UKzDialogueTimeline* Copy = DuplicateObject<UKzDialogueTimeline>(SourceTimeline, this);
+					Copy->OwningLineId = Line.LineId;
+					Timelines.Add(Copy);
+				}
 			}
 			Seen.Add(Line.LineId);
 		}
