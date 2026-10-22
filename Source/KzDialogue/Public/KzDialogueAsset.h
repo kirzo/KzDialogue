@@ -50,9 +50,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	bool bInterruptible = true;
 
-	/** Higher numbers preempt lower-numbered dialogues on the same channel. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (ClampMin = 0))
-	int32 Priority = 0;
+	/** Priority on its channel: an equal or higher one preempts the playing dialogue. -1 uses the channel default. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (ClampMin = -1))
+	int32 Priority = -1;
 
 	/** Default channel suggestion (subsystem call may override). */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))

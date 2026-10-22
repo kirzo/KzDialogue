@@ -380,11 +380,7 @@ private:
 	 */
 	int32 PendingViewAcks = 0;
 
-	/** Used to restore state after Resume(). */
 	EKzDialogueState StateBeforePause = EKzDialogueState::Idle;
-
-	/** Time remaining in the line when paused, so we can rearm the timer on resume. */
-	float PausedTimeRemaining = 0.0f;
 
 	FTimerHandle LineTimerHandle;
 

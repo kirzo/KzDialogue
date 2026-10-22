@@ -18,10 +18,10 @@ void FKzDialogueModule::ShutdownModule()
 {
 #if !UE_BUILD_SHIPPING
 	DebugCommands.Reset();
-	DebugCommands.Reset();
+	DebugOverlay.Reset();
 #endif
 }
 
 #undef LOCTEXT_NAMESPACE
-	
+
 IMPLEMENT_MODULE(FKzDialogueModule, KzDialogue)

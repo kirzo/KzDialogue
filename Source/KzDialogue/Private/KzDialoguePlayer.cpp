@@ -106,13 +106,11 @@ void UKzDialoguePlayer::Pause()
 	StateBeforePause = State;
 	State = EKzDialogueState::Paused;
 
-	// Capture the time remaining on the line timer so we can resume cleanly.
 	if (UWorld* World = GetWorld())
 	{
 		FTimerManager& TM = World->GetTimerManager();
 		if (TM.IsTimerActive(LineTimerHandle))
 		{
-			PausedTimeRemaining = TM.GetTimerRemaining(LineTimerHandle);
 			TM.PauseTimer(LineTimerHandle);
 		}
 		if (TM.IsTimerActive(AudioDelayTimerHandle))
@@ -399,12 +397,9 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		return;
 	}
 
-	const float Duration = (PausedTimeRemaining > 0.0f) ? PausedTimeRemaining : ResolveLineDuration(CurrentLine);
-	PausedTimeRemaining = 0.0f;
-
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().SetTimer(LineTimerHandle, this, &UKzDialoguePlayer::HandleLineTimerElapsed, Duration, /*loop=*/false);
+		World->GetTimerManager().SetTimer(LineTimerHandle, this, &UKzDialoguePlayer::HandleLineTimerElapsed, ResolveLineDuration(CurrentLine), /*loop=*/false);
 	}
 	else
 	{
@@ -469,7 +464,6 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 
 	State = EKzDialogueState::Idle;
 	StateBeforePause = EKzDialogueState::Idle;
-	PausedTimeRemaining = 0.0f;
 	Provider = nullptr;
 	CurrentLine = FKzDialogueLine{};
 

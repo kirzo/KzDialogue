@@ -526,7 +526,11 @@ void UKzSubtitleWidget::ClearTextWidgets()
 
 void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel)
 {
-	if (View.SpeakerText)
+	if (View.SpeakerText && !Line.Speaker.IsValid())
+	{
+		View.SpeakerText->SetText(FText::GetEmpty());
+	}
+	else if (View.SpeakerText)
 	{
 		FString FinalSpeakerName = Line.Speaker.GetDisplayLabel(this).ToString();
 
@@ -548,8 +552,7 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 
 	if (View.SubtitlesText)
 	{
-		// Formatting at display time (not at play time) means a hot culture switch formats the
-		// next line against the freshly resolved translation.
+		// Formatted at display time so a culture switch picks up the new translation.
 		View.SubtitlesText->SetText(Line.GetFormattedText());
 	}
 

@@ -399,11 +399,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 		return nullptr;
 	}
 
-	// Resolve on the authored ENTRY (not the alias-picked line) so pre-play resolution by
-	// callers (async actions) always lands on the same player.
+	// The authored entry, not the alias pick, so callers resolving ahead (async actions) land on the same player.
 	InChannel = ResolveChannelForEntry(InChannel, Asset, LineId);
 
-	return PlayLine(Line, InChannel, Priority, bStartImmediately);
+	return PlayLine(Line, InChannel, Priority != InheritPriority ? Priority : Asset->Priority, bStartImmediately);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
@@ -581,22 +580,16 @@ const FKzDialogueTextArgumentResolver* UKzDialogueSubsystem::FindTextArgumentRes
 FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 {
 	if (Alias.LineIds.Num() == 0) { return FGuid(); }
-	if (Alias.LineIds.Num() == 1) { return Alias.LineIds[0]; }
 
-	// Lazily create the state on first resolve.
 	FAliasPlaybackState& State = AliasStates.FindOrAdd(Alias.AliasId);
 
-	// Cooldown gating. Uses world time so pause/dilation are respected naturally.
+	// World time, so pause and dilation stretch the cooldown too.
 	if (Alias.CooldownSeconds > 0.0f && State.LastResolvedWorldTime >= 0.0)
 	{
 		const UWorld* World = GetWorld();
-		if (World)
+		if (World && World->TimeSince(State.LastResolvedWorldTime) < Alias.CooldownSeconds)
 		{
-			if (World->TimeSince(State.LastResolvedWorldTime) < Alias.CooldownSeconds)
-			{
-				// Rejected: still in cooldown window.
-				return FGuid();
-			}
+			return FGuid();
 		}
 	}
 
@@ -609,6 +602,8 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 		}
 		return Picked;
 	};
+
+	if (Alias.LineIds.Num() == 1) { return MarkResolved(Alias.LineIds[0]); }
 
 	auto PickRandom = [](const TArray<FGuid>& Candidates) -> FGuid
 	{

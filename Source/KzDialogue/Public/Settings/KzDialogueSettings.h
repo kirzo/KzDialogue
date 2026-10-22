@@ -29,7 +29,6 @@ public:
 	//~ UDeveloperSettings
 	virtual FName GetCategoryName() const override { return TEXT("Plugins"); }
 
-	/** Convenience accessor. */
 	static const UKzDialogueSettings* Get() { return GetDefault<UKzDialogueSettings>(); }
 
 	/** Channel used when callers don't pass one to the subsystem. */
@@ -37,7 +36,7 @@ public:
 	FGameplayTag DefaultChannel;
 
 	/** Fallback line duration when neither the line nor its audio defines one. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "General", meta = (ClampMin = 0.1))
+	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "General", meta = (ClampMin = 0.1))
 	float DefaultDuration = 2.5f;
 
 	/**

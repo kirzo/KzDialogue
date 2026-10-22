@@ -252,19 +252,30 @@ void UKzDialogueAsset::PostDuplicate(bool bDuplicateForPIE)
 
 	AssetId = FGuid::NewGuid();
 
-	// Force regeneration after duplication so duplicated lines don't share GUIDs
-	// with the originals (which would break Sequencer references in copies).
+	// Fresh ids keep LineId and AliasId globally unique; everything pointing at a line follows it.
+	TMap<FGuid, FGuid> NewLineIds;
 	for (FKzDialogueLine& Line : Lines)
 	{
-		Line.LineId = FGuid::NewGuid();
+		const FGuid NewId = FGuid::NewGuid();
+		NewLineIds.Add(Line.LineId, NewId);
+		Line.LineId = NewId;
 	}
 
 	for (FKzDialogueAlias& Alias : Aliases)
 	{
 		Alias.AliasId = FGuid::NewGuid();
+		for (FGuid& LineId : Alias.LineIds)
+		{
+			if (const FGuid* NewId = NewLineIds.Find(LineId)) { LineId = *NewId; }
+		}
 	}
 
-	// Re-anchor FText keys to the freshly generated GUIDs.
+	for (UKzDialogueTimeline* Timeline : Timelines)
+	{
+		if (!Timeline) { continue; }
+		if (const FGuid* NewId = NewLineIds.Find(Timeline->OwningLineId)) { Timeline->OwningLineId = *NewId; }
+	}
+
 	RefreshLineMetadata();
 }
 
