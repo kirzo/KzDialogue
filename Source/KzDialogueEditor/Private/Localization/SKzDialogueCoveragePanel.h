@@ -138,6 +138,10 @@ private:
 	/** Auto-refresh: the panel follows edits to any of its assets instead of relying on the Refresh button. */
 	void OnObjectPropertyChanged(UObject* Object, struct FPropertyChangedEvent& Event);
 
+	/** Archive writes from anywhere refresh the panel once, on the next tick. */
+	void OnArchivesChanged();
+	bool bArchiveRefreshPending = false;
+
 	/** Opens the asset's editor (or focuses it) and selects the line, same navigation as validation issues. */
 	void NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
 

@@ -5,9 +5,12 @@
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
 
+class FLocKey;
+class FLocMetadataObject;
 class FLocTextHelper;
 class UKzDialogueAsset;
 struct FKzDialogueLine;
+struct FLocItem;
 
 /** Optional per-line export filter: return false to skip a line's row. Speaker rows follow the included lines. */
 using FKzExportLineFilter = TFunction<bool(const UKzDialogueAsset&, const FKzDialogueLine&)>;
@@ -62,6 +65,36 @@ private:
 	FKzLocTargetInfo Target;
 	TSharedPtr<FLocTextHelper> LocHelper;
 	TSet<FString> LoadedCultures;
+};
+
+/**
+ * The one way translations reach the archives on disk: the manifest and the requested archives load once, writes
+ * are collected, and Save writes each touched archive (clearing a read-only flag, logged) and announces it.
+ */
+class FKzArchiveWriter
+{
+public:
+	/** Loads the target, its manifest and the archives of Cultures (every foreign culture when empty); a missing archive is created. */
+	bool Open(FText& OutError, const TArray<FString>& Cultures = TArray<FString>());
+
+	const FKzLocTargetInfo& GetTarget() const { return Target; }
+	FLocTextHelper& GetHelper() const { return *Helper; }
+
+	/** FLocTextHelper::ImportTranslation, remembering the culture for Save. */
+	bool Write(const FString& Culture, const FLocKey& Namespace, const FLocKey& Key, TSharedPtr<FLocMetadataObject> KeyMetadata, const FLocItem& Source, const FLocItem& Translation, bool bOptional = false);
+
+	/** Saves every archive written since Open. */
+	bool Save(FText& OutError);
+
+	bool SaveManifest(FText& OutError);
+
+	/** Fired after translations reach the disk, so every open view of them refreshes. */
+	static FSimpleMulticastDelegate OnArchivesChanged;
+
+private:
+	FKzLocTargetInfo Target;
+	TSharedPtr<FLocTextHelper> Helper;
+	TSet<FString> WrittenCultures;
 };
 
 /** Result counters for a source-fix import (ImportSourceFixes). */

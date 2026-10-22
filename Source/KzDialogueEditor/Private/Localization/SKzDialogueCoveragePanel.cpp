@@ -207,6 +207,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 
 	// Follow edits to the assets (line text/audio changes) so the tab never shows stale data.
 	FCoreUObjectDelegates::OnObjectPropertyChanged.AddSP(this, &SKzDialogueCoveragePanel::OnObjectPropertyChanged);
+	FKzArchiveWriter::OnArchivesChanged.AddSP(this, &SKzDialogueCoveragePanel::OnArchivesChanged);
 
 	Refresh();
 }
@@ -217,6 +218,23 @@ void SKzDialogueCoveragePanel::OnObjectPropertyChanged(UObject* Object, FPropert
 	{
 		Refresh();
 	}
+}
+
+void SKzDialogueCoveragePanel::OnArchivesChanged()
+{
+	if (bArchiveRefreshPending) { return; }
+	bArchiveRefreshPending = true;
+
+	// Writes can come from inside one of this panel's widgets: never rebuild under its feet.
+	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this))](float)
+	{
+		TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin();
+		if (Panel && Panel->bArchiveRefreshPending)
+		{
+			Panel->Refresh();
+		}
+		return false;
+	}));
 }
 
 void SKzDialogueCoveragePanel::LoadPersistedFilters()
@@ -240,6 +258,7 @@ void SKzDialogueCoveragePanel::SavePersistedFilter(const TCHAR* Key, bool bValue
 
 void SKzDialogueCoveragePanel::Refresh()
 {
+	bArchiveRefreshPending = false;
 	Rows->ClearChildren();
 	TranslationEditors.Reset();
 
@@ -1802,6 +1821,7 @@ void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<F
 		}
 		return;
 	}
+	bArchiveRefreshPending = false;
 
 	// The commit runs from inside the row's editable widget; rebuild next tick, not under its
 	// feet, then land the focus on the next editor of the fresh widget tree.

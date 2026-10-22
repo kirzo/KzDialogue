@@ -327,71 +327,63 @@ namespace
 		return Out;
 	}
 
-	/** Archives synced from source control are often read-only on disk and the JSON save just fails; imports write them directly, so drop the flag (logged) instead of failing. */
-	void EnsureArchiveWritable(const FKzLocTargetInfo& Target, const FString& Culture)
+	/** Localization files synced from source control are often read-only on disk and the JSON save just fails: drop the flag (logged) instead. */
+	void EnsureFileWritable(const FString& Path)
 	{
-		const FString ArchivePath = Target.TargetPath / Culture / Target.ArchiveName;
 		IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-		if (PlatformFile.FileExists(*ArchivePath) && PlatformFile.IsReadOnly(*ArchivePath))
+		if (PlatformFile.FileExists(*Path) && PlatformFile.IsReadOnly(*Path))
 		{
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Archive '%s' was read-only; clearing the flag to write the import (check it out in source control if applicable)."), *ArchivePath);
-			PlatformFile.SetReadOnly(*ArchivePath, false);
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("'%s' was read-only; clearing the flag to write it (check it out in source control if applicable)."), *Path);
+			PlatformFile.SetReadOnly(*Path, false);
 		}
 	}
 
 	/**
-	 * Copies each culture's best existing translation among FromIdentities into ToIdentity,
-	 * creating ToIdentity's manifest entry when it is not gathered yet (the next Gather
-	 * regenerates the manifest anyway). Stale translations (made against a different source)
-	 * are not migrated. Used by the line-text merge/unmerge to keep finished work.
+	 * Copies each culture's best existing translation among FromIdentities into ToIdentity, creating ToIdentity's
+	 * manifest entry when it is not gathered yet (the next Gather regenerates the manifest anyway). Stale translations
+	 * are never migrated; with bKeepCurrent a culture where ToIdentity already has a current translation is left alone.
 	 */
-	bool CopyTranslationsToIdentity(const TArray<TPair<FString, FString>>& FromIdentities, const TPair<FString, FString>& ToIdentity, const FString& SourceText, FText& OutError)
+	bool CopyTranslationsToIdentity(const TArray<TPair<FString, FString>>& FromIdentities, const TPair<FString, FString>& ToIdentity, const FString& SourceText, bool bKeepCurrent, FText& OutError)
 	{
-		FKzLocTargetInfo Target;
-		if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, OutError)) { return false; }
-
-		FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-		if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
-		if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
-		for (const FString& Culture : Target.ForeignCultures)
-		{
-			if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
-		}
+		FKzArchiveWriter Writer;
+		if (!Writer.Open(OutError)) { return false; }
+		FLocTextHelper& LocHelper = Writer.GetHelper();
 
 		if (!LocHelper.FindSourceText(FLocKey(ToIdentity.Key), FLocKey(ToIdentity.Value)).IsValid())
 		{
 			FManifestContext Context;
 			Context.Key = FLocKey(ToIdentity.Value);
 			Context.SourceLocation = TEXT("KzDialogue line text");
-			if (!LocHelper.AddSourceText(FLocKey(ToIdentity.Key), FLocItem(SourceText), Context) || !LocHelper.SaveManifest(&OutError))
+			if (!LocHelper.AddSourceText(FLocKey(ToIdentity.Key), FLocItem(SourceText), Context) || !Writer.SaveManifest(OutError))
 			{
 				return false;
 			}
 		}
 
-		int32 CulturesWritten = 0;
-		for (const FString& Culture : Target.ForeignCultures)
+		auto CurrentTranslation = [&LocHelper, &SourceText](const FString& Culture, const TPair<FString, FString>& Identity)
 		{
+			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr);
+			return Entry.IsValid() && SourceMatches(Entry->Source.Text, SourceText) ? Entry->Translation.Text : FString();
+		};
+
+		int32 CulturesWritten = 0;
+		for (const FString& Culture : Writer.GetTarget().ForeignCultures)
+		{
+			if (bKeepCurrent && !CurrentTranslation(Culture, ToIdentity).IsEmpty()) { continue; }
+
 			FString Translation;
 			for (const TPair<FString, FString>& From : FromIdentities)
 			{
-				const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(From.Key), FLocKey(From.Value), nullptr);
-				if (Entry.IsValid() && !Entry->Translation.Text.IsEmpty() && SourceMatches(Entry->Source.Text, SourceText))
-				{
-					Translation = Entry->Translation.Text;
-					break;
-				}
+				Translation = CurrentTranslation(Culture, From);
+				if (!Translation.IsEmpty()) { break; }
 			}
-			if (Translation.IsEmpty()) { continue; }
-
-			if (LocHelper.ImportTranslation(Culture, FLocKey(ToIdentity.Key), FLocKey(ToIdentity.Value), nullptr, FLocItem(SourceText), FLocItem(Translation), false))
+			if (!Translation.IsEmpty() && Writer.Write(Culture, FLocKey(ToIdentity.Key), FLocKey(ToIdentity.Value), nullptr, FLocItem(SourceText), FLocItem(Translation)))
 			{
-				EnsureArchiveWritable(Target, Culture);
-				if (!LocHelper.SaveArchive(Culture, &OutError)) { return false; }
 				++CulturesWritten;
 			}
 		}
 
+		if (!Writer.Save(OutError)) { return false; }
 		if (CulturesWritten > 0)
 		{
 			UE_LOG(LogKzDialogueL10N, Log, TEXT("Copied %d culture translation(s) into '%s,%s'."), CulturesWritten, *ToIdentity.Key, *ToIdentity.Value);
@@ -508,6 +500,59 @@ namespace
 			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
 		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0);
 	}
+}
+
+FSimpleMulticastDelegate FKzArchiveWriter::OnArchivesChanged;
+
+bool FKzArchiveWriter::Open(FText& OutError, const TArray<FString>& Cultures)
+{
+	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, OutError)) { return false; }
+
+	// A culture the step inis do not list yet (a fresh pseudo culture) still gets its archive.
+	TArray<FString> HelperCultures = Target.ForeignCultures;
+	for (const FString& Culture : Cultures) { HelperCultures.AddUnique(Culture); }
+
+	Helper = MakeShared<FLocTextHelper>(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, HelperCultures, nullptr);
+	if (!Helper->LoadManifest(ELocTextHelperLoadFlags::Load, &OutError))
+	{
+		OutError = FText::Format(LOCTEXT("ImportNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), OutError);
+		return false;
+	}
+	if (!Helper->LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+	for (const FString& Culture : Cultures.IsEmpty() ? Target.ForeignCultures : Cultures)
+	{
+		if (!Helper->LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+	}
+	return true;
+}
+
+bool FKzArchiveWriter::Write(const FString& Culture, const FLocKey& Namespace, const FLocKey& Key, TSharedPtr<FLocMetadataObject> KeyMetadata, const FLocItem& Source, const FLocItem& Translation, bool bOptional)
+{
+	if (!Helper->ImportTranslation(Culture, Namespace, Key, KeyMetadata, Source, Translation, bOptional)) { return false; }
+	WrittenCultures.Add(Culture);
+	return true;
+}
+
+bool FKzArchiveWriter::Save(FText& OutError)
+{
+	int32 Saved = 0;
+	for (const FString& Culture : WrittenCultures)
+	{
+		EnsureFileWritable(Target.TargetPath / Culture / Target.ArchiveName);
+		if (!Helper->SaveArchive(Culture, &OutError)) { break; }
+		++Saved;
+	}
+
+	const bool bAllSaved = Saved == WrittenCultures.Num();
+	WrittenCultures.Reset();
+	if (Saved > 0) { OnArchivesChanged.Broadcast(); }
+	return bAllSaved;
+}
+
+bool FKzArchiveWriter::SaveManifest(FText& OutError)
+{
+	EnsureFileWritable(Target.TargetPath / Target.ManifestName);
+	return Helper->SaveManifest(&OutError);
 }
 
 void FKzDialogueTranslationCsv::RegisterMenus()
@@ -843,18 +888,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		return false;
 	}
 
-	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError))
-	{
-		OutError = FText::Format(LOCTEXT("ImportNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), OutError);
-		return false;
-	}
-	// Archives may not exist yet for a culture that was added but never exported; create on demand.
-	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError) ||
-		!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError))
-	{
-		return false;
-	}
+	FKzArchiveWriter Writer;
+	if (!Writer.Open(OutError, { Culture })) { return false; }
+	FLocTextHelper& LocHelper = Writer.GetHelper();
 
 	TMap<FString, UObject*> LoadedAssets;
 
@@ -893,7 +929,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 				continue;
 			}
 
-			if (LocHelper.ImportTranslation(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Translation), false))
+			if (Writer.Write(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Translation)))
 			{
 				++OutStats.Imported;
 			}
@@ -965,7 +1001,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		// Hash matched, so the asset's current source string equals the one this row was translated against.
 		const FString* SourceString = FTextInspector::GetSourceString(*SourceText);
 
-		if (LocHelper.ImportTranslation(Culture, FLocKey(Cell(NamespaceCol)), FLocKey(Key), nullptr, FLocItem(SourceString ? *SourceString : FString()), FLocItem(Translation), false))
+		if (Writer.Write(Culture, FLocKey(Cell(NamespaceCol)), FLocKey(Key), nullptr, FLocItem(SourceString ? *SourceString : FString()), FLocItem(Translation)))
 		{
 			++OutStats.Imported;
 		}
@@ -976,14 +1012,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		}
 	}
 
-	if (OutStats.Imported > 0)
-	{
-		EnsureArchiveWritable(Target, Culture);
-		if (!LocHelper.SaveArchive(Culture, &OutError))
-		{
-			return false;
-		}
-	}
+	if (!Writer.Save(OutError)) { return false; }
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
 		*Culture, *CsvPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
@@ -997,21 +1026,13 @@ void FKzDialogueTranslationCsv::ExportInteractive(TArray<FAssetData> SelectedAss
 
 bool FKzDialogueTranslationCsv::WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError)
 {
-	FKzLocTargetInfo Target;
-	if (!ReadLocTargetInfo(Target, OutError)) { return false; }
-
-	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
-	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError) ||
-		!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError))
-	{
-		return false;
-	}
+	FKzArchiveWriter Writer;
+	if (!Writer.Open(OutError, { Culture })) { return false; }
 
 	int32 Written = 0;
 	for (const TPair<FString, FString>& Identity : Identities)
 	{
-		if (LocHelper.ImportTranslation(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr, FLocItem(Source), FLocItem(Translation), false))
+		if (Writer.Write(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr, FLocItem(Source), FLocItem(Translation)))
 		{
 			++Written;
 		}
@@ -1021,9 +1042,7 @@ bool FKzDialogueTranslationCsv::WriteTranslation(const FString& Culture, const T
 		OutError = LOCTEXT("WriteTranslationFailed", "The translation could not be written into the archive (identity no longer gathered?).");
 		return false;
 	}
-
-	EnsureArchiveWritable(Target, Culture);
-	return LocHelper.SaveArchive(Culture, &OutError);
+	return Writer.Save(OutError);
 }
 
 void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken)
@@ -1049,6 +1068,7 @@ void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Rename
 	{
 		FString Namespace;
 		FString Key;
+		FString OldSource;
 		FString NewSource;
 	};
 	TArray<FKzRenamedText> RenamedTexts;
@@ -1089,7 +1109,7 @@ void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Rename
 				Line.RecordedTextHash = KzComputeSourceTextHash(Line.Text);
 			}
 
-			RenamedTexts.Add({ TextNamespaceUtil::StripPackageNamespace(Namespace.GetValue()), Key.GetValue(), NewSource });
+			RenamedTexts.Add({ TextNamespaceUtil::StripPackageNamespace(Namespace.GetValue()), Key.GetValue(), *Source, NewSource });
 		}
 
 		if (bChanged)
@@ -1100,42 +1120,26 @@ void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Rename
 		}
 	}
 
-	// Follow up in the archives: re-key each affected entry to the new source, rewriting the
-	// token inside existing translations too, so nothing shows as stale after the rename.
-	if (RenamedTexts.Num() > 0)
+	// Follow up in the archives: the token is rewritten inside each translation and its recorded source.
+	// A translation that matched the old source stays current; a stale one stays stale.
+	FKzArchiveWriter Writer;
+	FText ArchiveError;
+	if (RenamedTexts.Num() > 0 && Writer.Open(ArchiveError))
 	{
-		FKzLocTargetInfo Target;
-		FText TargetError;
-		if (ReadLocTargetInfo(Target, TargetError))
+		for (const FString& Culture : Writer.GetTarget().ForeignCultures)
 		{
-			FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-			FText LoadError;
-			if (LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &LoadError) && LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &LoadError))
+			for (const FKzRenamedText& Text : RenamedTexts)
 			{
-				for (const FString& Culture : Target.ForeignCultures)
-				{
-					if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, &LoadError)) { continue; }
+				const TSharedPtr<FArchiveEntry> Entry = Writer.GetHelper().FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
+				if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
 
-					bool bArchiveChanged = false;
-					for (const FKzRenamedText& Text : RenamedTexts)
-					{
-						const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
-						if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
-
-						const FString NewTranslation = ReplaceTokens(Entry->Translation.Text);
-						if (LocHelper.ImportTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr, FLocItem(Text.NewSource), FLocItem(NewTranslation), false))
-						{
-							bArchiveChanged = true;
-						}
-					}
-
-					if (bArchiveChanged)
-					{
-						EnsureArchiveWritable(Target, Culture);
-						LocHelper.SaveArchive(Culture, nullptr);
-					}
-				}
+				const FString NewSource = SourceMatches(Entry->Source.Text, Text.OldSource) ? Text.NewSource : ReplaceTokens(Entry->Source.Text);
+				Writer.Write(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr, FLocItem(NewSource), FLocItem(ReplaceTokens(Entry->Translation.Text)));
 			}
+		}
+		if (!Writer.Save(ArchiveError))
+		{
+			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Token rename: the archives could not be saved: %s"), *ArchiveError.ToString());
 		}
 	}
 
@@ -1442,20 +1446,12 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		return false;
 	}
 
-	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
-	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError))
-	{
-		OutError = FText::Format(LOCTEXT("ImportNoManifest", "Could not load the localization manifest. Run Gather Text in the Localization Dashboard first. {0}"), OutError);
-		return false;
-	}
-	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError) ||
-		!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError))
-	{
-		return false;
-	}
+	FKzArchiveWriter Writer;
+	if (!Writer.Open(OutError, { Culture })) { return false; }
+	FLocTextHelper& LocHelper = Writer.GetHelper();
 
 	// A msgid that no longer matches the manifest source is drifted. Fuzzy entries are unconfirmed work: translators clear the flag when they revise them.
-	auto ProcessEntry = [&LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
+	auto ProcessEntry = [&Writer, &LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
 	{
 		const FString Ctxt = PoUnescape(RawCtxt);
 		const FString Id = PoUnescape(RawId);
@@ -1492,7 +1488,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 			return;
 		}
 
-		if (LocHelper.ImportTranslation(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Str), false))
+		if (Writer.Write(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Str)))
 		{
 			++OutStats.Imported;
 		}
@@ -1567,14 +1563,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 	}
 	FlushEntry();
 
-	if (OutStats.Imported > 0)
-	{
-		EnsureArchiveWritable(Target, Culture);
-		if (!LocHelper.SaveArchive(Culture, &OutError))
-		{
-			return false;
-		}
-	}
+	if (!Writer.Save(OutError)) { return false; }
 
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
 		*Culture, *PoPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
@@ -1823,6 +1812,13 @@ bool FKzDialogueTranslationCsv::MergeIdenticalTexts(const FString& SourceText, c
 		FString::Printf(TEXT("change its NSLOCTEXT/LOCTEXT to namespace '%s', key '%s' by hand"), *CanonicalNamespace, *CanonicalKey),
 		OutRewritten, OutSkipped, OutHandled);
 
+	// Cultures the canonical lacks take their translation from the merged identities.
+	FText ArchiveError;
+	if (!CopyTranslationsToIdentity(ToRewrite, { CanonicalNamespace, CanonicalKey }, SourceText, /*bKeepCurrent=*/true, ArchiveError))
+	{
+		UE_LOG(LogKzDialogueL10N, Warning, TEXT("Texts merged, but migrating translations failed: %s"), *ArchiveError.ToString());
+	}
+
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Merge to '%s,%s': %d occurrence(s) rewritten, %d skipped. Save the dirty assets and re-run Gather."), *CanonicalNamespace, *CanonicalKey, OutRewritten, OutSkipped);
 	return true;
 }
@@ -1925,7 +1921,7 @@ bool FKzDialogueTranslationCsv::MergeLineTexts(const TArray<FKzLineTextRef>& Lin
 
 	// Keep finished work: each culture's best existing translation moves to the shared entry.
 	FText ArchiveError;
-	if (!CopyTranslationsToIdentity(OldIdentities, SharedIdentity, SourceText, ArchiveError))
+	if (!CopyTranslationsToIdentity(OldIdentities, SharedIdentity, SourceText, /*bKeepCurrent=*/false, ArchiveError))
 	{
 		UE_LOG(LogKzDialogueL10N, Warning, TEXT("Line texts merged, but migrating translations failed: %s"), *ArchiveError.ToString());
 	}
@@ -1961,7 +1957,7 @@ bool FKzDialogueTranslationCsv::UnmergeLineText(UKzDialogueAsset* Asset, const F
 	if (OwnNamespace.IsSet() && OwnKey.IsSet() && !SourceText.IsEmpty())
 	{
 		FText ArchiveError;
-		if (!CopyTranslationsToIdentity({ SharedIdentity }, TPair<FString, FString>(OwnNamespace.GetValue(), OwnKey.GetValue()), SourceText, ArchiveError))
+		if (!CopyTranslationsToIdentity({ SharedIdentity }, TPair<FString, FString>(OwnNamespace.GetValue(), OwnKey.GetValue()), SourceText, /*bKeepCurrent=*/false, ArchiveError))
 		{
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Line text unmerged, but seeding its translations failed: %s"), *ArchiveError.ToString());
 		}
@@ -2005,26 +2001,17 @@ bool FKzDialogueTranslationCsv::GeneratePseudoTranslations(int32& OutCount, FTex
 		UE_LOG(LogKzDialogueL10N, Warning, TEXT("Pseudo culture '%s' is in the packaging CulturesToStage and would ship with packaged builds. Remove it there; QA builds opt in with -CookCultures."), *PseudoCulture);
 	}
 
-	FKzLocTargetInfo LocTarget;
-	if (!ReadLocTargetInfo(LocTarget, OutError)) { return false; }
-
-	// The step inis may not list a freshly added culture until the next Gather; the helper
-	// gets it explicitly so the archive can be created right away.
-	TArray<FString> Cultures = LocTarget.ForeignCultures;
-	Cultures.AddUnique(PseudoCulture);
-
-	FLocTextHelper LocHelper(LocTarget.TargetPath, LocTarget.ManifestName, LocTarget.ArchiveName, LocTarget.NativeCulture, Cultures, nullptr);
-	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, &OutError)) { return false; }
-	if (!LocHelper.LoadNativeArchive(ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
-	if (!LocHelper.LoadForeignArchive(PseudoCulture, ELocTextHelperLoadFlags::LoadOrCreate, &OutError)) { return false; }
+	// The step inis may not list a freshly added culture until the next Gather: the writer gets it explicitly.
+	FKzArchiveWriter Writer;
+	if (!Writer.Open(OutError, { PseudoCulture })) { return false; }
 
 	int32 Count = 0;
-	LocHelper.EnumerateSourceTexts([&LocHelper, &PseudoCulture, &Count](TSharedRef<FManifestEntry> Entry)
+	Writer.GetHelper().EnumerateSourceTexts([&Writer, &PseudoCulture, &Count](TSharedRef<FManifestEntry> Entry)
 	{
 		const FString Pseudo = MakePseudoTranslation(Entry->Source.Text);
 		for (const FManifestContext& Context : Entry->Contexts)
 		{
-			if (LocHelper.ImportTranslation(PseudoCulture, Entry->Namespace, Context.Key, Context.KeyMetadataObj, Entry->Source, FLocItem(Pseudo), Context.bIsOptional))
+			if (Writer.Write(PseudoCulture, Entry->Namespace, Context.Key, Context.KeyMetadataObj, Entry->Source, FLocItem(Pseudo), Context.bIsOptional))
 			{
 				++Count;
 			}
@@ -2032,8 +2019,7 @@ bool FKzDialogueTranslationCsv::GeneratePseudoTranslations(int32& OutCount, FTex
 		return true;
 	}, /*bCheckDependencies=*/true);
 
-	EnsureArchiveWritable(LocTarget, PseudoCulture);
-	if (!LocHelper.SaveArchive(PseudoCulture, &OutError)) { return false; }
+	if (!Writer.Save(OutError)) { return false; }
 
 	OutCount = Count;
 	UE_LOG(LogKzDialogueL10N, Log, TEXT("Generated %d pseudo-translations into '%s'. Compile the culture and switch to it in PIE."), Count, *PseudoCulture);
