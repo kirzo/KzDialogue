@@ -315,8 +315,8 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	// This player may have been a mute-rule trigger: re-show the views it was silencing.
 	RefreshMuteStates();
 
-	// Beyond mute bookkeeping, only react here to hard cancellations (Abort / Interrupt).
-	if (Reason == EKzDialogueFinishReason::Completed || bWasMuted)
+	// Beyond mute bookkeeping, only react here to hard cancellations (Abort / Interrupt): the others played their exit.
+	if (Reason == EKzDialogueFinishReason::Completed || Reason == EKzDialogueFinishReason::Stopped || bWasMuted)
 	{
 		return;
 	}

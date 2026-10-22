@@ -4,6 +4,8 @@
 
 #include "Modules/ModuleManager.h"
 
+KZDIALOGUE_API DECLARE_LOG_CATEGORY_EXTERN(LogKzDialogue, Log, All);
+
 class FKzDialogueModule : public IModuleInterface
 {
 private:

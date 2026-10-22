@@ -303,12 +303,12 @@ private:
 	/** Every claim of the current phase resolved (or none was made): move to the next phase, or on resume when paused. */
 	void OnPhaseAcksDone();
 	void HandleViewAck(EKzDialogueState Phase);
-	void ArmViewWatchdog();
 	void HandleViewWatchdogElapsed();
 
-	/** Arms a line timer, born paused when the player is paused. */
-	void ArmTimer(FTimerHandle& Handle, void (UKzDialoguePlayer::*Callback)(), float Delay);
+	/** Arms a timer, born paused when the player is paused. False without a world. */
+	bool ArmTimer(FTimerHandle& Handle, void (UKzDialoguePlayer::*Callback)(), float Delay);
 	void ClearTimer(FTimerHandle& Handle);
+	void SetTimersPaused(bool bPause);
 
 	/** Starts the line audio, honoring the line's AudioStartDelay (defers via timer when > 0). */
 	void StartLineAudio();
@@ -338,7 +338,7 @@ private:
 	// Notify timeline driven during LinePlaying.
 	void BakeTimeline();
 	void FlushTimeline();
-	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration) const;
+	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueProvider> Provider = nullptr;

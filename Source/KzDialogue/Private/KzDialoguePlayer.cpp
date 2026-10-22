@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "KzDialoguePlayer.h"
+#include "KzDialogue.h"
 #include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
@@ -37,8 +38,7 @@ UKzDialoguePlayer::UKzDialoguePlayer()
 
 UWorld* UKzDialoguePlayer::GetWorld() const
 {
-	// Route GetWorld through the outer chain. Subsystem-created players are outered to
-	// the world, so this resolves correctly without any special handling.
+	// Outered to the world subsystem that created it.
 	return GetOuter() ? GetOuter()->GetWorld() : nullptr;
 }
 
@@ -53,10 +53,9 @@ void UKzDialoguePlayer::BeginDestroy()
 		Speaker->SetSpeakingLevel(0.0f);
 	}
 	SpeakingSpeaker = nullptr;
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(LineTimerHandle);
-	}
+	ClearTimer(LineTimerHandle);
+	ClearTimer(LineStartDelayTimerHandle);
+	ClearTimer(ViewWatchdogHandle);
 	Super::BeginDestroy();
 }
 
@@ -74,7 +73,6 @@ void UKzDialoguePlayer::SetProvider(UKzDialogueProvider* InProvider)
 {
 	if (!IsValid(InProvider)) return;
 
-	// Cleanly cancel anything currently playing before starting fresh.
 	if (IsPlaying())
 	{
 		Abort();
@@ -86,47 +84,28 @@ void UKzDialoguePlayer::SetProvider(UKzDialogueProvider* InProvider)
 
 void UKzDialoguePlayer::StartDialogue()
 {
-	// Only start if we have a provider and we are currently Idle
 	if (!IsValid(Provider) || State != EKzDialogueState::Idle)
 	{
 		return;
 	}
 
+	const uint32 Serial = StateSerial;
 	OnDialogueStarted.Broadcast(this);
-	Enter_Entering();
+	if (Serial == StateSerial)
+	{
+		Enter_Entering();
+	}
 }
 
 void UKzDialoguePlayer::Pause()
 {
-	if (State == EKzDialogueState::Idle || State == EKzDialogueState::Paused)
+	if (State == EKzDialogueState::Idle || bPaused)
 	{
 		return;
 	}
 
-	StateBeforePause = State;
-	State = EKzDialogueState::Paused;
-
-	if (UWorld* World = GetWorld())
-	{
-		FTimerManager& TM = World->GetTimerManager();
-		if (TM.IsTimerActive(LineTimerHandle))
-		{
-			TM.PauseTimer(LineTimerHandle);
-		}
-		if (TM.IsTimerActive(AudioDelayTimerHandle))
-		{
-			TM.PauseTimer(AudioDelayTimerHandle);
-		}
-		if (TM.IsTimerActive(LineStartDelayTimerHandle))
-		{
-			TM.PauseTimer(LineStartDelayTimerHandle);
-		}
-		if (TM.IsTimerActive(AudioStopTimerHandle))
-		{
-			TM.PauseTimer(AudioStopTimerHandle);
-		}
-	}
-
+	bPaused = true;
+	SetTimersPaused(true);
 	if (IsValid(ActiveAudio))
 	{
 		ActiveAudio->SetPaused(true);
@@ -137,41 +116,25 @@ void UKzDialoguePlayer::Pause()
 
 void UKzDialoguePlayer::Resume()
 {
-	if (State != EKzDialogueState::Paused)
+	if (!bPaused)
 	{
 		return;
 	}
 
-	State = StateBeforePause;
-	StateBeforePause = EKzDialogueState::Idle;
-
-	if (UWorld* World = GetWorld())
-	{
-		FTimerManager& TM = World->GetTimerManager();
-		if (LineTimerHandle.IsValid())
-		{
-			TM.UnPauseTimer(LineTimerHandle);
-		}
-		if (AudioDelayTimerHandle.IsValid())
-		{
-			TM.UnPauseTimer(AudioDelayTimerHandle);
-		}
-		if (LineStartDelayTimerHandle.IsValid())
-		{
-			TM.UnPauseTimer(LineStartDelayTimerHandle);
-		}
-		if (AudioStopTimerHandle.IsValid())
-		{
-			TM.UnPauseTimer(AudioStopTimerHandle);
-		}
-	}
-
+	bPaused = false;
+	SetTimersPaused(false);
 	if (IsValid(ActiveAudio))
 	{
 		ActiveAudio->SetPaused(false);
 	}
 
+	const uint32 Serial = StateSerial;
 	OnResumed.Broadcast(this);
+	if (Serial == StateSerial && !bPaused && bAdvanceOnResume)
+	{
+		bAdvanceOnResume = false;
+		OnPhaseAcksDone();
+	}
 }
 
 void UKzDialoguePlayer::Stop()
@@ -181,40 +144,42 @@ void UKzDialoguePlayer::Stop()
 		return;
 	}
 
-	// From mid-line states, route through LineExiting -> Exiting (handled by transitions).
-	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
+	bStopRequested = true;
+	Resume();
+	if (!bStopRequested)
 	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(LineTimerHandle);
-		}
-		Enter_LineExiting();
+		// The dialogue already finished while resuming.
+		return;
 	}
-	else if (State == EKzDialogueState::Entering)
+
+	switch (State)
 	{
-		// Skip the line phase entirely.
+	case EKzDialogueState::Entering:
 		Enter_Exiting();
+		break;
+	case EKzDialogueState::LineEntering:
+	case EKzDialogueState::LinePlaying:
+		ClearTimer(LineTimerHandle);
+		if (bLinePresented) { Enter_LineExiting(); }
+		else { Enter_Exiting(); }
+		break;
+	default:
+		// Exiting phases: the flag ends the dialogue at the next step.
+		break;
 	}
-	// If already exiting, let it complete naturally.
 }
 
 void UKzDialoguePlayer::Abort()
 {
 	if (State == EKzDialogueState::Idle)
 	{
-		// Nothing to abort, but Continue-policy tails may outlive the dialogue: a hard stop on an
-		// idle player means "silence the channel".
+		// Continue-policy tails may outlive the dialogue: a hard stop on an idle player silences the channel.
 		StopReleasedAudios(0.0f);
 		return;
 	}
 
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(LineTimerHandle);
-	}
 	StopLineAudio(0.0f);
 	StopReleasedAudios(0.0f);
-
 	FinishWithReason(EKzDialogueFinishReason::Aborted);
 }
 
@@ -222,18 +187,12 @@ void UKzDialoguePlayer::Interrupt()
 {
 	if (State == EKzDialogueState::Idle)
 	{
-		// Same as Abort: an interrupt on an idle player still silences ringing released tails.
 		StopReleasedAudios(0.1f);
 		return;
 	}
 
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(LineTimerHandle);
-	}
 	StopLineAudio(0.1f);
 	StopReleasedAudios(0.1f);
-
 	FinishWithReason(EKzDialogueFinishReason::Interrupted);
 }
 
@@ -245,51 +204,108 @@ void UKzDialoguePlayer::StopAllAudio(float FadeTime)
 
 void UKzDialoguePlayer::Next()
 {
-	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
+	if (bPaused)
 	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(LineTimerHandle);
-		}
+		return;
+	}
+
+	if (State == EKzDialogueState::LineEntering && !bLinePresented)
+	{
+		// Still in its LineStartDelay gap: the line never showed, so it leaves without exit events.
+		ClearTimer(LineStartDelayTimerHandle);
+		AdvanceToNextLine();
+	}
+	else if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
+	{
+		ClearTimer(LineTimerHandle);
 		Enter_LineExiting();
 	}
 }
 
 // ---------------------------------------------------------------------------------------
-// View notifications
+// View responses
 // ---------------------------------------------------------------------------------------
 
-void UKzDialoguePlayer::NotifyEnterFinished()
+void UKzDialoguePlayer::ClaimViewResponse()
 {
-	// Ignore a notification for a phase we already left (stale fade): also avoids decrementing the next phase.
-	if (State != EKzDialogueState::Entering) { return; }
-	if (--PendingViewAcks <= 0) { Enter_LineEntering(); }
+	++PendingViewAcks;
+
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	if (Settings && Settings->ViewResponseTimeout > 0.0f)
+	{
+		ArmTimer(ViewWatchdogHandle, &UKzDialoguePlayer::HandleViewWatchdogElapsed, Settings->ViewResponseTimeout);
+	}
 }
 
-void UKzDialoguePlayer::NotifyExitFinished()
+void UKzDialoguePlayer::HandleViewAck(EKzDialogueState Phase)
 {
-	if (State != EKzDialogueState::Exiting) { return; }
-	if (--PendingViewAcks <= 0) { FinishWithReason(EKzDialogueFinishReason::Completed); }
+	// A late ack for a phase already left (stale fade) must not count against the next one.
+	if (State != Phase || PendingViewAcks <= 0)
+	{
+		return;
+	}
+
+	if (--PendingViewAcks == 0)
+	{
+		ClearTimer(ViewWatchdogHandle);
+		OnPhaseAcksDone();
+	}
 }
 
-void UKzDialoguePlayer::NotifyLineEnterFinished()
+void UKzDialoguePlayer::HandleViewWatchdogElapsed()
 {
-	if (State != EKzDialogueState::LineEntering) { return; }
-	if (--PendingViewAcks <= 0) { Enter_LinePlaying(); }
+	if (PendingViewAcks <= 0)
+	{
+		return;
+	}
+
+	UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': %d view claim(s) unanswered in %s after %.1f s; advancing without them."),
+		*Channel.ToString(), PendingViewAcks, *UEnum::GetValueAsString(State), UKzDialogueSettings::Get()->ViewResponseTimeout);
+	PendingViewAcks = 0;
+	OnPhaseAcksDone();
 }
 
-void UKzDialoguePlayer::NotifyLineExitFinished()
+void UKzDialoguePlayer::OnPhaseAcksDone()
 {
-	if (State != EKzDialogueState::LineExiting) { return; }
-	if (--PendingViewAcks <= 0) { AdvanceAfterLineExit(); }
+	if (bPaused)
+	{
+		bAdvanceOnResume = true;
+		return;
+	}
+
+	switch (State)
+	{
+	case EKzDialogueState::Entering:
+		if (bStopRequested) { Enter_Exiting(); }
+		else { Enter_LineEntering(); }
+		break;
+	case EKzDialogueState::LineEntering:
+		Enter_LinePlaying();
+		break;
+	case EKzDialogueState::LineExiting:
+		AdvanceAfterLineExit();
+		break;
+	case EKzDialogueState::Exiting:
+		FinishWithReason(bStopRequested ? EKzDialogueFinishReason::Stopped : EKzDialogueFinishReason::Completed);
+		break;
+	default:
+		break;
+	}
 }
 
 void UKzDialoguePlayer::AdvanceAfterLineExit()
 {
+	const uint32 Serial = StateSerial;
 	OnLineFinished.Broadcast(this, CurrentLine);
+	if (Serial == StateSerial)
+	{
+		AdvanceToNextLine();
+	}
+}
 
-	// Decide whether to play another line or wrap up.
-	if (IsValid(Provider) && Provider->HasNext())
+void UKzDialoguePlayer::AdvanceToNextLine()
+{
+	if (!bStopRequested && IsValid(Provider) && Provider->HasNext())
 	{
 		Enter_LineEntering();
 	}
@@ -303,16 +319,27 @@ void UKzDialoguePlayer::AdvanceAfterLineExit()
 // State entries
 // ---------------------------------------------------------------------------------------
 
+// Every broadcast may move the player on (a listener skipping, stopping or replacing the dialogue):
+// each entry captures the serial after its transition and stops as soon as it changed.
+
+void UKzDialoguePlayer::SetState(EKzDialogueState NewState)
+{
+	State = NewState;
+	++StateSerial;
+	bAdvanceOnResume = false;
+	ClearTimer(ViewWatchdogHandle);
+}
+
 void UKzDialoguePlayer::Enter_Entering()
 {
-	State = EKzDialogueState::Entering;
+	SetState(EKzDialogueState::Entering);
+	const uint32 Serial = StateSerial;
+
 	PendingViewAcks = 0;
 	OnRequestDialogueEnter.Broadcast(this);
-
-	// No bound view claimed an enter animation: skip to the first line immediately.
-	if (State == EKzDialogueState::Entering && PendingViewAcks == 0)
+	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
-		Enter_LineEntering();
+		OnPhaseAcksDone();
 	}
 }
 
@@ -324,30 +351,23 @@ void UKzDialoguePlayer::Enter_LineEntering()
 		return;
 	}
 
-	State = EKzDialogueState::LineEntering;
+	SetState(EKzDialogueState::LineEntering);
+	bLinePresented = false;
 
-	const FKzDialogueLine PreviousLine = CurrentLine;
+	const FKzDialogueLine PreviousLine = MoveTemp(CurrentLine);
 	CurrentLine = Provider->Advance();
 
 	// Decide what to do with the previous line's audio now that we know the incoming one.
 	ResolveOutgoingAudio(PreviousLine, &CurrentLine);
 
-	// Fill ambient template arguments before anyone sees the line, so every event and view
-	// receives a copy that formats correctly.
+	// Ambient template arguments go in before anyone sees the line, so every event and view gets a copy that formats.
 	ResolveLineFormatArguments();
 
-	// Silent pre-line gap: nothing presents (no subtitle, no audio, no view enter) until it
-	// elapses, then the whole line appears at once. Scaled by TimeScale like every timing.
-	// Clearing first also kills any stale gap timer from an aborted previous dialogue.
+	// Silent pre-line gap: nothing presents (no subtitle, audio or view enter) until it elapses.
 	const float Gap = FMath::Max(0.0f, CurrentLine.LineStartDelay) / FMath::Max(0.1f, TimeScale);
-	if (UWorld* World = GetWorld())
+	if (Gap > UE_KINDA_SMALL_NUMBER && ArmTimer(LineStartDelayTimerHandle, &UKzDialoguePlayer::HandleLineStartDelayElapsed, Gap))
 	{
-		World->GetTimerManager().ClearTimer(LineStartDelayTimerHandle);
-		if (Gap > UE_KINDA_SMALL_NUMBER)
-		{
-			World->GetTimerManager().SetTimer(LineStartDelayTimerHandle, this, &UKzDialoguePlayer::HandleLineStartDelayElapsed, Gap, /*loop=*/false);
-			return;
-		}
+		return;
 	}
 
 	PresentLine();
@@ -355,7 +375,7 @@ void UKzDialoguePlayer::Enter_LineEntering()
 
 void UKzDialoguePlayer::HandleLineStartDelayElapsed()
 {
-	if (State == EKzDialogueState::LineEntering)
+	if (State == EKzDialogueState::LineEntering && !bLinePresented)
 	{
 		PresentLine();
 	}
@@ -363,8 +383,14 @@ void UKzDialoguePlayer::HandleLineStartDelayElapsed()
 
 void UKzDialoguePlayer::PresentLine()
 {
+	const uint32 Serial = StateSerial;
+	bLinePresented = true;
+
 	OnLineStarted.Broadcast(this, CurrentLine);
+	if (Serial != StateSerial) { return; }
+
 	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
+	if (Serial != StateSerial) { return; }
 
 	if (bStartAudioOnLineEnter)
 	{
@@ -373,16 +399,15 @@ void UKzDialoguePlayer::PresentLine()
 
 	PendingViewAcks = 0;
 	OnRequestLineEnter.Broadcast(this, CurrentLine);
-
-	if (State == EKzDialogueState::LineEntering && PendingViewAcks == 0)
+	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
-		Enter_LinePlaying();
+		OnPhaseAcksDone();
 	}
 }
 
 void UKzDialoguePlayer::Enter_LinePlaying()
 {
-	State = EKzDialogueState::LinePlaying;
+	SetState(EKzDialogueState::LinePlaying);
 
 	if (!bStartAudioOnLineEnter)
 	{
@@ -397,11 +422,7 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		return;
 	}
 
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(LineTimerHandle, this, &UKzDialoguePlayer::HandleLineTimerElapsed, ResolveLineDuration(CurrentLine), /*loop=*/false);
-	}
-	else
+	if (!ArmTimer(LineTimerHandle, &UKzDialoguePlayer::HandleLineTimerElapsed, ResolveLineDuration(CurrentLine)))
 	{
 		// No world (unlikely in normal use): advance immediately.
 		HandleLineTimerElapsed();
@@ -410,43 +431,86 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 
 void UKzDialoguePlayer::Enter_LineExiting()
 {
-	State = EKzDialogueState::LineExiting;
+	SetState(EKzDialogueState::LineExiting);
+	const uint32 Serial = StateSerial;
 
-	// The line is ending: audio still waiting on its AudioStartDelay must never start now,
-	// and a pending pre-line gap (stopped mid-gap) must never present.
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
-		World->GetTimerManager().ClearTimer(LineStartDelayTimerHandle);
-	}
+	// Audio still waiting on its AudioStartDelay must never start now.
+	ClearTimer(AudioDelayTimerHandle);
+	ClearTimer(LineStartDelayTimerHandle);
 
 	FlushTimeline();
+	if (Serial != StateSerial) { return; }
+
 	PendingViewAcks = 0;
 	OnRequestLineExit.Broadcast(this, CurrentLine);
-	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
+	if (Serial != StateSerial) { return; }
 
-	if (State == EKzDialogueState::LineExiting && PendingViewAcks == 0)
+	DispatchSpecificLineEvent(SpecificLineFinishedBindings, CurrentLine);
+	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
-		AdvanceAfterLineExit();
+		OnPhaseAcksDone();
 	}
 }
 
 void UKzDialoguePlayer::Enter_Exiting()
 {
-	State = EKzDialogueState::Exiting;
+	SetState(EKzDialogueState::Exiting);
+	const uint32 Serial = StateSerial;
+
 	ResolveOutgoingAudio(CurrentLine, nullptr);
 	PendingViewAcks = 0;
 	OnRequestDialogueExit.Broadcast(this);
-
-	if (State == EKzDialogueState::Exiting && PendingViewAcks == 0)
+	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
-		FinishWithReason(EKzDialogueFinishReason::Completed);
+		OnPhaseAcksDone();
 	}
 }
 
 // ---------------------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------------------
+
+bool UKzDialoguePlayer::ArmTimer(FTimerHandle& Handle, void (UKzDialoguePlayer::*Callback)(), float Delay)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return false;
+	}
+
+	FTimerManager& TimerManager = World->GetTimerManager();
+	TimerManager.SetTimer(Handle, this, Callback, Delay, /*loop=*/false);
+	if (bPaused)
+	{
+		TimerManager.PauseTimer(Handle);
+	}
+	return true;
+}
+
+void UKzDialoguePlayer::ClearTimer(FTimerHandle& Handle)
+{
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(Handle);
+	}
+}
+
+void UKzDialoguePlayer::SetTimersPaused(bool bPause)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FTimerManager& TimerManager = World->GetTimerManager();
+	FTimerHandle* Handles[] = { &LineTimerHandle, &LineStartDelayTimerHandle, &AudioDelayTimerHandle, &AudioStopTimerHandle, &ViewWatchdogHandle };
+	for (FTimerHandle* Handle : Handles)
+	{
+		if (bPause) { TimerManager.PauseTimer(*Handle); }
+		else { TimerManager.UnPauseTimer(*Handle); }
+	}
+}
 
 void UKzDialoguePlayer::HandleLineTimerElapsed()
 {
@@ -458,20 +522,25 @@ void UKzDialoguePlayer::HandleLineTimerElapsed()
 
 void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 {
+	// A state ending in the flush may itself have finished or replaced the dialogue.
+	const uint32 Serial = StateSerial;
 	FlushTimeline();
+	if (Serial != StateSerial)
+	{
+		return;
+	}
 
-	UKzDialogueProvider* PreviousProvider = Provider;
-
-	State = EKzDialogueState::Idle;
-	StateBeforePause = EKzDialogueState::Idle;
+	ClearTimer(LineTimerHandle);
+	ClearTimer(LineStartDelayTimerHandle);
+	SetState(EKzDialogueState::Idle);
+	bPaused = false;
+	bStopRequested = false;
+	bLinePresented = false;
+	PendingViewAcks = 0;
 	Provider = nullptr;
 	CurrentLine = FKzDialogueLine{};
 
 	OnDialogueFinished.Broadcast(this, Reason);
-
-	// We deliberately keep PreviousProvider alive only inside this scope; it'll be GC'd
-	// when its outer goes out of scope.
-	(void)PreviousProvider;
 }
 
 float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
@@ -496,16 +565,11 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 
 void UKzDialoguePlayer::StartLineAudio()
 {
-	// Subtitles-lead-the-voice: defer the whole audio start (creation + envelope bind + play) by
-	// the line's AudioStartDelay. TimeScale compresses the lead like every other line timing.
+	// Subtitles lead the voice: the whole audio start waits AudioStartDelay, compressed by TimeScale like every line timing.
 	const float Delay = FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale);
-	if (Delay > UE_KINDA_SMALL_NUMBER && !CurrentLine.Audio.IsNull())
+	if (Delay > UE_KINDA_SMALL_NUMBER && !CurrentLine.Audio.IsNull() && ArmTimer(AudioDelayTimerHandle, &UKzDialoguePlayer::HandleAudioDelayElapsed, Delay))
 	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().SetTimer(AudioDelayTimerHandle, this, &UKzDialoguePlayer::HandleAudioDelayElapsed, Delay, /*loop=*/false);
-			return;
-		}
+		return;
 	}
 
 	StartLineAudioNow();
@@ -651,14 +715,17 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	BindAudioEnvelope();
 	ResolveSpeakingSpeaker(); // resolve speaker + tuning before the first envelope callback can land
 	ActiveAudio->Play(FMath::Max(0.0f, CurrentLine.AudioStartTime));
+	if (bPaused)
+	{
+		// A listener paused while the line was presenting.
+		ActiveAudio->SetPaused(true);
+	}
 
-	// Custom playback end: cut the audio at AudioEndTime. Only when set; the common case
-	// (0 = natural end) arms nothing. Audio plays in real time, so the cut is NOT scaled by
-	// TimeScale, unlike the line timings around it.
-	if (CurrentLine.AudioEndTime > 0.0f && World)
+	// Cut at AudioEndTime (0 = natural end, nothing armed). Audio plays in real time, so the cut is not scaled by TimeScale.
+	if (CurrentLine.AudioEndTime > 0.0f)
 	{
 		const float StopIn = FMath::Max(0.05f, CurrentLine.AudioEndTime - FMath::Max(0.0f, CurrentLine.AudioStartTime));
-		World->GetTimerManager().SetTimer(AudioStopTimerHandle, this, &UKzDialoguePlayer::HandleAudioStopElapsed, StopIn, /*loop=*/false);
+		ArmTimer(AudioStopTimerHandle, &UKzDialoguePlayer::HandleAudioStopElapsed, StopIn);
 	}
 }
 
@@ -673,13 +740,9 @@ void UKzDialoguePlayer::HandleAudioStopElapsed()
 
 void UKzDialoguePlayer::StopLineAudio(float FadeTime)
 {
-	// Covers hard teardowns (Abort / Interrupt / destroy): cancel a pending deferred start
-	// and a pending trim cut too.
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(AudioDelayTimerHandle);
-		World->GetTimerManager().ClearTimer(AudioStopTimerHandle);
-	}
+	// Hard teardowns also cancel a pending deferred start and trim cut.
+	ClearTimer(AudioDelayTimerHandle);
+	ClearTimer(AudioStopTimerHandle);
 
 	UnbindAudioEnvelope();
 	if (IsValid(ActiveAudio))
@@ -1032,7 +1095,7 @@ bool UKzDialoguePlayer::IsTickable() const
 	{
 		return true; // keep ticking to release the jaw toward 0
 	}
-	return State == EKzDialogueState::LinePlaying && (ActiveNotifies.Num() > 0 || IsValid(ActiveAudio));
+	return !bPaused && State == EKzDialogueState::LinePlaying && (ActiveNotifies.Num() > 0 || IsValid(ActiveAudio));
 }
 
 TStatId UKzDialoguePlayer::GetStatId() const
@@ -1044,57 +1107,68 @@ void UKzDialoguePlayer::Tick(float DeltaTime)
 {
 	UpdateSpeakingLevel(DeltaTime);
 
-	if (State != EKzDialogueState::LinePlaying)
+	if (bPaused || State != EKzDialogueState::LinePlaying)
 	{
 		return;
 	}
 
 	TimelineClock += DeltaTime;
 
-	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	// A notify may move the player on (Next, Stop, a new line on this channel). Flags are set before each
+	// call so a flush in between pairs Begin with End, and the loop stops as soon as the state changed.
+	const uint32 Serial = StateSerial;
+	for (int32 Index = 0; Index < ActiveNotifies.Num(); ++Index)
 	{
+		FKzDialogueActiveNotify& Entry = ActiveNotifies[Index];
 		if (Entry.bDone || !IsValid(Entry.Notify))
 		{
 			continue;
 		}
 
-		if (Entry.bIsState)
+		if (!Entry.bIsState)
 		{
-			UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify);
-			if (!StateNotify)
+			if (TimelineClock >= Entry.Start)
 			{
 				Entry.bDone = true;
-				continue;
-			}
-
-			if (!Entry.bActive && TimelineClock >= Entry.Start)
-			{
-				StateNotify->NotifyBegin(BuildNotifyContext(Entry));
-				Entry.bActive = true;
-			}
-
-			if (Entry.bActive)
-			{
-				if (!Entry.bFlushBound && TimelineClock >= Entry.End)
+				if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
 				{
-					StateNotify->NotifyEnd(BuildNotifyContext(Entry));
-					Entry.bActive = false;
-					Entry.bDone = true;
-				}
-				else
-				{
-					StateNotify->NotifyTick(BuildNotifyContext(Entry), DeltaTime);
+					PointNotify->Notify(BuildNotifyContext(Entry, TimelineClock, CachedLineDuration));
+					if (Serial != StateSerial) { return; }
 				}
 			}
+			continue;
 		}
-		else if (TimelineClock >= Entry.Start)
+
+		UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify);
+		if (!StateNotify)
 		{
-			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
-			{
-				PointNotify->Notify(BuildNotifyContext(Entry));
-			}
 			Entry.bDone = true;
+			continue;
 		}
+
+		if (!Entry.bActive && TimelineClock >= Entry.Start)
+		{
+			Entry.bActive = true;
+			StateNotify->NotifyBegin(BuildNotifyContext(Entry, TimelineClock, CachedLineDuration));
+			if (Serial != StateSerial) { return; }
+		}
+
+		if (!Entry.bActive)
+		{
+			continue;
+		}
+
+		if (!Entry.bFlushBound && TimelineClock >= Entry.End)
+		{
+			Entry.bActive = false;
+			Entry.bDone = true;
+			StateNotify->NotifyEnd(BuildNotifyContext(Entry, TimelineClock, CachedLineDuration));
+		}
+		else
+		{
+			StateNotify->NotifyTick(BuildNotifyContext(Entry, TimelineClock, CachedLineDuration), DeltaTime);
+		}
+		if (Serial != StateSerial) { return; }
 	}
 }
 
@@ -1102,7 +1176,6 @@ void UKzDialoguePlayer::BakeTimeline()
 {
 	ActiveNotifies.Reset();
 	TimelineClock = 0.0f;
-	CachedLineSpeaker = nullptr;
 	CachedLineDuration = 0.0f;
 
 	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
@@ -1112,10 +1185,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	}
 
 	CachedLineDuration = ResolveLineDuration(CurrentLine);
-	if (CurrentLine.Speaker.IsValid())
-	{
-		CachedLineSpeaker = UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset);
-	}
+	UKzDialogueSpeakerComponent* LineSpeaker = CurrentLine.Speaker.IsValid() ? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset) : nullptr;
 
 	FKzDialogueTimeResolveContext ResolveContext;
 	ResolveContext.LineDuration = CachedLineDuration;
@@ -1145,6 +1215,7 @@ void UKzDialoguePlayer::BakeTimeline()
 			FKzDialogueActiveNotify& Entry = ActiveNotifies.AddDefaulted_GetRef();
 			Entry.Notify = Event.Notify;
 			Event.Notify->SetOwningPlayer(this);
+			Entry.LineSpeaker = LineSpeaker;
 			Entry.bIsState = Event.Notify->IsA<UKzDialogueNotifyState>();
 			Entry.Start = Start;
 			Entry.End = FMath::Max(Start, End);
@@ -1161,43 +1232,43 @@ void UKzDialoguePlayer::FlushTimeline()
 		return;
 	}
 
-	// End active states in reverse (LIFO).
-	for (int32 Index = ActiveNotifies.Num() - 1; Index >= 0; --Index)
+	// Moved out first: an End may finish the dialogue or bake a new line, which must find an empty timeline.
+	const TArray<FKzDialogueActiveNotify> Flushed = MoveTemp(ActiveNotifies);
+	const float Clock = TimelineClock;
+	const float LineDuration = CachedLineDuration;
+
+	for (int32 Index = Flushed.Num() - 1; Index >= 0; --Index)
 	{
-		FKzDialogueActiveNotify& Entry = ActiveNotifies[Index];
+		const FKzDialogueActiveNotify& Entry = Flushed[Index];
 		if (Entry.bIsState && Entry.bActive && IsValid(Entry.Notify))
 		{
 			if (UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify))
 			{
-				StateNotify->NotifyEnd(BuildNotifyContext(Entry));
+				StateNotify->NotifyEnd(BuildNotifyContext(Entry, Clock, LineDuration));
 			}
-			Entry.bActive = false;
 		}
 	}
 
-	// Fire skipped points that opted in.
-	for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+	// Skipped points that opted in.
+	for (const FKzDialogueActiveNotify& Entry : Flushed)
 	{
 		if (!Entry.bIsState && !Entry.bDone && Entry.bFireIfSkipped && IsValid(Entry.Notify))
 		{
 			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
 			{
-				PointNotify->Notify(BuildNotifyContext(Entry));
+				PointNotify->Notify(BuildNotifyContext(Entry, Clock, LineDuration));
 			}
 		}
 	}
-
-	ActiveNotifies.Reset();
-	CachedLineSpeaker = nullptr;
 }
 
-FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry)
+FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration)
 {
 	FKzDialogueNotifyContext Context;
 	Context.Player = this;
-	Context.LineSpeaker = CachedLineSpeaker;
+	Context.LineSpeaker = Entry.LineSpeaker;
 
-	UKzDialogueSpeakerComponent* Target = CachedLineSpeaker;
+	UKzDialogueSpeakerComponent* Target = Entry.LineSpeaker;
 	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride)
 	{
 		Target = UKzDialogueSpeakerComponent::FindSpeaker(this, Entry.Notify->TargetSpeakerOverride);
@@ -1205,8 +1276,8 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogue
 
 	Context.TargetSpeaker = Target;
 	Context.TargetActor = Target ? Target->GetOwner() : nullptr;
-	Context.LineDuration = CachedLineDuration;
-	Context.CurrentTime = TimelineClock;
+	Context.LineDuration = LineDuration;
+	Context.CurrentTime = Clock;
 	Context.EventStart = Entry.Start;
 	Context.EventEnd = Entry.End;
 	return Context;

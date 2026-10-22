@@ -39,6 +39,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "General", meta = (ClampMin = 0.1))
 	float DefaultDuration = 2.5f;
 
+	/** Seconds a dialogue waits for views that claimed a phase before advancing anyway (a removed widget, a missed notify). 0 waits forever. */
+	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ClampMin = 0.0, Units = "Seconds"))
+	float ViewResponseTimeout = 10.0f;
+
 	/**
 	 * Default policy for what happens to a line's audio when the player transitions to the next line.
 	 * Lines and channels may override. An Inherit smuggled in via a hand-edited ini resolves as Stop.

@@ -98,12 +98,9 @@ void UKzDialogueAssetSession::HandleRunFinished(UKzDialoguePlayer* Player, EKzDi
 		Player->OnDialogueFinished.RemoveDynamic(this, &UKzDialogueAssetSession::HandleRunFinished);
 	}
 
-	// Chain the next run only if THIS run reached its natural end, on OUR current player, and we are not
-	// being torn down or in world teardown. Stop()/StopChannel/Deinitialize all emit Completed too, so
-	// player identity + the teardown flag are what separate "ran to its end" from "someone stopped it".
+	// Chain only when THIS run reached its natural end on OUR player and the world is not tearing down.
 	const bool bChain = (Reason == EKzDialogueFinishReason::Completed)
 		&& (Player == CurrentPlayer)
-		&& !bTearingDown
 		&& Subsystem && !Subsystem->IsDeinitializing();
 
 	CurrentPlayer = nullptr;
@@ -128,16 +125,14 @@ void UKzDialogueAssetSession::Stop()
 {
 	if (!bActive || bFinished) { return; }
 
-	bTearingDown = true;
 	if (CurrentPlayer)
 	{
-		// Player Stop() emits Completed (sync without a view, async with one). We keep the binding: the
-		// teardown flag makes HandleRunFinished resolve the session instead of chaining when it fires.
+		// Finishes as Stopped once the exit animations end (synchronously without views): HandleRunFinished resolves the session.
 		CurrentPlayer->Stop();
 	}
 	else
 	{
-		FinishSession(EKzDialogueFinishReason::Completed);
+		FinishSession(EKzDialogueFinishReason::Stopped);
 	}
 }
 
@@ -145,7 +140,6 @@ void UKzDialogueAssetSession::Interrupt()
 {
 	if (!bActive || bFinished) { return; }
 
-	bTearingDown = true;
 	if (CurrentPlayer)
 	{
 		// Synchronous: fires HandleRunFinished(Interrupted) inside this call -> FinishSession(Interrupted).

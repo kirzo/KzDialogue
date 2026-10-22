@@ -6,6 +6,8 @@
 
 #define LOCTEXT_NAMESPACE "FKzDialogueModule"
 
+DEFINE_LOG_CATEGORY(LogKzDialogue);
+
 void FKzDialogueModule::StartupModule()
 {
 #if !UE_BUILD_SHIPPING

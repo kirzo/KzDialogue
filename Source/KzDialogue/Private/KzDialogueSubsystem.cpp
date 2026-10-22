@@ -2,6 +2,7 @@
 
 #include "KzDialogueSubsystem.h"
 
+#include "KzDialogue.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
@@ -10,8 +11,6 @@
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
 #include "Sound/SoundBase.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzDialogue, Log, All);
 
 void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {

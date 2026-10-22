@@ -101,5 +101,4 @@ private:
 	bool bStartImmediately = true;
 	bool bActive = false;
 	bool bFinished = false;
-	bool bTearingDown = false;
 };
