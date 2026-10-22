@@ -278,37 +278,8 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** Text with FormatArguments applied; Text as-is when there are none (the common case). */
 	FText GetFormattedText() const;
 
-	/**
-	 * Effective audio length in seconds given the asset's full duration: the trimmed range when
-	 * AudioStartTime/AudioEndTime are set, the full length otherwise.
-	 */
-	float ResolveAudioLength(float FullDuration) const
-	{
-		const float Start = FMath::Max(0.0f, AudioStartTime);
-		if (AudioEndTime > 0.0f)
-		{
-			const float End = FullDuration > 0.0f ? FMath::Min(AudioEndTime, FullDuration) : AudioEndTime;
-			return FMath::Max(0.0f, End - Start);
-		}
-		return FMath::Max(0.0f, FullDuration - Start);
-	}
-
-	/**
-	 * Effective playback length in seconds (before TimeScale) from DurationMode, Duration, the
-	 * resolved audio length (0 if none) and the project default. Callers resolve the audio length.
-	 */
-	float ResolveDuration(float AudioLength, float DefaultDuration) const
-	{
-		switch (DurationMode)
-		{
-		case EKzLineDurationMode::Override:
-			return Duration;
-		case EKzLineDurationMode::ExtendAudio:
-			return AudioLength + Duration;
-		default:
-			return Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : DefaultDuration);
-		}
-	}
+	/** Seconds the line presents before TimeScale: DurationMode applied to the trimmed audio length, plus AudioStartDelay. LineStartDelay is not included. FullAudioDuration is the whole wave's length, 0 when there is no audio. */
+	float ResolveTotalDuration(float FullAudioDuration) const;
 
 	/**
 	 * Returns a "(Speaker) Text" formatted label for this line, suitable for editor

@@ -256,27 +256,19 @@ FGuid FKzDialogueLineCustomization::GetLineId() const
 
 float FKzDialogueLineCustomization::GetDisplayDuration() const
 {
-	// Mirror the runtime: resolve the audio length, then apply the line's DurationMode
-	// (UKzDialoguePlayer::ResolveLineDuration goes through the same FKzDialogueLine::ResolveDuration).
-	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
-	const float Default = Settings ? Settings->DefaultDuration : 2.5f;
-
 	if (StructHandle.IsValid())
 	{
 		void* RawData = nullptr;
 		if (StructHandle->GetValueData(RawData) == FPropertyAccess::Success && RawData)
 		{
 			const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
-			float AudioLength = 0.f;
-			if (USoundBase* Sound = Line->Audio.LoadSynchronous())
-			{
-				AudioLength = Line->ResolveAudioLength(Sound->GetDuration());
-			}
-			return FMath::Max(0.1f, Line->ResolveDuration(AudioLength, Default));
+			const USoundBase* Sound = Line->Audio.LoadSynchronous();
+			return FMath::Max(0.1f, Line->ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.f));
 		}
 	}
 
-	return Default;
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	return Settings ? Settings->DefaultDuration : 2.5f;
 }
 
 FReply FKzDialogueLineCustomization::OnCreateTimelineClicked()

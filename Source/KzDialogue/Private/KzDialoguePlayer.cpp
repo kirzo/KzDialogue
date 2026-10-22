@@ -549,22 +549,11 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 
 float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 {
-	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
-	const float Fallback = Settings ? Settings->DefaultDuration : 2.5f;
-
-	float AudioLength = 0.0f;
-	if (const USoundBase* Sound = Line.Audio.Get())
-	{
-		// Trimmed range when the line cuts a section out of the wave; full length otherwise.
-		AudioLength = Line.ResolveAudioLength(Sound->GetDuration());
-	}
-
-	// The audio lead extends the line: the text lives its resolved time plus the delay.
-	const float Duration = Line.ResolveDuration(AudioLength, Fallback) + FMath::Max(0.0f, Line.AudioStartDelay);
+	const USoundBase* Sound = Line.Audio.Get();
+	const float Duration = Line.ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.0f);
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
-	const float Scaled = Duration / FMath::Max(0.1f, TimeScale);
-	return FMath::Max(0.1f, Scaled);
+	return FMath::Max(0.1f, Duration / FMath::Max(0.1f, TimeScale));
 }
 
 void UKzDialoguePlayer::StartLineAudio()

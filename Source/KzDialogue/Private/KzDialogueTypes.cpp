@@ -4,10 +4,42 @@
 #include "KzDialogueAsset.h"
 #include "KzNamedTokenSubsystem.h"
 #include "KzSpeakerAsset.h"
+#include "Settings/KzDialogueSettings.h"
 
 FText FKzDialogueLine::GetFormattedText() const
 {
 	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
+}
+
+float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
+{
+	// Trimmed range when the line cuts a section out of the wave; full length otherwise.
+	float End = FullAudioDuration;
+	if (AudioEndTime > 0.0f)
+	{
+		End = FullAudioDuration > 0.0f ? FMath::Min(AudioEndTime, FullAudioDuration) : AudioEndTime;
+	}
+	const float AudioLength = FMath::Max(0.0f, End - FMath::Max(0.0f, AudioStartTime));
+
+	float Length = 0.0f;
+	switch (DurationMode)
+	{
+	case EKzLineDurationMode::Override:
+		Length = Duration;
+		break;
+	case EKzLineDurationMode::ExtendAudio:
+		Length = AudioLength + Duration;
+		break;
+	default:
+	{
+		const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+		Length = Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : (Settings ? Settings->DefaultDuration : 2.5f));
+		break;
+	}
+	}
+
+	// The audio lead extends the line: the text lives its resolved time plus the delay.
+	return Length + FMath::Max(0.0f, AudioStartDelay);
 }
 
 FText FKzDialogueSpeaker::GetDisplayLabel(const UObject* WorldContextObject) const

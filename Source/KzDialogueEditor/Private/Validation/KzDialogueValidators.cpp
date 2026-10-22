@@ -407,10 +407,8 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 		const UKzDialogueTimeline* Timeline = Dialogue->FindTimelineForLine(Line.LineId);
 		if (!Timeline) { continue; }
 
-		// Best-effort effective duration for the "past the line" check; skipped if unknown.
-		float LineDuration = Line.Duration;
 		const USoundBase* Audio = Line.Audio.IsNull() ? nullptr : Line.Audio.LoadSynchronous();
-		if (LineDuration <= 0.f && Audio) { LineDuration = Audio->GetDuration(); }
+		const float LineDuration = Line.ResolveTotalDuration(Audio ? Audio->GetDuration() : 0.f);
 
 		FKzDialogueTimeResolveContext ResolveCtx;
 		ResolveCtx.LineDuration = LineDuration;

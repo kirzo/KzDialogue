@@ -5,6 +5,7 @@
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
 #include "Sound/SoundBase.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
@@ -127,9 +128,16 @@ void SKzDialogueLinePicker::BuildAllItems()
 		return Speaker ? Speaker->GetName() + TEXT(" ") + Speaker->GetResolvedDisplayName().ToString() : FString();
 	};
 
-	// Lines
+	// Lines. The wave length comes from its registry tag: listing never loads audio.
+	const IAssetRegistry& Registry = IAssetRegistry::GetChecked();
 	for (const FKzDialogueLine& Line : AssetPtr->Lines)
 	{
+		float AudioDuration = 0.f;
+		if (!Line.Audio.IsNull())
+		{
+			Registry.GetAssetByObjectPath(Line.Audio.ToSoftObjectPath()).GetTagValue(GET_MEMBER_NAME_CHECKED(USoundBase, Duration), AudioDuration);
+		}
+
 		auto Entry = MakeShared<KzDialoguePickerInternal::FEntry>();
 		Entry->bIsAlias = false;
 		Entry->Id = Line.LineId;
@@ -137,7 +145,7 @@ void SKzDialogueLinePicker::BuildAllItems()
 		Entry->Speaker = Line.Speaker.Asset;
 		Entry->LineTags = Line.Tags;
 		Entry->bHasAudio = !Line.Audio.IsNull();
-		Entry->DefaultDuration = Line.Duration > 0.f ? Line.Duration : 2.f;
+		Entry->DefaultDuration = Line.ResolveTotalDuration(AudioDuration);
 
 		// Haystack: speaker + text, lowercase.
 		Entry->SearchHaystack = (SpeakerHaystack(Line.Speaker.Asset) + TEXT(" ") + Entry->DisplayText).ToLower();
