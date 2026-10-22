@@ -58,6 +58,11 @@ UKzDialoguePlayer* UKzDialogueSubsystem::GetOrCreatePlayer(FGameplayTag InChanne
 		return Existing->Get();
 	}
 
+	if (!UKzDialogueSettings::Get()->FindChannel(InChannel))
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s' has no definition for it or any ancestor in Project Settings -> Plugins -> KzDialogue -> Channels; using fallback values."), *InChannel.ToString());
+	}
+
 	UKzDialoguePlayer* NewPlayer = NewObject<UKzDialoguePlayer>(this);
 	NewPlayer->Channel = InChannel;
 	Players.Add(InChannel, NewPlayer);
@@ -84,7 +89,7 @@ void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialo
 }
 
 // Line-level resolution: the line's own channel, else the channel mapped to its audio's
-// SoundClass in project settings. Empty when neither applies — the chain moves to the asset.
+// SoundClass in project settings. Empty when neither applies: the chain moves to the asset.
 // The SoundClass step is skipped when the line has no audio, the audio fails to load or has
 // no SoundClass, or settings don't map it (invalid mappings also count as unmapped).
 static FGameplayTag ResolveLineLevelChannel(const FKzDialogueLine& Line)
@@ -103,17 +108,6 @@ static FGameplayTag ResolveLineLevelChannel(const FKzDialogueLine& Line)
 	}
 
 	return FGameplayTag();
-}
-
-FGameplayTag UKzDialogueSubsystem::ResolveChannel(FGameplayTag ExplicitChannel, const FKzDialogueLine& Line, const UKzDialogueAsset* Asset) const
-{
-	if (ExplicitChannel.IsValid()) { return ExplicitChannel; }
-
-	const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
-	if (LineLevel.IsValid()) { return LineLevel; }
-
-	if (IsValid(Asset) && Asset->DefaultChannel.IsValid()) { return Asset->DefaultChannel; }
-	return DefaultChannel;
 }
 
 // Returns the channel shared by every resolvable line of the alias, or empty when they disagree.
@@ -193,30 +187,6 @@ UKzDialoguePlayer* UKzDialogueSubsystem::FindPlayer(FGameplayTag InChannel) cons
 	return nullptr;
 }
 
-const FKzDialogueChannelDefinition* UKzDialogueSubsystem::FindChannelDefinition(const FGameplayTag& Tag) const
-{
-	if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
-	{
-		// Walk up the hierarchy: Dialogue.Channel.Bark.MyCharacter inherits the definition
-		// declared for Dialogue.Channel.Bark, so per-character channels need no declaration.
-		for (FGameplayTag Cursor = Tag; Cursor.IsValid(); Cursor = Cursor.RequestDirectParent())
-		{
-			if (const FKzDialogueChannelDefinition* Found = Settings->FindChannel(Cursor))
-			{
-				return Found;
-			}
-		}
-
-		if (Tag.IsValid())
-		{
-			UE_LOG(LogKzDialogue, Warning,
-				TEXT("Playing on channel '%s' with no definition for it or any ancestor in KzDialogueSettings. "
-					"Using fallback values. Consider adding it under Project Settings -> Plugins -> KzDialogue -> Channels."),
-				*Tag.ToString());
-		}
-	}
-	return nullptr;
-}
 
 int32 UKzDialogueSubsystem::ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const
 {
@@ -302,7 +272,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 
 	if (!InChannel.IsValid()) { InChannel = DefaultChannel; }
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
@@ -361,9 +331,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 {
 	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
 	// paths (PlayAssetLine/-List, PlayLineRefs) do this via ResolveAssetEntry; an ad-hoc line has none.
-	InChannel = ResolveChannel(InChannel, Line, /*Asset*/ nullptr);
+	if (!InChannel.IsValid()) { InChannel = ResolveLineLevelChannel(Line); }
+	if (!InChannel.IsValid()) { InChannel = DefaultChannel; }
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
@@ -418,7 +389,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 	// The authored entry, not the alias pick, so callers resolving ahead (async actions) land on the same player.
 	InChannel = ResolveChannelForEntry(InChannel, Asset, LineId);
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
@@ -441,7 +412,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 	// ahead stay deterministic even when entries get skipped.
 	InChannel = ResolveChannelForEntry(InChannel, Asset, LineIds[0]);
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
@@ -476,7 +447,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLi
 	const UKzDialogueAsset* FirstAsset = Refs[0].Asset.LoadSynchronous();
 	InChannel = ResolveChannelForEntry(InChannel, FirstAsset, Refs[0].LineId);
 
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, FirstAsset ? FirstAsset->Priority : InheritPriority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);

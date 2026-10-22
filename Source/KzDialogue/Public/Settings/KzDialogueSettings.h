@@ -99,7 +99,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Channels", meta = (Categories = "Dialogue.Channel"))
 	TMap<TSoftObjectPtr<USoundClass>, FGameplayTag> SoundClassChannels;
 
-	/** Lookup helper. Returns nullptr if the channel is not defined. */
+	/** The definition declared for Tag or its nearest declared ancestor, so every Dialogue.Channel.Bark.* channel uses Dialogue.Channel.Bark's. Null when none is declared. */
 	const FKzDialogueChannelDefinition* FindChannel(const FGameplayTag& Tag) const;
 
 	/** Channel mapped to a SoundClass or its nearest mapped ancestor; empty when the whole parent chain is unmapped (or maps to invalid channels). */

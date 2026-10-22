@@ -63,11 +63,14 @@ const FString& UKzDialogueSettings::GetActiveSpeakerNameFormat() const
 
 const FKzDialogueChannelDefinition* UKzDialogueSettings::FindChannel(const FGameplayTag& Tag) const
 {
-	if (!Tag.IsValid()) { return nullptr; }
-	return Channels.FindByPredicate([&Tag](const FKzDialogueChannelDefinition& Def)
+	for (FGameplayTag Cursor = Tag; Cursor.IsValid(); Cursor = Cursor.RequestDirectParent())
+	{
+		if (const FKzDialogueChannelDefinition* Found = Channels.FindByPredicate([&Cursor](const FKzDialogueChannelDefinition& Def) { return Def.Tag == Cursor; }))
 		{
-			return Def.Tag == Tag;
-		});
+			return Found;
+		}
+	}
+	return nullptr;
 }
 
 FGameplayTag UKzDialogueSettings::FindChannelForSoundClass(const USoundClass* SoundClass) const
