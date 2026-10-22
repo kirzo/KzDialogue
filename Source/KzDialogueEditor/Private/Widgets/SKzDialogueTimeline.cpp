@@ -318,20 +318,21 @@ public:
 
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
-		UKzDialogueTimeline* T = Timeline.Get();
-		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return FReply::Unhandled(); }
-
 		const float W = MyGeometry.GetLocalSize().X;
-		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
 
-		// Middle button anywhere pans the view.
+		// Middle button pans from any row, the waveform and Notifies bands included.
 		if (MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
 		{
 			bPanning = true;
 			PanLastX = LocalX;
 			return FReply::Handled().CaptureMouse(SharedThis(this));
 		}
+
+		UKzDialogueTimeline* T = Timeline.Get();
+		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return FReply::Unhandled(); }
+
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
 
 		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 		{
@@ -505,6 +506,17 @@ public:
 			return FReply::Handled();
 		}
 		return FReply::Unhandled();
+	}
+
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override
+	{
+		// A drag cut short (window switch, another button) must still close its retime transaction.
+		const bool bWasRetiming = DragIndex != INDEX_NONE && bDragStarted;
+		bPanning = false;
+		DragIndex = INDEX_NONE;
+		DragMode = EDragMode::None;
+		bDragStarted = false;
+		if (bWasRetiming) { OnEndRetime.ExecuteIfBound(); }
 	}
 
 	virtual FReply OnMouseButtonDoubleClick(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
@@ -884,6 +896,12 @@ public:
 			return FReply::Handled().ReleaseMouseCapture();
 		}
 		return FReply::Unhandled();
+	}
+
+	virtual void OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent) override
+	{
+		bPanning = false;
+		bScrubbing = false;
 	}
 
 private:

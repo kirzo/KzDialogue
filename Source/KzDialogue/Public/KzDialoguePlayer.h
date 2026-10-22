@@ -27,6 +27,9 @@ struct FKzDialogueActiveNotify
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueNotifyBase> Notify = nullptr;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UKzDialogueSpeakerComponent> LineSpeaker = nullptr;
+
 	/** Baked window in seconds. End == Start for point notifies. */
 	float Start = 0.0f;
 	float End = 0.0f;
@@ -48,20 +51,12 @@ struct FKzDialogueActiveNotify
 };
 
 /**
- * Engine of the dialogue system. Owns the state machine, drives the provider, manages
- * audio and timing, and broadcasts events for views to react to.
+ * Engine of the dialogue system: owns the state machine, drives the provider, manages audio and
+ * timing, and broadcasts events for any number of views (subtitles, history, world bubbles).
  *
- * This object is intentionally NOT a widget. Multiple views (subtitles, history log,
- * 3D worldspace billboard, accessibility caption) can listen to the same player.
- *
- * Lifecycle:
- *   1. Subsystem creates one player per channel.
- *   2. Game code calls Play(Provider).
- *   3. Player walks the state machine, broadcasting events.
- *   4. Views render in response and call Notify*Finished when their animations end.
- *   5. When done, the player returns to Idle and broadcasts OnDialogueFinished.
- *
- * Views without animations: call SetUsesFadeAnimations(false) on bind.
+ * The subsystem creates one player per channel and hands it providers. On each OnRequest* event a
+ * view that animates calls ClaimViewResponse and later the matching Notify*Finished; a phase nobody
+ * claims advances immediately, and one whose claims never resolve advances after ViewResponseTimeout.
  */
 UCLASS(BlueprintType)
 class KZDIALOGUE_API UKzDialoguePlayer : public UObject, public FTickableGameObject
@@ -75,10 +70,7 @@ public:
 	// Configuration
 	// -------------------------------------------------------------------------------
 
-	/**
-	 * Multiplies all line durations and audio fades. 1.0 = normal speed. Useful for
-	 * console-driven debugging (Kz.Dialogue.SetSpeed) and for fast-forward features.
-	 */
+	/** Playback speed of line timings (durations, gaps, audio leads); audio itself plays at normal speed. Kz.Dialogue.SetSpeed drives it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Player", meta = (ClampMin = 0.1, ClampMax = 10.0))
 	float TimeScale = 1.0f;
 
@@ -170,7 +162,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void StartDialogue();
 
-	/** Pause the player (timer, audio, view animations). No-op if Idle. */
+	/** Pause the player (timers, audio, view animations). Next() is ignored while paused. No-op if Idle. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Pause();
 
@@ -178,7 +170,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Resume();
 
-	/** Gracefully end the current line and exit the dialogue with normal animations. */
+	/** End the dialogue gracefully: the current line and the dialogue play their exit animations, no further line starts. Finishes as Stopped. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Stop();
 
@@ -190,11 +182,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Interrupt();
 
-	/**
-	 * Hard-stop every audio this player spawned — the current line's (even if still waiting on its
-	 * AudioStartDelay) and any released Continue-policy tails — without touching dialogue state.
-	 * Useful when the player is already Idle but tails are still ringing (e.g. a sequence stopped).
-	 */
+	/** Hard-stop every audio this player spawned (the current line's and released Continue-policy tails) without touching dialogue state. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void StopAllAudio(float FadeTime = 0.1f);
 
@@ -230,36 +218,35 @@ public:
 	// View binding helpers
 	// -------------------------------------------------------------------------------
 
-	/**
-	 * A view calls this while handling an OnRequest* event when it WILL present (animate) that phase and
-	 * then call the matching Notify*Finished. The player waits for every claiming view before advancing
-	 * (or advances immediately if none claim), so several views of different latency can share one player.
-	 */
+	/** Call only inside an OnRequest* handler, when the view will animate that phase and then call the matching Notify*Finished. The player waits for every claim before advancing. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
-	void ClaimViewResponse() { ++PendingViewAcks; }
+	void ClaimViewResponse();
 
 	// -------------------------------------------------------------------------------
 	// View notifications (called by views when their animations end)
 	// -------------------------------------------------------------------------------
 
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|View Notifications")
-	void NotifyEnterFinished();
+	void NotifyEnterFinished() { HandleViewAck(EKzDialogueState::Entering); }
 
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|View Notifications")
-	void NotifyExitFinished();
+	void NotifyExitFinished() { HandleViewAck(EKzDialogueState::Exiting); }
 
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|View Notifications")
-	void NotifyLineEnterFinished();
+	void NotifyLineEnterFinished() { HandleViewAck(EKzDialogueState::LineEntering); }
 
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player|View Notifications")
-	void NotifyLineExitFinished();
+	void NotifyLineExitFinished() { HandleViewAck(EKzDialogueState::LineExiting); }
 
 	// -------------------------------------------------------------------------------
 	// Queries
 	// -------------------------------------------------------------------------------
 
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
-	EKzDialogueState GetState() const { return State; }
+	EKzDialogueState GetState() const { return bPaused ? EKzDialogueState::Paused : State; }
+
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	bool IsPaused() const { return bPaused; }
 
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	bool IsPlaying() const { return State != EKzDialogueState::Idle; }
@@ -296,7 +283,9 @@ public:
 	virtual TStatId GetStatId() const override;
 
 private:
-	// State machine entry points. Each transitions and broadcasts as needed.
+	/** The only writer of State. Bumps StateSerial so code that just called out can tell the player moved on. */
+	void SetState(EKzDialogueState NewState);
+
 	void Enter_Entering();
 	void Enter_LineEntering();
 	void Enter_LinePlaying();
@@ -307,10 +296,20 @@ private:
 	void PresentLine();
 	void HandleLineStartDelayElapsed();
 
-	/** OnLineFinished + advance to the next line or Exiting. Shared by the LineExiting auto-advance and NotifyLineExitFinished. */
+	/** OnLineFinished, then the next line or Exiting. */
 	void AdvanceAfterLineExit();
+	void AdvanceToNextLine();
 
-	// Helpers.
+	/** Every claim of the current phase resolved (or none was made): move to the next phase, or on resume when paused. */
+	void OnPhaseAcksDone();
+	void HandleViewAck(EKzDialogueState Phase);
+	void ArmViewWatchdog();
+	void HandleViewWatchdogElapsed();
+
+	/** Arms a line timer, born paused when the player is paused. */
+	void ArmTimer(FTimerHandle& Handle, void (UKzDialoguePlayer::*Callback)(), float Delay);
+	void ClearTimer(FTimerHandle& Handle);
+
 	/** Starts the line audio, honoring the line's AudioStartDelay (defers via timer when > 0). */
 	void StartLineAudio();
 	/** The actual audio start: create the component, bind the envelope, play. */
@@ -339,7 +338,7 @@ private:
 	// Notify timeline driven during LinePlaying.
 	void BakeTimeline();
 	void FlushTimeline();
-	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry);
+	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration) const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueProvider> Provider = nullptr;
@@ -362,27 +361,35 @@ private:
 	/** Effective speaking tuning for the current line: speaker override else project defaults. Resolved per line. */
 	FKzSpeakingLevelSettings ActiveSpeakingSettings;
 
-	/**
-	 * Audio components from previous lines that were released to play past their line transition.
-	 * Pruned lazily; stopped on Abort/Interrupt.
-	 */
+	/** Audio components from previous lines released to play past their line transition; stopped on Abort/Interrupt. */
 	TArray<TWeakObjectPtr<UAudioComponent>> ReleasedAudios;
 
 	UPROPERTY(Transient)
 	FKzDialogueLine CurrentLine;
 
+	/** Never Paused: pause is the bPaused flag on top of the phase, so phase checks keep working while paused. */
 	UPROPERTY(Transient)
 	EKzDialogueState State = EKzDialogueState::Idle;
 
-	/**
-	 * Outstanding view presentations for the current wait-phase: reset before each OnRequest* broadcast,
-	 * bumped by ClaimViewResponse(), decremented by each Notify*Finished. The phase advances when it hits 0.
-	 */
+	uint32 StateSerial = 0;
+
+	/** Claims of the current phase not yet answered: reset before each OnRequest* broadcast. */
 	int32 PendingViewAcks = 0;
 
-	EKzDialogueState StateBeforePause = EKzDialogueState::Idle;
+	bool bPaused = false;
+
+	/** The current phase's claims resolved while paused. */
+	bool bAdvanceOnResume = false;
+
+	/** Stop() was called: the current line exits and no further line starts. */
+	bool bStopRequested = false;
+
+	/** The current line got past its LineStartDelay gap (OnLineStarted fired). */
+	bool bLinePresented = false;
 
 	FTimerHandle LineTimerHandle;
+
+	FTimerHandle ViewWatchdogHandle;
 
 	/** Pending deferred audio start for the current line (AudioStartDelay > 0). */
 	FTimerHandle AudioDelayTimerHandle;
@@ -397,9 +404,6 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<FKzDialogueActiveNotify> ActiveNotifies;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UKzDialogueSpeakerComponent> CachedLineSpeaker = nullptr;
 
 	/** The evaluator clock: elapsed line time in seconds. */
 	float TimelineClock = 0.0f;

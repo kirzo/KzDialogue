@@ -198,6 +198,12 @@ FReply SKzAudioRangeStrip::OnMouseButtonUp(const FGeometry& /*MyGeometry*/, cons
 	return FReply::Handled().ReleaseMouseCapture();
 }
 
+void SKzAudioRangeStrip::OnMouseCaptureLost(const FCaptureLostEvent& CaptureLostEvent)
+{
+	// A drag cut short (window switch, another button) is cancelled: nothing was committed yet.
+	Drag = EDragEdge::None;
+}
+
 FCursorReply SKzAudioRangeStrip::OnCursorQuery(const FGeometry& MyGeometry, const FPointerEvent& CursorEvent) const
 {
 	if (Drag != EDragEdge::None || HitTestEdge(MyGeometry, CursorEvent.GetScreenSpacePosition()) != EDragEdge::None)
