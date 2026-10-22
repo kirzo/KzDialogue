@@ -175,25 +175,19 @@ void UKzSpeakerAsset::RefreshMetadata()
 	// A referenced shared word wins: the inline text empties so the localization gather
 	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not
 	// FText::IsEmpty: a keyed empty text can display a stale translation and lie.
-	auto EnforceWordWins = [&bDirty](FKzWordText& Field)
+	ForEachLocalizedField([&bDirty](const TCHAR*, FText& Text, uint32&, FKzWordText* WordText)
 	{
-		const FString* Source = FTextInspector::GetSourceString(Field.Text);
-		if (Field.Word && ((Source && !Source->IsEmpty()) || FTextInspector::GetNamespace(Field.Text).IsSet()))
+		const FString* Source = FTextInspector::GetSourceString(Text);
+		if (WordText && WordText->Word && ((Source && !Source->IsEmpty()) || FTextInspector::GetNamespace(Text).IsSet()))
 		{
-			Field.Text = FText::GetEmpty();
+			Text = FText::GetEmpty();
 			bDirty = true;
 		}
-	};
-	EnforceWordWins(GivenName);
-	EnforceWordWins(FamilyName);
-	EnforceWordWins(SecondFamilyName);
-	EnforceWordWins(Honorific);
-	EnforceWordWins(Qualifier);
-	EnforceWordWins(NickName);
+	});
 
 	bDirty |= RebindFTextKeys();
 
-	auto RefreshHash = [&bDirty](const FText& Text, uint32& Hash)
+	ForEachLocalizedField([&bDirty](const TCHAR*, const FText& Text, uint32& Hash, FKzWordText*)
 	{
 		const uint32 NewHash = KzComputeSourceTextHash(Text);
 		if (NewHash != Hash)
@@ -201,14 +195,7 @@ void UKzSpeakerAsset::RefreshMetadata()
 			Hash = NewHash;
 			bDirty = true;
 		}
-	};
-	RefreshHash(DisplayName, SourceDisplayNameHash);
-	RefreshHash(GivenName.Text, SourceGivenNameHash);
-	RefreshHash(FamilyName.Text, SourceFamilyNameHash);
-	RefreshHash(SecondFamilyName.Text, SourceSecondFamilyNameHash);
-	RefreshHash(Honorific.Text, SourceHonorificHash);
-	RefreshHash(Qualifier.Text, SourceQualifierHash);
-	RefreshHash(NickName.Text, SourceNickNameHash);
+	});
 
 	if (bDirty)
 	{
@@ -223,13 +210,10 @@ bool UKzSpeakerAsset::RebindFTextKeys()
 	const FString Namespace = FString::Printf(TEXT("KzSpeaker.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
 	bool bChanged = false;
-	bChanged |= KzAnchorText(DisplayName, Namespace, TEXT("DisplayName"));
-	bChanged |= KzAnchorText(GivenName.Text, Namespace, TEXT("GivenName"));
-	bChanged |= KzAnchorText(FamilyName.Text, Namespace, TEXT("FamilyName"));
-	bChanged |= KzAnchorText(SecondFamilyName.Text, Namespace, TEXT("SecondFamilyName"));
-	bChanged |= KzAnchorText(Honorific.Text, Namespace, TEXT("Honorific"));
-	bChanged |= KzAnchorText(Qualifier.Text, Namespace, TEXT("Qualifier"));
-	bChanged |= KzAnchorText(NickName.Text, Namespace, TEXT("NickName"));
+	ForEachLocalizedField([&bChanged, &Namespace](const TCHAR* Key, FText& Text, uint32&, FKzWordText*)
+	{
+		bChanged |= KzAnchorText(Text, Namespace, Key);
+	});
 	return bChanged;
 }
 

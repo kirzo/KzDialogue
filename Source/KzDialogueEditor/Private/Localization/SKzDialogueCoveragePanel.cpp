@@ -458,10 +458,10 @@ void SKzDialogueCoveragePanel::Refresh()
 		for (UKzSpeakerAsset* Speaker : Speakers)
 		{
 			if (bSpeakerFilterActive && Speaker->GetName() != SpeakerFilter) { continue; }
-			for (const FKzWordText* Field : { &Speaker->GivenName, &Speaker->FamilyName, &Speaker->Honorific, &Speaker->Qualifier })
+			Speaker->ForEachLocalizedField([&WordSet](const TCHAR*, const FText&, uint32, FKzWordText* WordText)
 			{
-				if (Field->Word) { WordSet.Add(Field->Word); }
-			}
+				if (WordText && WordText->Word) { WordSet.Add(WordText->Word); }
+			});
 		}
 
 		// Project scope without a speaker filter: every word asset, token-referenced or not.
@@ -728,14 +728,10 @@ void SKzDialogueCoveragePanel::Refresh()
 			{
 				if (bSpeakerFilterActive && Speaker->GetName() != SpeakerFilter) { continue; }
 
-				auto Prefix = [Speaker](const TCHAR* Field) { return FString::Printf(TEXT("(%s) %s"), *Speaker->GetName(), Field); };
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("DisplayName")), Speaker->DisplayName, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("GivenName")), Speaker->GivenName.Text, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("FamilyName")), Speaker->FamilyName.Text, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("SecondFamilyName")), Speaker->SecondFamilyName.Text, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("Honorific")), Speaker->Honorific.Text, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("Qualifier")), Speaker->Qualifier.Text, SpeakerClickTip);
-				AddAssetTextRow(SpeakerGroup, Speaker, Prefix(TEXT("NickName")), Speaker->NickName.Text, SpeakerClickTip);
+				Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
+				{
+					AddAssetTextRow(SpeakerGroup, Speaker, FString::Printf(TEXT("(%s) %s"), *Speaker->GetName(), Key), Text, SpeakerClickTip);
+				});
 			}
 		}
 

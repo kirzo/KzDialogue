@@ -97,6 +97,12 @@ public:
 	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. bWithFamily covers both surname components. Overridden atoms flow into the composition. */
 	FText ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily = true, const FKzNamedTokenOverride* Overrides = nullptr) const;
 
+	/** Calls Func(Key, Text, SourceHash, WordText) for every localizable name field; Key is its stable localization key, WordText is null for DisplayName. */
+	template <typename FuncType>
+	void ForEachLocalizedField(FuncType&& Func) { VisitLocalizedFields(*this, Func); }
+	template <typename FuncType>
+	void ForEachLocalizedField(FuncType&& Func) const { VisitLocalizedFields(*this, Func); }
+
 	//~ UKzNamedAsset: parts are given / family / family2 / nick / honorific / qualifier / gender / display / fullname (structured composition even when DisplayName is set) / no-honorific / no-qualifier / no-family (composition without either surname: "Teen Kirzo"); None or unknown = GetResolvedDisplayName.
 	virtual FText ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const override;
 
@@ -118,4 +124,17 @@ private:
 	/** Re-anchor every localizable FText to its stable GUID-derived (Namespace, Key). True when a text changed. */
 	bool RebindFTextKeys();
 #endif
+
+private:
+	template <typename SelfType, typename FuncType>
+	static void VisitLocalizedFields(SelfType& Self, FuncType& Func)
+	{
+		Func(TEXT("DisplayName"), Self.DisplayName, Self.SourceDisplayNameHash, static_cast<decltype(&Self.GivenName)>(nullptr));
+		Func(TEXT("GivenName"), Self.GivenName.Text, Self.SourceGivenNameHash, &Self.GivenName);
+		Func(TEXT("FamilyName"), Self.FamilyName.Text, Self.SourceFamilyNameHash, &Self.FamilyName);
+		Func(TEXT("SecondFamilyName"), Self.SecondFamilyName.Text, Self.SourceSecondFamilyNameHash, &Self.SecondFamilyName);
+		Func(TEXT("Honorific"), Self.Honorific.Text, Self.SourceHonorificHash, &Self.Honorific);
+		Func(TEXT("Qualifier"), Self.Qualifier.Text, Self.SourceQualifierHash, &Self.Qualifier);
+		Func(TEXT("NickName"), Self.NickName.Text, Self.SourceNickNameHash, &Self.NickName);
+	}
 };

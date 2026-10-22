@@ -716,31 +716,17 @@ void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAss
 	const FName Id = GetValidatorId();
 	const FString ExpectedNamespace = FString::Printf(TEXT("KzSpeaker.%s"), *Speaker->AssetId.ToString(EGuidFormats::Digits));
 
-	struct FKzNamedField { const TCHAR* Key; const FText& Text; };
-	const FKzNamedField Fields[] = {
-		{ TEXT("DisplayName"), Speaker->DisplayName },
-		{ TEXT("GivenName"), Speaker->GivenName.Text },
-		{ TEXT("FamilyName"), Speaker->FamilyName.Text },
-		{ TEXT("SecondFamilyName"), Speaker->SecondFamilyName.Text },
-		{ TEXT("Honorific"), Speaker->Honorific.Text },
-		{ TEXT("Qualifier"), Speaker->Qualifier.Text },
-		{ TEXT("NickName"), Speaker->NickName.Text },
-	};
-
-	// Key anchoring. Self-heals on resave. Culture-invariant fields are deliberately
-	// non-localizable and carry no key on purpose.
-	for (const FKzNamedField& Field : Fields)
+	// Flags exactly what the resave rebind would change.
+	Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
 	{
-		if (Field.Text.IsEmpty() || Field.Text.IsCultureInvariant()) { continue; }
-		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Field.Text);
-		const TOptional<FString> Key = FTextInspector::GetKey(Field.Text);
-		if (!Namespace.IsSet() || !Key.IsSet() || Namespace.GetValue() != ExpectedNamespace || Key.GetValue() != Field.Key)
+		FText Anchored = Text;
+		if (KzAnchorText(Anchored, ExpectedNamespace, Key))
 		{
 			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning,
-				FText::Format(LOCTEXT("SpeakerUnstableKey", "{0} is not anchored to its stable localization key; resave the asset to rebind it."), FText::FromString(Field.Key)),
+				FText::Format(LOCTEXT("SpeakerUnstableKey", "{0} is not anchored to its stable localization key; resave the asset to rebind it."), FText::FromString(Key)),
 				Id));
 		}
-	}
+	});
 
 	// Stale name translations, against the localization target archives.
 	FKzLocTargetInfo Target;
@@ -754,20 +740,19 @@ void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAss
 	{
 		if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr)) { continue; }
 
-		for (const FKzNamedField& Field : Fields)
+		Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
 		{
-			if (Field.Text.IsEmpty()) { continue; }
-			const FString* SourceString = FTextInspector::GetSourceString(Field.Text);
-			if (!SourceString) { continue; }
+			const FString* SourceString = FTextInspector::GetSourceString(Text);
+			if (Text.IsEmpty() || !SourceString) { return; }
 
-			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(ExpectedNamespace), FLocKey(Field.Key), nullptr);
+			const TSharedPtr<FArchiveEntry> Entry = LocHelper.FindTranslation(Culture, FLocKey(ExpectedNamespace), FLocKey(Key), nullptr);
 			if (Entry.IsValid() && !Entry->Translation.Text.IsEmpty() && Entry->Source.Text != *SourceString)
 			{
 				OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning,
-					FText::Format(LOCTEXT("SpeakerStaleTranslation", "{0}: the '{1}' translation predates the current name; needs review."), FText::FromString(Field.Key), FText::FromString(Culture)),
+					FText::Format(LOCTEXT("SpeakerStaleTranslation", "{0}: the '{1}' translation predates the current name; needs review."), FText::FromString(Key), FText::FromString(Culture)),
 					Id));
 			}
-		}
+		});
 	}
 }
 

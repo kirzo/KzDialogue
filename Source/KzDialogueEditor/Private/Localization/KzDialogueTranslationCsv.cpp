@@ -724,7 +724,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 		const FString SpeakerPath = Speaker->GetPathName();
 		const FString SpeakerLabel = Speaker->GetResolvedDisplayName().ToString();
 
-		auto AddSpeakerRow = [&](const FText& Source, uint32 SourceHash)
+		Speaker->ForEachLocalizedField([&](const TCHAR*, const FText& Source, uint32 SourceHash, const FKzWordText*)
 		{
 			const TOptional<FString> Namespace = FTextInspector::GetNamespace(Source);
 			const TOptional<FString> Key = FTextInspector::GetKey(Source);
@@ -749,15 +749,7 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 			Csv += CsvEscape(StaleTranslation);
 			Csv += LINE_TERMINATOR;
 			++NumRows;
-		};
-
-		AddSpeakerRow(Speaker->DisplayName, Speaker->SourceDisplayNameHash);
-		AddSpeakerRow(Speaker->GivenName.Text, Speaker->SourceGivenNameHash);
-		AddSpeakerRow(Speaker->FamilyName.Text, Speaker->SourceFamilyNameHash);
-		AddSpeakerRow(Speaker->SecondFamilyName.Text, Speaker->SourceSecondFamilyNameHash);
-		AddSpeakerRow(Speaker->Honorific.Text, Speaker->SourceHonorificHash);
-		AddSpeakerRow(Speaker->Qualifier.Text, Speaker->SourceQualifierHash);
-		AddSpeakerRow(Speaker->NickName.Text, Speaker->SourceNickNameHash);
+		});
 	}
 
 	// Asset-less rows (empty Asset column marks them): the manifest validates them at
@@ -962,13 +954,10 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		}
 		else if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
 		{
-			if (Key == TEXT("DisplayName")) { SourceText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
-			else if (Key == TEXT("GivenName")) { SourceText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
-			else if (Key == TEXT("FamilyName")) { SourceText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
-			else if (Key == TEXT("SecondFamilyName")) { SourceText = &SpeakerAsset->SecondFamilyName.Text; CurrentHash = SpeakerAsset->SourceSecondFamilyNameHash; }
-			else if (Key == TEXT("Honorific")) { SourceText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
-			else if (Key == TEXT("Qualifier")) { SourceText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
-			else if (Key == TEXT("NickName")) { SourceText = &SpeakerAsset->NickName.Text; CurrentHash = SpeakerAsset->SourceNickNameHash; }
+			SpeakerAsset->ForEachLocalizedField([&](const TCHAR* FieldKey, const FText& Text, uint32 Hash, const FKzWordText*)
+			{
+				if (Key == FieldKey) { SourceText = &Text; CurrentHash = Hash; }
+			});
 		}
 
 		if (!SourceText)
@@ -1317,13 +1306,10 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 	for (const UKzSpeakerAsset* Speaker : Speakers)
 	{
 		const TArray<FString> Comments = { FString::Printf(TEXT("Speaker asset: %s"), *Speaker->GetName()) };
-		AppendPoText(Entries, Speaker->DisplayName, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->GivenName.Text, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->FamilyName.Text, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->SecondFamilyName.Text, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->Honorific.Text, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->Qualifier.Text, CopyTemp(Comments));
-		AppendPoText(Entries, Speaker->NickName.Text, CopyTemp(Comments));
+		Speaker->ForEachLocalizedField([&Entries, &Comments](const TCHAR*, const FText& Text, uint32, const FKzWordText*)
+		{
+			AppendPoText(Entries, Text, CopyTemp(Comments));
+		});
 	}
 
 	// Shared word assets: global vocabulary, present in every export so the glossary
@@ -2158,13 +2144,10 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		}
 		else if (UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
 		{
-			if (Key == TEXT("DisplayName")) { TargetText = &SpeakerAsset->DisplayName; CurrentHash = SpeakerAsset->SourceDisplayNameHash; }
-			else if (Key == TEXT("GivenName")) { TargetText = &SpeakerAsset->GivenName.Text; CurrentHash = SpeakerAsset->SourceGivenNameHash; }
-			else if (Key == TEXT("FamilyName")) { TargetText = &SpeakerAsset->FamilyName.Text; CurrentHash = SpeakerAsset->SourceFamilyNameHash; }
-			else if (Key == TEXT("SecondFamilyName")) { TargetText = &SpeakerAsset->SecondFamilyName.Text; CurrentHash = SpeakerAsset->SourceSecondFamilyNameHash; }
-			else if (Key == TEXT("Honorific")) { TargetText = &SpeakerAsset->Honorific.Text; CurrentHash = SpeakerAsset->SourceHonorificHash; }
-			else if (Key == TEXT("Qualifier")) { TargetText = &SpeakerAsset->Qualifier.Text; CurrentHash = SpeakerAsset->SourceQualifierHash; }
-			else if (Key == TEXT("NickName")) { TargetText = &SpeakerAsset->NickName.Text; CurrentHash = SpeakerAsset->SourceNickNameHash; }
+			SpeakerAsset->ForEachLocalizedField([&](const TCHAR* FieldKey, FText& Text, uint32 Hash, FKzWordText*)
+			{
+				if (Key == FieldKey) { TargetText = &Text; CurrentHash = Hash; }
+			});
 		}
 
 		if (!TargetText)
