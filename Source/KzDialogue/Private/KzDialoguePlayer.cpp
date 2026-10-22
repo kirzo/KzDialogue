@@ -73,7 +73,7 @@ void UKzDialoguePlayer::SetProvider(UKzDialogueProvider* InProvider)
 {
 	if (!IsValid(InProvider)) return;
 
-	if (IsPlaying())
+	if (IsPlaying() || IsValid(Provider))
 	{
 		Abort();
 	}
@@ -141,6 +141,8 @@ void UKzDialoguePlayer::Stop()
 {
 	if (State == EKzDialogueState::Idle)
 	{
+		// A dialogue set up but never started still reports its end to whoever waits on it.
+		if (IsValid(Provider)) { FinishWithReason(EKzDialogueFinishReason::Stopped); }
 		return;
 	}
 
@@ -175,6 +177,7 @@ void UKzDialoguePlayer::Abort()
 	{
 		// Continue-policy tails may outlive the dialogue: a hard stop on an idle player silences the channel.
 		StopReleasedAudios(0.0f);
+		if (IsValid(Provider)) { FinishWithReason(EKzDialogueFinishReason::Aborted); }
 		return;
 	}
 
@@ -188,6 +191,7 @@ void UKzDialoguePlayer::Interrupt()
 	if (State == EKzDialogueState::Idle)
 	{
 		StopReleasedAudios(0.1f);
+		if (IsValid(Provider)) { FinishWithReason(EKzDialogueFinishReason::Interrupted); }
 		return;
 	}
 

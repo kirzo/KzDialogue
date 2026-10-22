@@ -96,6 +96,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")
 	int32 CurrentPriority = 0;
 
+	/** Whether the playing dialogue lets an equal or higher priority take the channel (its asset's bInterruptible; ad-hoc lines always do). */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")
+	bool bCurrentInterruptible = true;
+
 	// -------------------------------------------------------------------------------
 	// Outgoing events
 	// -------------------------------------------------------------------------------

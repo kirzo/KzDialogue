@@ -75,11 +75,9 @@ public:
 	static constexpr int32 InheritPriority = -1;
 
 	/**
-	 * Play a provider on a given channel, respecting priority.
-	 * Returns the player that is now playing it, or nullptr if rejected (lower priority
-	 * than current and channel/asset don't allow interruption).
-	 *
-	 * Pass InheritPriority to fall back to the asset hint / channel default.
+	 * Play a provider on a channel. An equal or higher priority takes the channel unless the channel or
+	 * the playing dialogue refuse interruption; a channel only playing its exit animations takes anything.
+	 * Returns the player, or nullptr when refused. InheritPriority falls back to the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
 	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
@@ -123,7 +121,7 @@ public:
 	/**
 	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
 	 * sequential dialogue. Aliases are resolved at launch (stateful); entries that fail to
-	 * resolve are skipped. No asset priority hint applies: explicit Priority, else channel default.
+	 * resolve are skipped. The first ref's asset gives the channel, priority hint and interruptibility.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
 	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
@@ -219,8 +217,22 @@ private:
 	 *  Bark.* channel uses it). Null and a warning when no ancestor is declared either. */
 	const FKzDialogueChannelDefinition* FindChannelDefinition(const FGameplayTag& Tag) const;
 
-	/** True if the dialogue currently playing on this player allows being interrupted. */
-	bool IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const;
+	enum class EKzPlayAdmission : uint8
+	{
+		Admitted,
+		RejectedPriority,
+		RejectedNotInterruptible,
+		RejectedDeinitializing
+	};
+
+	/** The single gate every play request passes BEFORE anything with side effects (alias state, providers) runs. */
+	EKzPlayAdmission Admit(const UKzDialoguePlayer& Player, int32 Priority, const FKzDialogueChannelDefinition* ChannelDef) const;
+
+	/** Ends whatever occupies the admitted player and starts Provider on it. Null when a listener of that ending took the channel first. */
+	UKzDialoguePlayer* StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode);
+
+	/** Plays one resolved line on an admitted player: hot-swaps a playing manual line, else starts a fresh manual provider. */
+	UKzDialoguePlayer* CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible, bool bStartImmediately);
 
 	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
 	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);

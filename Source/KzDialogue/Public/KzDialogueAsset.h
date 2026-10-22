@@ -46,7 +46,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	FGameplayTagContainer Tags;
 
-	/** When true, a higher-priority dialogue may interrupt this one mid-line. */
+	/** When false, no request takes this dialogue's channel while it plays, whatever its priority. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	bool bInterruptible = true;
 

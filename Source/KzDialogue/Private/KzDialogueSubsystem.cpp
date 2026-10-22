@@ -43,7 +43,8 @@ void UKzDialogueSubsystem::Deinitialize()
 	}
 	AssetSessions.Reset();
 
-	StopAll();
+	// Hard stop: no exit animations, and Admit refuses whatever the finish handlers request now.
+	InterruptAll();
 	Players.Reset();
 	Super::Deinitialize();
 }
@@ -235,6 +236,63 @@ EKzDialogueAdvanceMode UKzDialogueSubsystem::ResolveAdvanceMode(EKzDialogueAdvan
 	return EKzDialogueAdvanceMode::Automatic;
 }
 
+UKzDialogueSubsystem::EKzPlayAdmission UKzDialogueSubsystem::Admit(const UKzDialoguePlayer& Player, int32 Priority, const FKzDialogueChannelDefinition* ChannelDef) const
+{
+	EKzPlayAdmission Result = EKzPlayAdmission::Admitted;
+	if (bDeinitializing)
+	{
+		Result = EKzPlayAdmission::RejectedDeinitializing;
+	}
+	else if (!Player.IsPlaying() && !IsValid(Player.GetProvider()))
+	{
+		return EKzPlayAdmission::Admitted;
+	}
+	else if (Player.GetState() == EKzDialogueState::Exiting)
+	{
+		// Only its exit animations are left: the channel is as good as free.
+		return EKzPlayAdmission::Admitted;
+	}
+	else if (Player.CurrentPriority > Priority)
+	{
+		Result = EKzPlayAdmission::RejectedPriority;
+	}
+	else if ((ChannelDef && !ChannelDef->bAllowInterruption) || !Player.bCurrentInterruptible)
+	{
+		Result = EKzPlayAdmission::RejectedNotInterruptible;
+	}
+
+	if (Result != EKzPlayAdmission::Admitted)
+	{
+		static const TCHAR* Reasons[] = { TEXT("admitted"), TEXT("a higher priority holds it"), TEXT("the playing dialogue is not interruptible"), TEXT("the world is tearing down") };
+		UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s' refused a priority %d request: %s."), *Player.Channel.ToString(), Priority, Reasons[static_cast<int32>(Result)]);
+	}
+	return Result;
+}
+
+UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+{
+	if (Player.IsPlaying() || IsValid(Player.GetProvider()))
+	{
+		Player.Interrupt();
+		if (Player.IsPlaying() || IsValid(Player.GetProvider()))
+		{
+			return nullptr;
+		}
+	}
+
+	Player.CurrentPriority = Priority;
+	Player.bCurrentInterruptible = bInterruptible;
+	// Inherit at this level means "no asset to resolve against" (manual providers): fall to Automatic.
+	Player.AdvanceMode = (AdvanceMode == EKzDialogueAdvanceMode::Inherit) ? EKzDialogueAdvanceMode::Automatic : AdvanceMode;
+	Player.SetProvider(Provider);
+
+	if (bStartImmediately)
+	{
+		Player.StartDialogue();
+	}
+	return &Player;
+}
+
 UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Provider))
@@ -248,44 +306,11 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
-	if (!IsValid(Player))
+	if (!IsValid(Player) || Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted)
 	{
 		return nullptr;
 	}
-
-	if (Player->IsPlaying())
-	{
-		// Higher priority always loses (refuse).
-		if (Player->CurrentPriority > ResolvedPriority)
-		{
-			return nullptr;
-		}
-
-		// Equal-or-lower priority: both the channel and the active asset must agree to
-		// interruption (AND). This keeps "non-interruptible" guarantees consistent
-		// regardless of which side declared them.
-		const bool bChannelAllows = !ChannelDef || ChannelDef->bAllowInterruption;
-		const bool bAssetAllows = IsActiveDialogueInterruptible(Player);
-
-		if (!bChannelAllows || !bAssetAllows)
-		{
-			return nullptr;
-		}
-
-		Player->Interrupt();
-	}
-
-	Player->CurrentPriority = ResolvedPriority;
-	// Inherit at this level means "no asset to resolve against" (manual providers): fall to Automatic.
-	Player->AdvanceMode = (AdvanceMode == EKzDialogueAdvanceMode::Inherit) ? EKzDialogueAdvanceMode::Automatic : AdvanceMode;
-	Player->SetProvider(Provider);
-
-	if (bStartImmediately)
-	{
-		Player->StartDialogue();
-	}
-
-	return Player;
+	return StartOnPlayer(*Player, Provider, ResolvedPriority, /*bInterruptible=*/true, bStartImmediately, AdvanceMode);
 }
 
 UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
@@ -325,6 +350,13 @@ void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)
 	}
 }
 
+// Anti-spam: the same line is already showing through a manual provider.
+static bool IsPlayingManualLine(const UKzDialoguePlayer& Player, const FGuid& LineId)
+{
+	const UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
+	return ManualProv && ManualProv->Line.LineId == LineId;
+}
+
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
 	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
@@ -337,38 +369,27 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return nullptr; }
 
-	// Reject if the channel is busy with a higher-priority dialogue.
-	if (Player->IsPlaying() && Player->CurrentPriority > ResolvedPriority) { return nullptr; }
+	if (IsPlayingManualLine(*Player, Line.LineId)) { return Player; }
+	if (Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
+	return CommitLine(*Player, Line, ResolvedPriority, /*bInterruptible=*/true, bStartImmediately);
+}
 
-	if (Player->IsPlaying())
+UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible, bool bStartImmediately)
+{
+	if (IsPlayingManualLine(Player, Line.LineId)) { return &Player; }
+
+	// Hot-swap inside the manual provider: a line fade instead of a full exit and enter (Sequencer lines back to back).
+	UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
+	if (ManualProv && Player.GetState() != EKzDialogueState::Exiting)
 	{
-		// Hot-swap inside the manual provider: a line fade instead of a full exit and enter (Sequencer lines back to back).
-		if (UKzManualDialogueProvider* ManualProv = Cast<UKzManualDialogueProvider>(Player->GetProvider()))
-		{
-			if (ManualProv->Line.LineId == Line.LineId)
-			{
-				return Player;
-			}
-
-			if (Player->GetState() != EKzDialogueState::Exiting)
-			{
-				const bool bChannelAllows = !ChannelDef || ChannelDef->bAllowInterruption;
-				const bool bAssetAllows = IsActiveDialogueInterruptible(Player);
-				if (!bChannelAllows || !bAssetAllows)
-				{
-					return nullptr;
-				}
-
-				Player->CurrentPriority = ResolvedPriority;
-				ManualProv->SetLine(Line);
-				Player->Next();
-				return Player;
-			}
-		}
+		Player.CurrentPriority = Priority;
+		Player.bCurrentInterruptible = bInterruptible;
+		ManualProv->SetLine(Line);
+		Player.Next();
+		return &Player;
 	}
 
-	UKzManualDialogueProvider* Provider = UKzManualDialogueProvider::Create(this, Line);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+	return StartOnPlayer(Player, UKzManualDialogueProvider::Create(this, Line), Priority, bInterruptible, bStartImmediately, EKzDialogueAdvanceMode::Automatic);
 }
 
 bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine)
@@ -392,23 +413,40 @@ bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGui
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
-	FKzDialogueLine Line;
-	if (!ResolveAssetEntry(Asset, LineId, Line))
-	{
-		return nullptr;
-	}
+	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
 
 	// The authored entry, not the alias pick, so callers resolving ahead (async actions) land on the same player.
 	InChannel = ResolveChannelForEntry(InChannel, Asset, LineId);
 
-	return PlayLine(Line, InChannel, Priority != InheritPriority ? Priority : Asset->Priority, bStartImmediately);
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
+
+	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
+	if (!IsValid(Player)) { return nullptr; }
+
+	if (IsPlayingManualLine(*Player, LineId)) { return Player; }
+	if (Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
+
+	// Aliases resolve only once admitted, so a refused request leaves their cooldown and shuffle bag untouched.
+	FKzDialogueLine Line;
+	if (!ResolveAssetEntry(Asset, LineId, Line)) { return nullptr; }
+	return CommitLine(*Player, Line, ResolvedPriority, Asset->bInterruptible, bStartImmediately);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset) || LineIds.IsEmpty()) { return nullptr; }
 
-	// Resolve every entry up-front (aliases go through the stateful resolver, like PlayAssetLine).
+	// First-entry rule: the channel resolves from the first AUTHORED entry, so callers resolving
+	// ahead stay deterministic even when entries get skipped.
+	InChannel = ResolveChannelForEntry(InChannel, Asset, LineIds[0]);
+
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
+
+	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
+	if (!IsValid(Player) || Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
+
 	TArray<FKzDialogueLine> Lines;
 	Lines.Reserve(LineIds.Num());
 
@@ -427,20 +465,22 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 	if (Lines.IsEmpty()) { return nullptr; }
 
-	// First-entry rule: the session channel resolves from the first AUTHORED entry, so
-	// pre-play resolution by callers stays deterministic even when entries get skipped.
-	InChannel = ResolveChannelForEntry(InChannel, Asset, LineIds[0]);
-
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
-	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/Asset->Priority, ChannelDef);
-
-	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately, AdvanceMode);
+	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, Asset->bInterruptible, bStartImmediately, AdvanceMode);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
 {
 	if (Refs.IsEmpty()) { return nullptr; }
+
+	// First-entry rule, on the first AUTHORED ref (see PlayAssetLineList).
+	const UKzDialogueAsset* FirstAsset = Refs[0].Asset.LoadSynchronous();
+	InChannel = ResolveChannelForEntry(InChannel, FirstAsset, Refs[0].LineId);
+
+	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
+	const int32 ResolvedPriority = ResolvePriority(Priority, FirstAsset ? FirstAsset->Priority : InheritPriority, ChannelDef);
+
+	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
+	if (!IsValid(Player) || Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
 
 	TArray<FKzDialogueLine> Lines;
 	Lines.Reserve(Refs.Num());
@@ -464,14 +504,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLi
 
 	if (Lines.IsEmpty()) { return nullptr; }
 
-	// First-entry rule, on the first AUTHORED ref (see PlayAssetLineList).
-	InChannel = ResolveChannelForEntry(InChannel, Refs[0].Asset.LoadSynchronous(), Refs[0].LineId);
-
-	const FKzDialogueChannelDefinition* ChannelDef = FindChannelDefinition(InChannel);
-	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
-
-	UKzLineListDialogueProvider* Provider = UKzLineListDialogueProvider::Create(this, Lines);
-	return Play(Provider, InChannel, ResolvedPriority, bStartImmediately);
+	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, !FirstAsset || FirstAsset->bInterruptible, bStartImmediately, EKzDialogueAdvanceMode::Automatic);
 }
 
 void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
@@ -526,28 +559,6 @@ void UKzDialogueSubsystem::GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers)
 	{
 		if (IsValid(Pair.Value)) { OutPlayers.Add(Pair.Value); }
 	}
-}
-
-bool UKzDialogueSubsystem::IsActiveDialogueInterruptible(const UKzDialoguePlayer* Player) const
-{
-	if (!IsValid(Player) || !Player->IsPlaying()) { return true; }
-
-	// Manual providers (single ad-hoc lines) are always interruptible — they have no
-	// associated asset to consult.
-	const UKzDialogueProvider* Provider = Player->GetProvider();
-	if (!IsValid(Provider) || Provider->IsA<UKzManualDialogueProvider>())
-	{
-		return true;
-	}
-
-	// Asset-backed providers consult the asset.
-	if (const UKzAssetDialogueProvider* AssetProvider = Cast<UKzAssetDialogueProvider>(Provider))
-	{
-		return !IsValid(AssetProvider->Asset) || AssetProvider->Asset->bInterruptible;
-	}
-
-	// Unknown provider type: assume interruptible to avoid soft-locks.
-	return true;
 }
 
 void UKzDialogueSubsystem::ResetAliasState(FGuid AliasId)
