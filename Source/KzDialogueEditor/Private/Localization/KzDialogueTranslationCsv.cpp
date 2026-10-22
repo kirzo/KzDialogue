@@ -238,12 +238,16 @@ namespace
 		return Plain.FindChar(Char, Index) ? Accented[Index] : Char;
 	}
 
-	/** Machine pseudo-translation: accented letters, ~40% length padding and bracket delimiters. Format syntax survives verbatim: "{...}" arguments, backtick escapes and the "|keyword" of modifiers, so runtime formatting keeps working. */
+	/** Machine pseudo-translation: accented letters, ~40% length padding and bracket delimiters. Format syntax survives verbatim ("{...}" arguments, backtick escapes, "|keyword" of modifiers, plural and ordinal form keys) so runtime formatting keeps working. */
 	FString MakePseudoTranslation(const FString& Source)
 	{
 		FString Out;
 		Out.Reserve(Source.Len() * 2 + 8);
 		Out += TEXT("[");
+
+		enum class EFormArgs : uint8 { None, Key, Value };
+		EFormArgs FormArgs = EFormArgs::None;
+		bool bInQuote = false;
 
 		int32 BraceDepth = 0;
 		for (int32 i = 0; i < Source.Len(); ++i)
@@ -266,13 +270,49 @@ namespace
 				Out.AppendChar(Char);
 				continue;
 			}
+
+			// Inside "|plural(one=..., other=...)" the engine matches the form keys literally.
+			if (FormArgs != EFormArgs::None)
+			{
+				if (Char == TEXT('"'))
+				{
+					bInQuote = !bInQuote;
+				}
+				else if (!bInQuote && Char == TEXT(')'))
+				{
+					FormArgs = EFormArgs::None;
+				}
+				else if (!bInQuote && Char == TEXT(','))
+				{
+					FormArgs = EFormArgs::Key;
+				}
+				else if (FormArgs == EFormArgs::Key)
+				{
+					if (Char == TEXT('=')) { FormArgs = EFormArgs::Value; }
+				}
+				else
+				{
+					Out.AppendChar(PseudoAccent(Char));
+					continue;
+				}
+				Out.AppendChar(Char);
+				continue;
+			}
+
 			if (Char == TEXT('|'))
 			{
-				// "|gender(", "|plural(": the keyword is parser syntax, its arguments are not.
-				Out.AppendChar(Char);
+				// The keyword is parser syntax; gender arguments are plain text.
+				FString Keyword;
 				while (i + 1 < Source.Len() && FChar::IsAlpha(Source[i + 1]))
 				{
+					Keyword.AppendChar(Source[++i]);
+				}
+				Out.AppendChar(Char);
+				Out += Keyword;
+				if ((Keyword == TEXT("plural") || Keyword == TEXT("ordinal")) && i + 1 < Source.Len() && Source[i + 1] == TEXT('('))
+				{
 					Out.AppendChar(Source[++i]);
+					FormArgs = EFormArgs::Key;
 				}
 				continue;
 			}
@@ -1207,7 +1247,13 @@ namespace
 				Po += LINE_TERMINATOR;
 				for (const FString& Comment : Entry.Comments)
 				{
-					Po += FString::Printf(TEXT("#. %s") LINE_TERMINATOR, *Comment);
+					// A bare line inside an entry breaks PO parsers: every comment line needs its own marker.
+					TArray<FString> CommentLines;
+					NormalizeNewlines(Comment).ParseIntoArray(CommentLines, TEXT("\n"), false);
+					for (const FString& CommentLine : CommentLines)
+					{
+						Po += FString::Printf(TEXT("#. %s") LINE_TERMINATOR, *CommentLine);
+					}
 				}
 
 				FString ArchiveSource;
@@ -1408,10 +1454,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		return false;
 	}
 
-	// Entries validate against the MANIFEST: an entry whose msgid no longer matches the
-	// gathered source was translated against old text and is skipped as drifted. Fuzzy
-	// entries (our stale exports) are unconfirmed work and skip too; translators clear the
-	// flag when they revise the translation.
+	// A msgid that no longer matches the manifest source is drifted. Fuzzy entries are unconfirmed work: translators clear the flag when they revise them.
 	auto ProcessEntry = [&LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
 	{
 		const FString Ctxt = PoUnescape(RawCtxt);
@@ -1474,19 +1517,22 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		return Value.Len() >= 2 && Value.StartsWith(TEXT("\"")) && Value.EndsWith(TEXT("\"")) ? Value.Mid(1, Value.Len() - 2) : FString();
 	};
 
+	auto FlushEntry = [&]()
+	{
+		if (!bSeenStr) { return; }
+		ProcessEntry(Ctxt, Id, Str, bFuzzy);
+		Ctxt.Reset(); Id.Reset(); Str.Reset();
+		bSeenStr = false;
+		bFuzzy = false;
+	};
+
 	for (const FString& RawLine : FileLines)
 	{
 		const FString Line = RawLine.TrimStartAndEnd();
 
 		if (Line.StartsWith(TEXT("msgctxt ")) || Line.StartsWith(TEXT("msgid ")))
 		{
-			if (bSeenStr)
-			{
-				ProcessEntry(Ctxt, Id, Str, bFuzzy);
-				Ctxt.Reset(); Id.Reset(); Str.Reset();
-				bSeenStr = false;
-				bFuzzy = false;
-			}
+			FlushEntry();
 			if (Line.StartsWith(TEXT("msgctxt ")))
 			{
 				Ctxt = Quoted(Line.Mid(8));
@@ -1510,7 +1556,8 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		}
 		else
 		{
-			// Flag comments precede their entry; anything else just ends a string continuation.
+			// A blank or comment line closes the previous entry, so a flag comment belongs to the next one.
+			FlushEntry();
 			if (Line.StartsWith(TEXT("#,")) && Line.Contains(TEXT("fuzzy")))
 			{
 				bFuzzy = true;
@@ -1518,10 +1565,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 			Continuation = nullptr;
 		}
 	}
-	if (bSeenStr)
-	{
-		ProcessEntry(Ctxt, Id, Str, bFuzzy);
-	}
+	FlushEntry();
 
 	if (OutStats.Imported > 0)
 	{

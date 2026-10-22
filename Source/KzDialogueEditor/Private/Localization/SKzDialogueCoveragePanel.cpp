@@ -1455,9 +1455,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 							.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
 					]
 			]
-			// Divider at the row's half, then this culture's translation, editable in place:
-			// committing (Enter or focus loss) writes straight into the culture's archive.
-			// Esc reverts; empty commits are ignored. Native-card rows have no column.
+			// This culture's translation, edited in place: a commit writes the archive, Esc reverts, empty commits are ignored.
 			+ SHorizontalBox::Slot().AutoWidth().Padding(6.0f, 0.0f)
 			[
 				SNew(SSeparator)
@@ -1474,6 +1472,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter or Tab: it is written into this culture's archive and the focus moves to the next row.")
 						: Entry.Translation)
 					.SelectAllTextWhenFocused(true)
+					.RevertTextOnEscape(true)
 					.ClearKeyboardFocusOnCommit(true)
 					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
 					{
@@ -1492,16 +1491,15 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 						bAdvanceTranslationFocus = false;
 						if (CommitType == ETextCommit::OnCleared) { return; }
 
-						const FString NewTranslation = NewText.ToString();
-						if (!NewTranslation.IsEmpty() && NewTranslation != Previous.ToString())
+						// The text box hands multi-line text back with CRLF; the archive stores LF.
+						const FString NewTranslation = NewText.ToString().Replace(TEXT("\r\n"), TEXT("\n"));
+						if (!NewTranslation.IsEmpty() && NewTranslation != Previous.ToString().Replace(TEXT("\r\n"), TEXT("\n")))
 						{
 							CommitTranslation(Culture, Identities, TranslationSource, NewTranslation, bAdvance ? NextEditorKeysAfter(EditorKey) : TArray<FString>());
 						}
 						else if (bAdvance)
 						{
-							// Nothing to write (unchanged or empty): skip straight to the next row.
-							// Deferred one tick: the editor clears the keyboard focus right after
-							// this callback and would stomp an immediate jump.
+							// Deferred a tick: the editor clears the keyboard focus right after this callback.
 							FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this)), Keys = NextEditorKeysAfter(EditorKey)](float)
 							{
 								if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
