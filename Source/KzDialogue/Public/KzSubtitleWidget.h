@@ -272,8 +272,14 @@ private:
 	/** Re-evaluates the muted set; hides views that become muted and re-shows ones that no longer are. */
 	void RefreshMuteStates();
 
-	/** Stops the player's in-flight animations (their finish notifies the player) and hides its view. */
-	void ApplyMute(UKzDialoguePlayer* InPlayer);
+	/** Stops the player's in-flight animations (their finish notifies the player) and snaps its view to the hidden baseline. */
+	void HardResetView(UKzDialoguePlayer* InPlayer);
+
+	/** Answers every claim still pending for InPlayer (all players when null), for a view that stops listening mid-animation. */
+	void ReleaseClaims(const UKzDialoguePlayer* InPlayer);
+
+	/** The Notify*Finished matching the slot Anim occupies in the player's view. */
+	void DispatchViewAck(UKzDialoguePlayer& Player, const UWidgetAnimation* Anim);
 
 	/** Re-shows the player's view mid-line after a mute is lifted. */
 	void SyncViewToPlayer(UKzDialoguePlayer* InPlayer);

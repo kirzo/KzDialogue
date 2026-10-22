@@ -261,6 +261,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	FKzDialogueLine GetCurrentLine() const { return CurrentLine; }
 
+	/** The current line's id, without copying the line. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	FGuid GetCurrentLineId() const { return CurrentLine.LineId; }
+
 	/** Current line's speaking amplitude (channel-level / whoever's talking). For per-character mouth, read the SpeakerComponent's gated GetSpeakingLevel. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	float GetSpeakingLevel() const { return SpeakingLevel; }

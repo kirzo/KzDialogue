@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Customizations/KzDialogueLineFromAssetRowCustomizer.h"
+#include "KzDialogueAudition.h"
 #include "Widgets/SKzDialogueLinePicker.h"
 
 #include "KzDialogueAsset.h"
@@ -12,9 +13,7 @@
 #include "ScopedTransaction.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 
-#include "Components/AudioComponent.h"
 #include "Framework/Application/SlateApplication.h"
-#include "Sound/SoundBase.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
@@ -22,11 +21,6 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueLineFromAssetRowCustomizer"
-
-FKzDialogueLineFromAssetRowCustomizer::~FKzDialogueLineFromAssetRowCustomizer()
-{
-	StopActiveAudition();
-}
 
 TSharedRef<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildLeadingWidget(TSharedPtr<IPropertyHandle> Handle)
 {
@@ -204,43 +198,17 @@ bool FKzDialogueLineFromAssetRowCustomizer::TryResolveLine(TSharedPtr<IPropertyH
 
 bool FKzDialogueLineFromAssetRowCustomizer::IsAuditioning(TSharedPtr<IPropertyHandle> Handle) const
 {
-	if (!ActiveEntryId.IsValid()) { return false; }
-	return ReadGuid(Handle) == ActiveEntryId && ActivePreviewAudio.IsValid() && ActivePreviewAudio->IsPlaying();
+	return KzDialogueAudition::IsPlayingLine(ReadGuid(Handle));
 }
 
 FReply FKzDialogueLineFromAssetRowCustomizer::OnPlayClicked(TSharedPtr<IPropertyHandle> Handle)
 {
-	// Toggle: if this is the entry currently playing, stop it.
-	if (IsAuditioning(Handle))
-	{
-		StopActiveAudition();
-		return FReply::Handled();
-	}
-
-	StopActiveAudition();
-
 	FKzDialogueLine Line;
-	if (!TryResolveLine(Handle, Line) || !GEditor) { return FReply::Handled(); }
-
-	USoundBase* Sound = Line.Audio.LoadSynchronous();
-	if (!Sound) { return FReply::Handled(); }
-
-	// PlayPreviewSound spawns and manages the component itself.
-	ActivePreviewAudio = GEditor->PlayPreviewSound(Sound);
-	ActiveEntryId = ReadGuid(Handle);
-
-	return FReply::Handled();
-}
-
-void FKzDialogueLineFromAssetRowCustomizer::StopActiveAudition()
-{
-	if (GEditor)
+	if (TryResolveLine(Handle, Line))
 	{
-		// Kills any preview sound. Safe to call when nothing is playing.
-		GEditor->ResetPreviewAudioComponent();
+		KzDialogueAudition::ToggleLine(Line);
 	}
-	ActivePreviewAudio = nullptr;
-	ActiveEntryId = FGuid();
+	return FReply::Handled();
 }
 
 FGuid FKzDialogueLineFromAssetRowCustomizer::ReadGuid(TSharedPtr<IPropertyHandle> Handle) const

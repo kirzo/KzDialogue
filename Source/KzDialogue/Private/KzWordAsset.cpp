@@ -123,49 +123,24 @@ void UKzWordAsset::RefreshMetadata()
 		MarkPackageDirty();
 	}
 
-	// Texts whose SOURCE went empty keep no identity: a keyed empty can resolve a stale
-	// translation as its display string and read as non-empty everywhere.
-	auto ResetKeyedEmpty = [this](FText& InText)
+	if (RebindFTextKeys())
 	{
-		if (FTextInspector::GetNamespace(InText).IsSet() && KzIsTextSourceEmpty(InText))
-		{
-			InText = FText::GetEmpty();
-			MarkPackageDirty();
-		}
-	};
-	ResetKeyedEmpty(Text);
-	for (TPair<EKzGender, FText>& Form : GenderForms)
-	{
-		ResetKeyedEmpty(Form.Value);
+		MarkPackageDirty();
 	}
-
-	RebindFTextKeys();
 }
 
-void UKzWordAsset::RebindFTextKeys()
+bool UKzWordAsset::RebindFTextKeys()
 {
-	if (!AssetId.IsValid()) { return; }
+	if (!AssetId.IsValid()) { return false; }
 
 	const FString Namespace = FString::Printf(TEXT("KzWord.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
-	// A text the user marked as non-localizable (culture invariant) keeps that choice:
-	// ChangeKey would rebuild it as localizable, silently reverting the checkbox. Empty
-	// texts stay keyless: a keyed empty can pick up a stale translation as its display
-	// string and read as non-empty everywhere downstream.
-	auto Rebind = [&Namespace](FText& InText, const FString& Key)
-	{
-		const FString* Source = FTextInspector::GetSourceString(InText);
-		if (Source && !Source->IsEmpty() && !InText.IsCultureInvariant())
-		{
-			InText = FText::ChangeKey(Namespace, Key, InText);
-		}
-	};
-
-	Rebind(Text, TEXT("Text"));
+	bool bChanged = KzAnchorText(Text, Namespace, TEXT("Text"));
 	for (TPair<EKzGender, FText>& Form : GenderForms)
 	{
-		Rebind(Form.Value, FString::Printf(TEXT("Text_%s"), *StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key))));
+		bChanged |= KzAnchorText(Form.Value, Namespace, FString::Printf(TEXT("Text_%s"), *StaticEnum<EKzGender>()->GetNameStringByValue(static_cast<int64>(Form.Key))));
 	}
+	return bChanged;
 }
 
 #endif

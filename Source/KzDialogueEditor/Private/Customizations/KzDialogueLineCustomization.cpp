@@ -1,6 +1,7 @@
 ﻿// Copyright 2026 kirzo
 
 #include "Customizations/KzDialogueLineCustomization.h"
+#include "KzDialogueAudition.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueAsset.h"
@@ -15,7 +16,6 @@
 #include "ScopedTransaction.h"
 #include "Utils/KzEditorUtils.h"
 
-#include "Editor.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
@@ -26,7 +26,6 @@
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Widgets/SKzTokenTextEditor.h"
 
-#include "Components/AudioComponent.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 
@@ -36,11 +35,6 @@
 TSharedRef<IPropertyTypeCustomization> FKzDialogueLineCustomization::MakeInstance()
 {
 	return MakeShared<FKzDialogueLineCustomization>();
-}
-
-FKzDialogueLineCustomization::~FKzDialogueLineCustomization()
-{
-	StopRangeAudition();
 }
 
 void FKzDialogueLineCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> StructPropertyHandle, FDetailWidgetRow& HeaderRow, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
@@ -222,73 +216,16 @@ void FKzDialogueLineCustomization::AddAudioRangeRow(IDetailGroup& AudioGroup)
 
 bool FKzDialogueLineCustomization::IsAuditioningRange() const
 {
-	return RangePreviewAudio.IsValid() && RangePreviewAudio->IsPlaying();
-}
-
-void FKzDialogueLineCustomization::StopRangeAudition()
-{
-	if (RangeStopTicker.IsValid())
-	{
-		FTSTicker::GetCoreTicker().RemoveTicker(RangeStopTicker);
-		RangeStopTicker.Reset();
-	}
-	if (GEditor)
-	{
-		GEditor->ResetPreviewAudioComponent();
-	}
-	RangePreviewAudio = nullptr;
+	return KzDialogueAudition::IsPlayingLine(GetLineId());
 }
 
 FReply FKzDialogueLineCustomization::OnPlayRangeClicked()
 {
-	// Toggle off when this row's preview is the one playing.
-	if (IsAuditioningRange())
-	{
-		StopRangeAudition();
-		return FReply::Handled();
-	}
-
-	StopRangeAudition();
-
 	void* RawData = nullptr;
-	if (!StructHandle.IsValid() || StructHandle->GetValueData(RawData) != FPropertyAccess::Success || !RawData || !GEditor)
+	if (StructHandle.IsValid() && StructHandle->GetValueData(RawData) == FPropertyAccess::Success && RawData)
 	{
-		return FReply::Handled();
+		KzDialogueAudition::ToggleLine(*reinterpret_cast<const FKzDialogueLine*>(RawData));
 	}
-	const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
-	USoundBase* Sound = Line->Audio.LoadSynchronous();
-	if (!Sound)
-	{
-		return FReply::Handled();
-	}
-
-	UAudioComponent* Preview = GEditor->PlayPreviewSound(Sound);
-	if (!Preview)
-	{
-		return FReply::Handled();
-	}
-	RangePreviewAudio = Preview;
-
-	// Same behavior as the runtime player: start at the offset, cut at the end time.
-	const float Start = FMath::Max(0.0f, Line->AudioStartTime);
-	if (Start > 0.0f)
-	{
-		Preview->Stop();
-		Preview->Play(Start);
-	}
-	if (Line->AudioEndTime > 0.0f)
-	{
-		const float StopIn = FMath::Max(0.05f, Line->AudioEndTime - Start);
-		RangeStopTicker = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAudio = RangePreviewAudio](float)
-		{
-			if (UAudioComponent* Audio = WeakAudio.Get())
-			{
-				Audio->FadeOut(0.1f, 0.0f);
-			}
-			return false;   // one-shot
-		}), StopIn);
-	}
-
 	return FReply::Handled();
 }
 

@@ -144,7 +144,7 @@ private:
 	/** Editor-only invariant pass: ensures unique GUIDs, anchors FText keys, and refreshes source text hashes. Idempotent. */
 	void RefreshLineMetadata();
 
-	/** Re-anchor every FText in the asset to its stable, GUID-derived (Namespace, Key). Idempotent. */
-	void RebindFTextKeys();
+	/** Re-anchor every FText in the asset to its stable, GUID-derived (Namespace, Key). True when a text changed. */
+	bool RebindFTextKeys();
 #endif
 };

@@ -172,25 +172,6 @@ void UKzSpeakerAsset::RefreshMetadata()
 		bDirty = true;
 	}
 
-	// Texts whose SOURCE went empty keep no identity: a keyed empty can resolve a stale
-	// translation as its display string and read as non-empty everywhere. Self-heals assets
-	// keyed back when the rebind did not skip empties yet.
-	auto ResetKeyedEmpty = [&bDirty](FText& InText)
-	{
-		if (FTextInspector::GetNamespace(InText).IsSet() && KzIsTextSourceEmpty(InText))
-		{
-			InText = FText::GetEmpty();
-			bDirty = true;
-		}
-	};
-	ResetKeyedEmpty(DisplayName);
-	ResetKeyedEmpty(GivenName.Text);
-	ResetKeyedEmpty(FamilyName.Text);
-	ResetKeyedEmpty(SecondFamilyName.Text);
-	ResetKeyedEmpty(Honorific.Text);
-	ResetKeyedEmpty(Qualifier.Text);
-	ResetKeyedEmpty(NickName.Text);
-
 	// A referenced shared word wins: the inline text empties so the localization gather
 	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not
 	// FText::IsEmpty: a keyed empty text can display a stale translation and lie.
@@ -210,7 +191,7 @@ void UKzSpeakerAsset::RefreshMetadata()
 	EnforceWordWins(Qualifier);
 	EnforceWordWins(NickName);
 
-	RebindFTextKeys();
+	bDirty |= RebindFTextKeys();
 
 	auto RefreshHash = [&bDirty](const FText& Text, uint32& Hash)
 	{
@@ -235,31 +216,21 @@ void UKzSpeakerAsset::RefreshMetadata()
 	}
 }
 
-void UKzSpeakerAsset::RebindFTextKeys()
+bool UKzSpeakerAsset::RebindFTextKeys()
 {
-	if (!AssetId.IsValid()) { return; }
+	if (!AssetId.IsValid()) { return false; }
 
 	const FString Namespace = FString::Printf(TEXT("KzSpeaker.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
-	// A text the user marked as non-localizable (culture invariant) keeps that choice:
-	// ChangeKey would rebuild it as localizable, silently reverting the checkbox. Empty
-	// texts stay keyless: a keyed empty can pick up a stale translation as its display
-	// string and read as non-empty everywhere downstream.
-	auto Rebind = [&Namespace](FText& Text, const TCHAR* Key)
-	{
-		const FString* Source = FTextInspector::GetSourceString(Text);
-		if (Source && !Source->IsEmpty() && !Text.IsCultureInvariant())
-		{
-			Text = FText::ChangeKey(Namespace, Key, Text);
-		}
-	};
-	Rebind(DisplayName, TEXT("DisplayName"));
-	Rebind(GivenName.Text, TEXT("GivenName"));
-	Rebind(FamilyName.Text, TEXT("FamilyName"));
-	Rebind(SecondFamilyName.Text, TEXT("SecondFamilyName"));
-	Rebind(Honorific.Text, TEXT("Honorific"));
-	Rebind(Qualifier.Text, TEXT("Qualifier"));
-	Rebind(NickName.Text, TEXT("NickName"));
+	bool bChanged = false;
+	bChanged |= KzAnchorText(DisplayName, Namespace, TEXT("DisplayName"));
+	bChanged |= KzAnchorText(GivenName.Text, Namespace, TEXT("GivenName"));
+	bChanged |= KzAnchorText(FamilyName.Text, Namespace, TEXT("FamilyName"));
+	bChanged |= KzAnchorText(SecondFamilyName.Text, Namespace, TEXT("SecondFamilyName"));
+	bChanged |= KzAnchorText(Honorific.Text, Namespace, TEXT("Honorific"));
+	bChanged |= KzAnchorText(Qualifier.Text, Namespace, TEXT("Qualifier"));
+	bChanged |= KzAnchorText(NickName.Text, Namespace, TEXT("NickName"));
+	return bChanged;
 }
 
 #endif

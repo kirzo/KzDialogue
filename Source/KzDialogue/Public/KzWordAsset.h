@@ -62,8 +62,8 @@ private:
 	/** Editor-only invariant pass: AssetId and stable FText keys. Idempotent. */
 	void RefreshMetadata();
 
-	/** Re-anchor every localizable FText to its stable GUID-derived (Namespace, Key). Idempotent. */
-	void RebindFTextKeys();
+	/** Re-anchor every localizable FText to its stable GUID-derived (Namespace, Key). True when a text changed. */
+	bool RebindFTextKeys();
 #endif
 };
 

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Internationalization/TextNamespaceUtil.h"
 #include "KzNamedAsset.generated.h"
 
 struct FKzNamedTokenOverride;
@@ -14,6 +15,33 @@ FORCEINLINE bool KzIsTextSourceEmpty(const FText& Text)
 	const FString* Source = FTextInspector::GetSourceString(Text);
 	return !Source || Source->IsEmpty();
 }
+
+#if WITH_EDITOR
+/**
+ * Anchors an authored text to its plugin-managed (Namespace, Key). Culture-invariant and string-table
+ * texts are left alone; a text whose source went empty loses its key instead. True when it changed.
+ */
+inline bool KzAnchorText(FText& Text, const FString& Namespace, const FString& Key)
+{
+	if (Text.IsCultureInvariant() || Text.IsFromStringTable()) { return false; }
+
+	const TOptional<FString> CurrentNamespace = FTextInspector::GetNamespace(Text);
+	if (KzIsTextSourceEmpty(Text))
+	{
+		if (!CurrentNamespace.IsSet()) { return false; }
+		Text = FText::GetEmpty();
+		return true;
+	}
+
+	const TOptional<FString> CurrentKey = FTextInspector::GetKey(Text);
+	if (CurrentNamespace.IsSet() && CurrentKey.IsSet() && TextNamespaceUtil::StripPackageNamespace(CurrentNamespace.GetValue()) == Namespace && CurrentKey.GetValue() == Key)
+	{
+		return false;
+	}
+	Text = FText::ChangeKey(Namespace, Key, Text);
+	return true;
+}
+#endif
 
 /**
  * Something with a proper name that text can reference by token: a character, a place, an

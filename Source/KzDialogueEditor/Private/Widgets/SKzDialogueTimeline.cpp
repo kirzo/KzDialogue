@@ -941,6 +941,11 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 	EventDetailsView = PropertyModule.CreateStructureDetailView(DetailsArgs, StructArgs, nullptr, FText::GetEmpty());
 	EventDetailsView->GetOnFinishedChangingPropertiesDelegate().AddSP(this, &SKzDialogueTimeline::OnEventDetailsChanged);
 
+	if (GEditor)
+	{
+		GEditor->RegisterForUndo(this);
+	}
+
 	Rebuild();
 }
 
@@ -1067,12 +1072,27 @@ void SKzDialogueTimeline::PanView(float DeltaSeconds)
 	Invalidate(EInvalidateWidgetReason::Paint);
 }
 
-FKzDialogueNotifyEvent* SKzDialogueTimeline::SelectedEvent() const
+FKzDialogueNotifyEvent* SKzDialogueTimeline::FindEvent(int32 TrackIndex, int32 EventIndex) const
 {
 	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(SelTrack)) { return nullptr; }
-	FKzDialogueNotifyTrack& Track = T->Tracks[SelTrack];
-	return Track.Events.IsValidIndex(SelEvent) ? &Track.Events[SelEvent] : nullptr;
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return nullptr; }
+	FKzDialogueNotifyTrack& Track = T->Tracks[TrackIndex];
+	return Track.Events.IsValidIndex(EventIndex) ? &Track.Events[EventIndex] : nullptr;
+}
+
+void SKzDialogueTimeline::EditTimeline(const FText& Title, TFunctionRef<void(UKzDialogueTimeline&)> Edit, bool bRebuild)
+{
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T) { return; }
+
+	const FScopedTransaction Transaction(Title);
+	T->Modify();
+	Edit(*T);
+	Modified();
+	if (bRebuild)
+	{
+		Rebuild();
+	}
 }
 
 void SKzDialogueTimeline::Modified()
@@ -1791,17 +1811,13 @@ FName SKzDialogueTimeline::GetNewTrackName() const
 
 void SKzDialogueTimeline::AddTrack()
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("AddTrackTransaction", "Add Notify Track"));
-	T->Modify();
-
-	FKzDialogueNotifyTrack NewTrack;
-	NewTrack.Name = GetNewTrackName();
-	T->Tracks.Add(NewTrack);
-	bNotifiesExpanded = true;
-	Modified();
-	Rebuild();
+	EditTimeline(LOCTEXT("AddTrackTransaction", "Add Notify Track"), [this](UKzDialogueTimeline& T)
+	{
+		FKzDialogueNotifyTrack NewTrack;
+		NewTrack.Name = GetNewTrackName();
+		T.Tracks.Add(NewTrack);
+		bNotifiesExpanded = true;
+	});
 }
 
 void SKzDialogueTimeline::RemoveTrack(int32 TrackIndex)
@@ -1809,49 +1825,52 @@ void SKzDialogueTimeline::RemoveTrack(int32 TrackIndex)
 	UKzDialogueTimeline* T = Timeline.Get();
 	// Keep at least one track; deleting the last one is what "Delete timeline" is for.
 	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || T->Tracks.Num() <= 1) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("RemoveTrackTransaction", "Delete Notify Track"));
-	T->Modify();
-	T->Tracks.RemoveAt(TrackIndex);
-	if (SelTrack == TrackIndex) { SelTrack = INDEX_NONE; SelEvent = INDEX_NONE; }
-	else if (SelTrack > TrackIndex) { --SelTrack; }
-	Modified();
-	Rebuild();
+
+	EditTimeline(LOCTEXT("RemoveTrackTransaction", "Delete Notify Track"), [this, TrackIndex](UKzDialogueTimeline& Edited)
+	{
+		Edited.Tracks.RemoveAt(TrackIndex);
+		if (SelTrack == TrackIndex) { SelTrack = INDEX_NONE; SelEvent = INDEX_NONE; }
+		else if (SelTrack > TrackIndex) { --SelTrack; }
+	});
 }
 
 void SKzDialogueTimeline::RenameTrack(int32 TrackIndex, const FText& NewName)
 {
 	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return; }
-	T->Modify();
-	T->Tracks[TrackIndex].Name = FName(*NewName.ToString());
-	Modified();
+	const FName Name(*NewName.ToString());
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || T->Tracks[TrackIndex].Name == Name) { return; }
+
+	// No rebuild: the committing name box already shows the new name and must outlive its own callback.
+	EditTimeline(LOCTEXT("RenameTrackTransaction", "Rename Notify Track"), [TrackIndex, Name](UKzDialogueTimeline& Edited)
+	{
+		Edited.Tracks[TrackIndex].Name = Name;
+	}, /*bRebuild=*/false);
 }
 
 void SKzDialogueTimeline::AddEventAt(int32 TrackIndex, UClass* NotifyClass, float TimeSeconds)
 {
 	UKzDialogueTimeline* T = Timeline.Get();
 	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !NotifyClass) { return; }
-	T->Modify();
 
-	FKzDialogueNotifyEvent NewEvent;
-	NewEvent.Notify = NewObject<UKzDialogueNotifyBase>(T, NotifyClass, NAME_None, RF_Transactional);
-	if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+	EditTimeline(LOCTEXT("AddEventTransaction", "Add Dialogue Notify"), [this, TrackIndex, NotifyClass, TimeSeconds](UKzDialogueTimeline& Edited)
 	{
-		Rel->Time = FMath::Max(0.f, TimeSeconds);
-
-		// State notifies span a window, so give them a non-zero default duration that fits.
-		if (NotifyClass->IsChildOf(UKzDialogueNotifyState::StaticClass()))
+		FKzDialogueNotifyEvent NewEvent;
+		NewEvent.Notify = NewObject<UKzDialogueNotifyBase>(&Edited, NotifyClass, NAME_None, RF_Transactional);
+		if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
 		{
-			const float Remaining = FMath::Max(0.f, Duration() - Rel->Time);
-			Rel->Duration = FMath::Clamp(0.5f, 0.1f, FMath::Max(0.1f, Remaining));
-		}
-	}
+			Rel->Time = FMath::Max(0.f, TimeSeconds);
 
-	const int32 NewIndex = T->Tracks[TrackIndex].Events.Add(NewEvent);
-	SelTrack = TrackIndex;
-	SelEvent = NewIndex;
-	Modified();
-	Rebuild();
+			// State notifies span a window, so give them a non-zero default duration that fits.
+			if (NotifyClass->IsChildOf(UKzDialogueNotifyState::StaticClass()))
+			{
+				const float Remaining = FMath::Max(0.f, Duration() - Rel->Time);
+				Rel->Duration = FMath::Clamp(0.5f, 0.1f, FMath::Max(0.1f, Remaining));
+			}
+		}
+
+		SelTrack = TrackIndex;
+		SelEvent = Edited.Tracks[TrackIndex].Events.Add(NewEvent);
+	});
 }
 
 void SKzDialogueTimeline::RemoveSelected()
@@ -1861,76 +1880,70 @@ void SKzDialogueTimeline::RemoveSelected()
 
 void SKzDialogueTimeline::RemoveEvent(int32 TrackIndex, int32 EventIndex)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("DeleteEventTransaction", "Delete Dialogue Notify"));
-	T->Modify();
-	T->Tracks[TrackIndex].Events.RemoveAt(EventIndex);
-	if (SelTrack == TrackIndex)
+	if (!FindEvent(TrackIndex, EventIndex)) { return; }
+
+	EditTimeline(LOCTEXT("DeleteEventTransaction", "Delete Dialogue Notify"), [this, TrackIndex, EventIndex](UKzDialogueTimeline& Edited)
 	{
-		if (SelEvent == EventIndex) { SelEvent = INDEX_NONE; }
-		else if (SelEvent > EventIndex) { --SelEvent; }
-	}
-	Modified();
-	Rebuild();
+		Edited.Tracks[TrackIndex].Events.RemoveAt(EventIndex);
+		if (SelTrack == TrackIndex)
+		{
+			if (SelEvent == EventIndex) { SelEvent = INDEX_NONE; }
+			else if (SelEvent > EventIndex) { --SelEvent; }
+		}
+	});
 }
 
 void SKzDialogueTimeline::ToggleEventEnabled(int32 TrackIndex, int32 EventIndex)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("ToggleEnabledTransaction", "Toggle Dialogue Notify"));
-	T->Modify();
-	bool& bEnabled = T->Tracks[TrackIndex].Events[EventIndex].bEnabled;
-	bEnabled = !bEnabled;
-	Modified();
-	Rebuild();
+	if (!FindEvent(TrackIndex, EventIndex)) { return; }
+
+	EditTimeline(LOCTEXT("ToggleEnabledTransaction", "Toggle Dialogue Notify"), [TrackIndex, EventIndex](UKzDialogueTimeline& Edited)
+	{
+		bool& bEnabled = Edited.Tracks[TrackIndex].Events[EventIndex].bEnabled;
+		bEnabled = !bEnabled;
+	});
 }
 
 void SKzDialogueTimeline::DuplicateEvent(int32 TrackIndex, int32 EventIndex)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("DuplicateEventTransaction", "Duplicate Dialogue Notify"));
-	T->Modify();
+	if (!FindEvent(TrackIndex, EventIndex)) { return; }
 
-	// Read every field of the source before Add (which may reallocate the array).
-	const FKzDialogueNotifyEvent& Src = T->Tracks[TrackIndex].Events[EventIndex];
-	FKzDialogueNotifyEvent NewEvent;
-	NewEvent.TimeSource = Src.TimeSource;
-	NewEvent.bFireIfSkipped = Src.bFireIfSkipped;
-	NewEvent.bEnabled = Src.bEnabled;
-	NewEvent.Notify = Src.Notify ? DuplicateObject<UKzDialogueNotifyBase>(Src.Notify, T) : nullptr;
-
-	// Nudge the copy off the original so it is selectable.
-	if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+	EditTimeline(LOCTEXT("DuplicateEventTransaction", "Duplicate Dialogue Notify"), [this, TrackIndex, EventIndex](UKzDialogueTimeline& Edited)
 	{
-		const float Offset = Rel->bNormalized ? 0.02f : 0.1f;
-		const float MaxTime = Rel->bNormalized ? 1.f : Duration();
-		Rel->Time = FMath::Min(Rel->Time + Offset, MaxTime);
-	}
+		// Read every field of the source before Add (which may reallocate the array).
+		const FKzDialogueNotifyEvent& Src = Edited.Tracks[TrackIndex].Events[EventIndex];
+		FKzDialogueNotifyEvent NewEvent;
+		NewEvent.TimeSource = Src.TimeSource;
+		NewEvent.bFireIfSkipped = Src.bFireIfSkipped;
+		NewEvent.bEnabled = Src.bEnabled;
+		NewEvent.Notify = Src.Notify ? DuplicateObject<UKzDialogueNotifyBase>(Src.Notify, &Edited) : nullptr;
 
-	const int32 NewIndex = T->Tracks[TrackIndex].Events.Add(NewEvent);
-	SelTrack = TrackIndex;
-	SelEvent = NewIndex;
-	Modified();
-	Rebuild();
+		// Nudge the copy off the original so it is selectable.
+		if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+		{
+			const float Offset = Rel->bNormalized ? 0.02f : 0.1f;
+			const float MaxTime = Rel->bNormalized ? 1.f : Duration();
+			Rel->Time = FMath::Min(Rel->Time + Offset, MaxTime);
+		}
+
+		SelTrack = TrackIndex;
+		SelEvent = Edited.Tracks[TrackIndex].Events.Add(NewEvent);
+	});
 }
 
 void SKzDialogueTimeline::CopyEvent(int32 TrackIndex, int32 EventIndex)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
-	const FKzDialogueNotifyEvent& Src = T->Tracks[TrackIndex].Events[EventIndex];
+	const FKzDialogueNotifyEvent* Src = FindEvent(TrackIndex, EventIndex);
+	if (!Src) { return; }
 
 	if (GClipboardNotify) { GClipboardNotify->RemoveFromRoot(); GClipboardNotify = nullptr; }
-	GClipboardTimeSource = Src.TimeSource;
-	GClipboardFireIfSkipped = Src.bFireIfSkipped;
-	GClipboardEnabled = Src.bEnabled;
-	if (Src.Notify)
+	GClipboardTimeSource = Src->TimeSource;
+	GClipboardFireIfSkipped = Src->bFireIfSkipped;
+	GClipboardEnabled = Src->bEnabled;
+	if (Src->Notify)
 	{
 		// Duplicate into the transient package and root it so the clipboard survives until replaced.
-		GClipboardNotify = DuplicateObject<UKzDialogueNotifyBase>(Src.Notify, GetTransientPackage());
+		GClipboardNotify = DuplicateObject<UKzDialogueNotifyBase>(Src->Notify, GetTransientPackage());
 		GClipboardNotify->AddToRoot();
 	}
 }
@@ -1939,26 +1952,24 @@ void SKzDialogueTimeline::PasteEvent(int32 TrackIndex, float TimeSeconds)
 {
 	UKzDialogueTimeline* T = Timeline.Get();
 	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !GClipboardNotify) { return; }
-	const FScopedTransaction Transaction(LOCTEXT("PasteEventTransaction", "Paste Dialogue Notify"));
-	T->Modify();
 
-	FKzDialogueNotifyEvent NewEvent;
-	NewEvent.TimeSource = GClipboardTimeSource;
-	NewEvent.bFireIfSkipped = GClipboardFireIfSkipped;
-	NewEvent.bEnabled = GClipboardEnabled;
-	NewEvent.Notify = DuplicateObject<UKzDialogueNotifyBase>(GClipboardNotify, T);
-
-	// Place it at the cursor time (converting to a fraction when the source is normalized).
-	if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+	EditTimeline(LOCTEXT("PasteEventTransaction", "Paste Dialogue Notify"), [this, TrackIndex, TimeSeconds](UKzDialogueTimeline& Edited)
 	{
-		Rel->Time = Rel->bNormalized ? (Duration() > 0.f ? FMath::Clamp(TimeSeconds / Duration(), 0.f, 1.f) : 0.f) : FMath::Max(0.f, TimeSeconds);
-	}
+		FKzDialogueNotifyEvent NewEvent;
+		NewEvent.TimeSource = GClipboardTimeSource;
+		NewEvent.bFireIfSkipped = GClipboardFireIfSkipped;
+		NewEvent.bEnabled = GClipboardEnabled;
+		NewEvent.Notify = DuplicateObject<UKzDialogueNotifyBase>(GClipboardNotify, &Edited);
 
-	const int32 NewIndex = T->Tracks[TrackIndex].Events.Add(NewEvent);
-	SelTrack = TrackIndex;
-	SelEvent = NewIndex;
-	Modified();
-	Rebuild();
+		// Place it at the cursor time (converting to a fraction when the source is normalized).
+		if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())
+		{
+			Rel->Time = Rel->bNormalized ? (Duration() > 0.f ? FMath::Clamp(TimeSeconds / Duration(), 0.f, 1.f) : 0.f) : FMath::Max(0.f, TimeSeconds);
+		}
+
+		SelTrack = TrackIndex;
+		SelEvent = Edited.Tracks[TrackIndex].Events.Add(NewEvent);
+	});
 }
 
 void SKzDialogueTimeline::SetSelection(int32 TrackIndex, int32 EventIndex)
@@ -1987,15 +1998,15 @@ void SKzDialogueTimeline::BeginRetime()
 {
 	UKzDialogueTimeline* T = Timeline.Get();
 	if (!T) { return; }
+	// A drag spans many frames, so it holds its own transaction instead of going through EditTimeline.
 	DragTransaction = MakeUnique<FScopedTransaction>(LOCTEXT("RetimeEventTransaction", "Retime Dialogue Notify"));
 	T->Modify();
 }
 
 void SKzDialogueTimeline::RetimeEvent(int32 TrackIndex, int32 EventIndex, float StartSeconds, float EndSeconds)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !T->Tracks[TrackIndex].Events.IsValidIndex(EventIndex)) { return; }
-	FKzDialogueTimeSource_Relative* Rel = T->Tracks[TrackIndex].Events[EventIndex].TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>();
+	FKzDialogueNotifyEvent* Event = FindEvent(TrackIndex, EventIndex);
+	FKzDialogueTimeSource_Relative* Rel = Event ? Event->TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>() : nullptr;
 	if (!Rel) { return; }
 
 	const float Dur = Duration();
@@ -2027,39 +2038,34 @@ void SKzDialogueTimeline::MoveEventToTrack(int32 FromTrack, int32 EventIndex, in
 	UKzDialogueTimeline* T = Timeline.Get();
 	if (!T || T->Tracks.Num() == 0) { return; }
 	ToTrack = FMath::Clamp(ToTrack, 0, T->Tracks.Num() - 1);
-	if (FromTrack == ToTrack || !T->Tracks.IsValidIndex(FromTrack) || !T->Tracks[FromTrack].Events.IsValidIndex(EventIndex)) { return; }
+	if (FromTrack == ToTrack || !FindEvent(FromTrack, EventIndex)) { return; }
 
-	const FScopedTransaction Transaction(LOCTEXT("MoveEventToTrackTransaction", "Move Notify To Track"));
-	T->Modify();
-	const FKzDialogueNotifyEvent Moved = T->Tracks[FromTrack].Events[EventIndex];
-	T->Tracks[FromTrack].Events.RemoveAt(EventIndex);
-	const int32 NewIndex = T->Tracks[ToTrack].Events.Add(Moved);
-	SelTrack = ToTrack;
-	SelEvent = NewIndex;
-	Modified();
-	Rebuild();
+	EditTimeline(LOCTEXT("MoveEventToTrackTransaction", "Move Notify To Track"), [this, FromTrack, EventIndex, ToTrack](UKzDialogueTimeline& Edited)
+	{
+		const FKzDialogueNotifyEvent Moved = Edited.Tracks[FromTrack].Events[EventIndex];
+		Edited.Tracks[FromTrack].Events.RemoveAt(EventIndex);
+		SelTrack = ToTrack;
+		SelEvent = Edited.Tracks[ToTrack].Events.Add(Moved);
+	});
 }
 
 void SKzDialogueTimeline::OnEventDetailsChanged(const FPropertyChangedEvent& PropertyChangedEvent)
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-	FKzDialogueNotifyEvent* LiveEvent = SelectedEvent();
-	if (!T || !LiveEvent || !EventScope.IsValid()) { return; }
+	// Spin box drags commit once at the end; the scope is written back to the event it was made
+	// from, which a click on another marker may no longer be the selected one.
+	if (PropertyChangedEvent.ChangeType == EPropertyChangeType::Interactive || !EventScope.IsValid() || !FindEvent(ScopeTrack, ScopeEvent)) { return; }
 
-	// Write the edited copy back onto the live event (its time source and bFireIfSkipped; the
-	// notify object is shared, so its params were already edited in place).
-	T->Modify();
-	FKzDialogueNotifyEvent::StaticStruct()->CopyScriptStruct(LiveEvent, EventScope->GetStructMemory());
-
-	// If the notify class was changed via the picker, the struct-on-scope creates the new object
-	// without our outer; re-home it under the timeline so it persists.
-	if (LiveEvent->Notify && LiveEvent->Notify->GetOuter() != T)
+	EditTimeline(LOCTEXT("EditEventTransaction", "Edit Dialogue Notify"), [this](UKzDialogueTimeline& Edited)
 	{
-		LiveEvent->Notify = DuplicateObject<UKzDialogueNotifyBase>(LiveEvent->Notify, T);
-	}
+		FKzDialogueNotifyEvent* Event = FindEvent(ScopeTrack, ScopeEvent);
+		FKzDialogueNotifyEvent::StaticStruct()->CopyScriptStruct(Event, EventScope->GetStructMemory());
 
-	Modified();
-	Rebuild();
+		// A notify class picked in the details is created without our outer; re-home it so it persists.
+		if (Event->Notify && Event->Notify->GetOuter() != &Edited)
+		{
+			Event->Notify = DuplicateObject<UKzDialogueNotifyBase>(Event->Notify, &Edited);
+		}
+	});
 }
 
 #undef LOCTEXT_NAMESPACE

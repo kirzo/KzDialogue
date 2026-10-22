@@ -372,7 +372,7 @@ void UKzDialogueAsset::RefreshLineMetadata()
 		}
 	}
 
-	RebindFTextKeys();
+	bDirty |= RebindFTextKeys();
 
 	// Refresh source text hashes. Compared on import to flag stale translations
 	// for review when the authored text drifts.
@@ -502,32 +502,23 @@ void UKzDialogueAsset::RefreshLineMetadata()
 	}
 }
 
-void UKzDialogueAsset::RebindFTextKeys()
+bool UKzDialogueAsset::RebindFTextKeys()
 {
-	if (!AssetId.IsValid()) { return; }
+	if (!AssetId.IsValid()) { return false; }
 
 	const FString Namespace = FString::Printf(TEXT("KzDialogue.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
+	bool bChanged = false;
 	for (FKzDialogueLine& Line : Lines)
 	{
 		if (!Line.LineId.IsValid()) { continue; }
 
-		// A text the user marked as non-localizable (culture invariant) keeps that choice:
-		// ChangeKey would rebuild it as localizable, silently reverting the checkbox.
-		if (Line.Text.IsCultureInvariant()) { continue; }
-
-		// A shared text keys under the asset-independent shared namespace: every line
-		// carrying this id resolves to the same entry, one translation for all of them.
-		if (Line.SharedTextId.IsValid())
-		{
-			Line.Text = FText::ChangeKey(KzSharedTextNamespace, Line.SharedTextId.ToString(EGuidFormats::Digits), Line.Text);
-			continue;
-		}
-
-		const FString LineGuid = Line.LineId.ToString(EGuidFormats::Digits);
-
-		Line.Text = FText::ChangeKey(Namespace, LineGuid + TEXT("-Text"), Line.Text);
+		// A shared text keys under the asset-independent shared namespace: one translation for every line carrying the id.
+		bChanged |= Line.SharedTextId.IsValid()
+			? KzAnchorText(Line.Text, KzSharedTextNamespace, Line.SharedTextId.ToString(EGuidFormats::Digits))
+			: KzAnchorText(Line.Text, Namespace, Line.LineId.ToString(EGuidFormats::Digits) + TEXT("-Text"));
 	}
+	return bChanged;
 }
 
 #endif

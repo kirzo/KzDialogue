@@ -13,28 +13,22 @@
 class UKzDialogueAsset;
 class UMovieSceneKzDialogueSection;
 
-/**
- * Per-section evaluation state. Stored on the persistent evaluation data so it
- * survives across Evaluate calls within the same play session, but is wiped on
- * TearDown (when the section leaves the evaluation field, e.g. on Stop).
- */
+/** Per-section evaluation state, kept across evaluations of one pass and reset on TearDown. */
 struct FMovieSceneKzDialogueSectionState : IPersistentEvaluationData
 {
-	/** True once we have dispatched the line to the subsystem during this play session.
-	 *  Reset on TearDown. */
+	/** The line was dispatched to the subsystem during this pass. */
 	bool bFired = false;
 
-	/** Last status we saw on Evaluate. Used to detect Playing -> Paused transitions. */
-	EMovieScenePlayerStatus::Type LastStatus = EMovieScenePlayerStatus::Stopped;
+	/** Our line is paused because the sequence is. */
+	bool bPausedLine = false;
 
 	/** Last evaluated time (tick resolution). TearDown compares it against the section end to tell natural flow-past from a cut. */
 	FFrameTime LastEvalTime;
 };
 
 /**
- * Per-section Sequencer evaluation template. On entering, dispatches the line to the
- * dialogue subsystem; ignored when scrubbing or evaluating in the editor unless the
- * game world is active.
+ * Per-section Sequencer evaluation template: plays the line when the section is entered while playing,
+ * pauses and resumes it with the sequence, and ends it when the section is left.
  */
 USTRUCT()
 struct FMovieSceneKzDialogueSectionTemplate : public FMovieSceneEvalTemplate
@@ -48,7 +42,6 @@ struct FMovieSceneKzDialogueSectionTemplate : public FMovieSceneEvalTemplate
 	UPROPERTY() FGameplayTag Channel;
 	UPROPERTY() FGuid LineId;
 	UPROPERTY() bool bSuppressAudio = false;
-	UPROPERTY() FFrameNumber SectionStartFrame;
 	UPROPERTY() float SectionDurationSeconds = 0.0f;
 
 	/** Exclusive section end (tick resolution), for TearDown's natural-flow-past test. */

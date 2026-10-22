@@ -6,6 +6,7 @@
 #include "Widgets/SCompoundWidget.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Components/AudioComponent.h"
+#include "EditorUndoClient.h"
 
 class UKzDialogueTimeline;
 class USoundWave;
@@ -24,10 +25,10 @@ struct FKzWaveformPreview;
  * "Notifies" group whose "+ Track" dropdown adds notify tracks, and one row per track) and a
  * right track area (the engine time ruler on top, then one painted track per row). Markers
  * are point/state notifies placed along the line duration; drag one to retime it (drag a
- * state's edges to resize), right-click empty space to add a notify, right-click a marker to
- * delete it. An inline editor for the selected event sits below.
+ * state's edges to resize), right-click empty space to add a notify, right-click a marker for
+ * its menu. An inline editor for the selected event sits below.
  */
-class SKzDialogueTimeline : public SCompoundWidget
+class SKzDialogueTimeline : public SCompoundWidget, public FEditorUndoClient
 {
 public:
 	SLATE_BEGIN_ARGS(SKzDialogueTimeline) {}
@@ -47,6 +48,10 @@ public:
 	virtual bool SupportsKeyboardFocus() const override { return true; }
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
+	//~ FEditorUndoClient
+	virtual void PostUndo(bool bSuccess) override { Rebuild(); }
+	virtual void PostRedo(bool bSuccess) override { Rebuild(); }
 
 	/** Ask the open timeline for the given line to select a specific notify (e.g. from a validation
 	 *  issue click). The matching widget consumes the request on its next tick. */
@@ -87,7 +92,11 @@ private:
 	void MoveEventToTrack(int32 FromTrack, int32 EventIndex, int32 ToTrack);
 	void OpenEventNotifyAsset(int32 TrackIndex, int32 EventIndex);
 
-	FKzDialogueNotifyEvent* SelectedEvent() const;
+	/** Every timeline edit goes through here: one undo transaction around Edit, then dirty and (unless the caller's widget must survive) rebuild. */
+	void EditTimeline(const FText& Title, TFunctionRef<void(UKzDialogueTimeline&)> Edit, bool bRebuild = true);
+
+	FKzDialogueNotifyEvent* FindEvent(int32 TrackIndex, int32 EventIndex) const;
+	FKzDialogueNotifyEvent* SelectedEvent() const { return FindEvent(SelTrack, SelEvent); }
 
 	/** Visible time window [start, end] in seconds, for zoom/pan; defaults to the whole line. */
 	float GetViewStart() const;
@@ -142,7 +151,7 @@ private:
 	TUniquePtr<FScopedTransaction> DragTransaction;
 
 	/** Details of the selected event: its time source plus the notify with its C++/BP params.
-	 * Edits a copy held in EventScope and is written back to the live event on change. */
+	 * Edits a copy held in EventScope, written back to the event it was made from (ScopeTrack/ScopeEvent). */
 	TSharedPtr<IStructureDetailsView> EventDetailsView;
 	TSharedPtr<FStructOnScope> EventScope;
 	int32 ScopeTrack = INDEX_NONE;

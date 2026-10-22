@@ -127,10 +127,6 @@ private:
 		TArray<FLineRow> Lines;
 	};
 
-	/** Editor audio preview, one at a time. Key = card prefix + line id. */
-	TWeakObjectPtr<class UAudioComponent> PreviewAudio;
-	FString PreviewKey;
-
 	/** Translation editors in build (visual) order, keyed "<culture>|<namespace>|<key>"; rebuilt every Refresh. */
 	TArray<TPair<FString, TWeakPtr<class SEditableText>>> TranslationEditors;
 

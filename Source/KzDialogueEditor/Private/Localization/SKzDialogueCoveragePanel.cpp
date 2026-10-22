@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Localization/SKzDialogueCoveragePanel.h"
+#include "KzDialogueAudition.h"
 
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
@@ -1258,29 +1259,15 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
 			.ContentPadding(FMargin(2.0f))
 			.ToolTipText(LOCTEXT("PlayTakeTip", "Preview this culture's take."))
-			.OnClicked_Lambda([this, PlayKey, Path = Entry.AudioPath]()
+			.OnClicked_Lambda([PlayKey, Path = Entry.AudioPath]()
 			{
-				const bool bWasThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-				if (GEditor) { GEditor->ResetPreviewAudioComponent(); }
-				PreviewAudio = nullptr;
-				PreviewKey.Reset();
-				if (!bWasThis && GEditor)
-				{
-					if (USoundBase* Sound = Cast<USoundBase>(Path.TryLoad()))
-					{
-						PreviewAudio = GEditor->PlayPreviewSound(Sound);
-						PreviewKey = PlayKey;
-					}
-				}
+				if (KzDialogueAudition::IsPlaying(PlayKey)) { KzDialogueAudition::Stop(PlayKey); }
+				else { KzDialogueAudition::Play(Cast<USoundBase>(Path.TryLoad()), PlayKey); }
 				return FReply::Handled();
 			})
 			[
 				SNew(SImage)
-					.Image_Lambda([this, PlayKey]()
-					{
-						const bool bThis = PreviewKey == PlayKey && PreviewAudio.IsValid() && PreviewAudio->IsPlaying();
-						return FAppStyle::GetBrush(bThis ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play");
-					})
+					.Image_Lambda([PlayKey]() { return FAppStyle::GetBrush(KzDialogueAudition::IsPlaying(PlayKey) ? "Icons.Toolbar.Stop" : "Icons.Toolbar.Play"); })
 					.ColorAndOpacity(FSlateColor::UseForeground())
 			];
 	}

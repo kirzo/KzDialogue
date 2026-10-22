@@ -87,6 +87,7 @@ void UKzSubtitleWidget::UnbindPlayer(UKzDialoguePlayer* InPlayer)
 		{
 			return Weak.Get() == InPlayer;
 		});
+	ReleaseClaims(InPlayer);
 }
 
 void UKzSubtitleWidget::UnbindAllPlayers()
@@ -99,8 +100,27 @@ void UKzSubtitleWidget::UnbindAllPlayers()
 		}
 	}
 	BoundPlayers.Reset();
-	ActiveAnimations.Reset();
 	MutedPlayers.Reset();
+	ReleaseClaims(nullptr);
+}
+
+void UKzSubtitleWidget::ReleaseClaims(const UKzDialoguePlayer* InPlayer)
+{
+	// Events are already unbound, so the players moving on cannot ask this view for anything new.
+	TArray<TPair<UKzDialoguePlayer*, UWidgetAnimation*>> Pending;
+	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
+	{
+		UKzDialoguePlayer* Player = It->Value.Get();
+		if (!InPlayer || Player == InPlayer)
+		{
+			if (Player && It->Key.IsValid()) { Pending.Emplace(Player, It->Key.Get()); }
+			It.RemoveCurrent();
+		}
+	}
+	for (const TPair<UKzDialoguePlayer*, UWidgetAnimation*>& Claim : Pending)
+	{
+		DispatchViewAck(*Claim.Key, Claim.Value);
+	}
 }
 
 void UKzSubtitleWidget::GetBoundPlayers(TArray<UKzDialoguePlayer*>& OutPlayers) const
@@ -321,47 +341,8 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 		return;
 	}
 
-	// Stop any in-flight animations and untrack them. StopAnimation re-enters OnAnimationFinished
-	// synchronously, which removes from ActiveAnimations and may add the next phase's fade — so
-	// never stop while iterating the map: collect first (same pattern as ApplyMute).
-	TArray<UWidgetAnimation*> ToStop;
-	for (const auto& Pair : ActiveAnimations)
-	{
-		if (Pair.Value.Get() == InPlayer)
-		{
-			if (UWidgetAnimation* Anim = Pair.Key.Get())
-			{
-				ToStop.Add(Anim);
-			}
-		}
-	}
-	for (UWidgetAnimation* Anim : ToStop)
-	{
-		StopAnimation(Anim);
-	}
-
-	// Flush the shared UMG tick manager so StopAnimation's deferred rewind-to-frame-0 lands now (and fires
-	// OnAnimationFinished synchronously), instead of next tick where it would clobber the reset below. See ApplyMute.
-	FlushAnimations();
-
-	// OnAnimationFinished untracked what it saw; sweep whatever remains for this player (stale
-	// weak anims, or animations that were no longer playing so their stop never notified).
-	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
-	{
-		if (It->Value.Get() == InPlayer || !It->Value.IsValid())
-		{
-			It.RemoveCurrent();
-		}
-	}
-
-	// Snap the channel to a clean visual state without playing exit animations: a hard
-	// cancel is meant to be immediate. ReceiveHide may be called here without a prior
-	// EndFadeOut — subclasses that customize hide should account for that.
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
-	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
-	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
-	ReceiveResetChannelVisual(InPlayer->Channel);
-	ReceiveHide(InPlayer->Channel);
+	// A hard cancel is immediate: no exit animations. ReceiveHide may arrive here without a prior EndFadeOut.
+	HardResetView(InPlayer);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -372,9 +353,8 @@ void UKzSubtitleWidget::SetViewEnabled(bool bEnabled)
 {
 	if (bViewEnabled == bEnabled) { return; }
 
-	// Flip the flag first: ApplyMute's StopAnimation dispatches the pending Notify, which can
-	// re-enter synchronously with the player's next OnRequest* — the handlers must already see
-	// the view as disabled so they don't claim again.
+	// Flip the flag first: the reset's StopAnimation dispatches the pending Notify, which can re-enter
+	// synchronously with the player's next OnRequest*, and the handlers must already see the view disabled.
 	bViewEnabled = bEnabled;
 
 	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
@@ -384,9 +364,8 @@ void UKzSubtitleWidget::SetViewEnabled(bool bEnabled)
 
 		if (!bEnabled)
 		{
-			// Hide the view and stop in-flight fades; their finish resolves any claimed acks,
-			// so no player is left waiting on this widget.
-			ApplyMute(Player);
+			// Stopped fades still answer their claims, so no player is left waiting on this widget.
+			if (Player->IsPlaying()) { HardResetView(Player); }
 		}
 		else if (!MutedPlayers.Contains(Weak))
 		{
@@ -439,7 +418,7 @@ void UKzSubtitleWidget::RefreshMuteStates()
 		if (bMuted)
 		{
 			MutedPlayers.Add(Weak);
-			ApplyMute(Player);
+			if (Player->IsPlaying()) { HardResetView(Player); }
 		}
 		else
 		{
@@ -449,12 +428,10 @@ void UKzSubtitleWidget::RefreshMuteStates()
 	}
 }
 
-void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
+void UKzSubtitleWidget::HardResetView(UKzDialoguePlayer* InPlayer)
 {
-	if (!InPlayer->IsPlaying()) { return; }
-
-	// Stop the player's in-flight animations. UMG fires OnAnimationFinished on stop, which
-	// dispatches the pending Notify*Finished, so the player's state machine keeps moving.
+	// UMG fires OnAnimationFinished on stop, which dispatches the pending Notify*Finished and may
+	// start the next phase's fade synchronously: collect first, never stop while iterating the map.
 	TArray<UWidgetAnimation*> ToStop;
 	for (const auto& Pair : ActiveAnimations)
 	{
@@ -476,6 +453,15 @@ void UKzSubtitleWidget::ApplyMute(UKzDialoguePlayer* InPlayer)
 	// (frame 0 = Opacity 1) the deferred rewind would otherwise fire next tick and clobber
 	// ReceiveResetChannelVisual, leaving the background visible with no text.
 	FlushAnimations();
+
+	// Sweep what the stops did not untrack: stale weak anims, or animations no longer playing.
+	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
+	{
+		if (It->Value.Get() == InPlayer || !It->Value.IsValid())
+		{
+			It.RemoveCurrent();
+		}
+	}
 
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
@@ -585,8 +571,18 @@ void UKzSubtitleWidget::PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePla
 {
 	if (!Anim || !InPlayer) { return; }
 
-	// Track which player this animation belongs to so OnAnimationFinished can dispatch the right Notify.
-	// PlayAnimation on an already-playing animation restarts it from the beginning, so re-entry is safe.
+	// Channels sharing one view bundle: a restarted animation never reports its first run, so the
+	// other player's claim is answered here before the animation changes owner.
+	if (const TWeakObjectPtr<UKzDialoguePlayer>* Owner = ActiveAnimations.Find(Anim))
+	{
+		UKzDialoguePlayer* Previous = Owner->Get();
+		ActiveAnimations.Remove(Anim);
+		if (Previous && Previous != InPlayer)
+		{
+			DispatchViewAck(*Previous, Anim);
+		}
+	}
+
 	ActiveAnimations.Add(Anim, InPlayer);
 	PlayAnimation(Anim);
 }
@@ -609,15 +605,17 @@ void UKzSubtitleWidget::OnAnimationFinished_Implementation(const UWidgetAnimatio
 	UKzDialoguePlayer* Player = GetPlayerForAnim(Finished);
 	if (!Player) { return; }
 
-	// Notify the right phase based on which slot the animation occupies in the player's view.
-	const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
-
 	// Untrack BEFORE dispatching: the notify re-enters and may start the next line's fade synchronously,
 	// so removing first keeps at most one tracked fade per player.
 	ActiveAnimations.Remove(Finished);
+	DispatchViewAck(*Player, Finished);
+}
 
-	if (Finished == View.StartFadeIn) { Player->NotifyEnterFinished(); }
-	else if (Finished == View.EndFadeOut) { Player->NotifyExitFinished(); }
-	else if (Finished == View.LineFadeIn) { Player->NotifyLineEnterFinished(); }
-	else if (Finished == View.LineFadeOut) { Player->NotifyLineExitFinished(); }
+void UKzSubtitleWidget::DispatchViewAck(UKzDialoguePlayer& Player, const UWidgetAnimation* Anim)
+{
+	const FKzSubtitleChannelView View = GetViewForChannel(Player.Channel);
+	if (Anim == View.StartFadeIn) { Player.NotifyEnterFinished(); }
+	else if (Anim == View.EndFadeOut) { Player.NotifyExitFinished(); }
+	else if (Anim == View.LineFadeIn) { Player.NotifyLineEnterFinished(); }
+	else if (Anim == View.LineFadeOut) { Player.NotifyLineExitFinished(); }
 }
