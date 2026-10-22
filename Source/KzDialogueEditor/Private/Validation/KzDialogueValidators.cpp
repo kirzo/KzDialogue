@@ -70,13 +70,13 @@ void UKzDialogueValidator_BrokenAudio::Validate_Implementation(const UObject* As
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
 		if (Line.Audio.IsNull()) { continue; }
 
-		// LoadSynchronous returns null when the soft pointer can't be resolved.
-		if (!Line.Audio.LoadSynchronous())
+		// The registry knows whether the wave exists without loading it.
+		if (!IAssetRegistry::GetChecked().GetAssetByObjectPath(Line.Audio.ToSoftObjectPath()).IsValid())
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Error,
 				FText::Format(
-					LOCTEXT("BrokenAudio", "Line {0} references audio that failed to load: {1}"),
+					LOCTEXT("BrokenAudio", "Line {0} references audio that does not exist: {1}"),
 					FText::AsNumber(i + 1),
 					FText::FromString(Line.Audio.ToString())),
 				Id,
@@ -130,18 +130,18 @@ void UKzDialogueValidator_AudioRange::Validate_Implementation(const UObject* Ass
 			OutIssues.Add(Issue);
 		}
 
-		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
+		// The wave's length from its registry tag, so validating never loads audio.
+		float AudioDuration = 0.0f;
+		IAssetRegistry::GetChecked().GetAssetByObjectPath(Line.Audio.ToSoftObjectPath()).GetTagValue(GET_MEMBER_NAME_CHECKED(USoundBase, Duration), AudioDuration);
+		if (AudioDuration > 0.0f && Line.AudioStartTime >= AudioDuration)
 		{
-			if (Line.AudioStartTime >= Sound->GetDuration())
-			{
-				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
-					EKzValidationSeverity::Warning,
-					FText::Format(LOCTEXT("AudioRangePastEnd", "Line {0}: AudioStartTime ({1}s) is at or beyond the audio's length ({2}s)."), FText::AsNumber(i + 1), Line.AudioStartTime, Sound->GetDuration()),
-					Id,
-					Line.LineId);
-				Issue.ContextIndex = i;
-				OutIssues.Add(Issue);
-			}
+			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+				EKzValidationSeverity::Warning,
+				FText::Format(LOCTEXT("AudioRangePastEnd", "Line {0}: AudioStartTime ({1}s) is at or beyond the audio's length ({2}s)."), FText::AsNumber(i + 1), Line.AudioStartTime, AudioDuration),
+				Id,
+				Line.LineId);
+			Issue.ContextIndex = i;
+			OutIssues.Add(Issue);
 		}
 	}
 }
@@ -502,21 +502,11 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 
 bool UKzDialogueValidator_Localization::CanValidate_Implementation(const UObject* Asset) const
 {
-	return Asset && (Asset->IsA<UKzDialogueAsset>() || Asset->IsA<UKzNamedAsset>());
+	return Asset && Asset->IsA<UKzDialogueAsset>();
 }
 
 void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
 {
-	if (const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Asset))
-	{
-		ValidateNamedAssetToken(Named, OutIssues);
-		if (const UKzSpeakerAsset* SpeakerAsset = Cast<UKzSpeakerAsset>(Asset))
-		{
-			ValidateSpeakerAsset(SpeakerAsset, OutIssues);
-		}
-		return;
-	}
-
 	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
 	if (!Dialogue) { return; }
 
@@ -688,8 +678,25 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 	}
 }
 
-void UKzDialogueValidator_Localization::ValidateNamedAssetToken(const UKzNamedAsset* Named, TArray<FKzValidationIssue>& OutIssues) const
+// =======================================================================================
+// Named assets
+// =======================================================================================
+
+bool UKzDialogueValidator_NamedAsset::CanValidate_Implementation(const UObject* Asset) const
 {
+	return Asset && Asset->IsA<UKzNamedAsset>();
+}
+
+void UKzDialogueValidator_NamedAsset::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Asset);
+	if (!Named) { return; }
+
+	if (const UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Named))
+	{
+		ValidateSpeakerAsset(Speaker, OutIssues);
+	}
+
 	if (Named->Token.IsNone()) { return; }
 
 	const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
@@ -709,7 +716,7 @@ void UKzDialogueValidator_Localization::ValidateNamedAssetToken(const UKzNamedAs
 	}
 }
 
-void UKzDialogueValidator_Localization::ValidateSpeakerAsset(const UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const
+void UKzDialogueValidator_NamedAsset::ValidateSpeakerAsset(const UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const
 {
 	const FName Id = GetValidatorId();
 	const FString ExpectedNamespace = FString::Printf(TEXT("KzSpeaker.%s"), *Speaker->AssetId.ToString(EGuidFormats::Digits));
