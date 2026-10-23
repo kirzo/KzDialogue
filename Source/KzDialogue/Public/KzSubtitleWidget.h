@@ -248,6 +248,7 @@ protected:
 	UFUNCTION() void HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line);
+	UFUNCTION() void HandleRequestLineRevealComplete(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line);
 	UFUNCTION() void HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line);
 	UFUNCTION() void HandlePaused(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleResumed(UKzDialoguePlayer* InPlayer);

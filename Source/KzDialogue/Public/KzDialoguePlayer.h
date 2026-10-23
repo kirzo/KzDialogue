@@ -152,6 +152,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|View Requests")
 	FKzOnDialogueLineEvent OnRequestLineEnter;
 
+	/** Request the line's reveal (fade in, typewriter) to jump to its end. Sent by Next in Manual mode, which moves on without waiting for the enter acks. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|View Requests")
+	FKzOnDialogueLineEvent OnRequestLineRevealComplete;
+
 	/** Request a per-line exit animation. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|View Requests")
 	FKzOnDialogueLineEvent OnRequestLineExit;
@@ -194,7 +198,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void StopAllAudio(float FadeTime = 0.1f);
 
-	/** End the showing line now and move on: drives Manual mode, cuts the line short in Automatic mode. */
+	/** End the showing line now and move on: drives Manual mode, cuts the line short in Automatic mode. In Manual mode a Next during the reveal completes it instead. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Next();
 

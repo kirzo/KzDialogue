@@ -210,6 +210,17 @@ void UKzDialoguePlayer::Next()
 		ClearTimer(LineStartDelayTimerHandle);
 		AdvanceToNextLine();
 	}
+	else if (State == EKzDialogueState::LineEntering && AdvanceMode == EKzDialogueAdvanceMode::Manual)
+	{
+		// The first Next completes the reveal; the views' late enter acks are ignored.
+		const uint32 Serial = StateSerial;
+		OnRequestLineRevealComplete.Broadcast(this, CurrentLine);
+		if (Serial != StateSerial) { return; }
+
+		ClearTimer(ViewWatchdogHandle);
+		PendingViewAcks = 0;
+		OnPhaseAcksDone();
+	}
 	else if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{
 		ClearTimer(LineTimerHandle);

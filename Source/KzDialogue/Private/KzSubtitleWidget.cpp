@@ -189,6 +189,7 @@ void UKzSubtitleWidget::BindPlayerEvents(UKzDialoguePlayer* InPlayer)
 	InPlayer->OnRequestDialogueEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
 	InPlayer->OnRequestDialogueExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
 	InPlayer->OnRequestLineEnter.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
+	InPlayer->OnRequestLineRevealComplete.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineRevealComplete);
 	InPlayer->OnRequestLineExit.AddDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
 	InPlayer->OnPaused.AddDynamic(this, &UKzSubtitleWidget::HandlePaused);
 	InPlayer->OnResumed.AddDynamic(this, &UKzSubtitleWidget::HandleResumed);
@@ -201,6 +202,7 @@ void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
 	InPlayer->OnRequestDialogueEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueEnter);
 	InPlayer->OnRequestDialogueExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestDialogueExit);
 	InPlayer->OnRequestLineEnter.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineEnter);
+	InPlayer->OnRequestLineRevealComplete.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineRevealComplete);
 	InPlayer->OnRequestLineExit.RemoveDynamic(this, &UKzSubtitleWidget::HandleRequestLineExit);
 	InPlayer->OnPaused.RemoveDynamic(this, &UKzSubtitleWidget::HandlePaused);
 	InPlayer->OnResumed.RemoveDynamic(this, &UKzSubtitleWidget::HandleResumed);
@@ -275,6 +277,16 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 	{
 		InPlayer->ClaimViewResponse();
 		PlayAnimForPlayer(View.LineFadeIn, InPlayer);
+	}
+}
+
+void UKzSubtitleWidget::HandleRequestLineRevealComplete(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
+{
+	// Jump to the end, never StopAnimation: a stop rewinds to frame 0 and hides the line.
+	UWidgetAnimation* FadeIn = GetViewForChannel(InPlayer->Channel).LineFadeIn;
+	if (FadeIn && GetPlayerForAnim(FadeIn) == InPlayer)
+	{
+		SetAnimationCurrentTime(FadeIn, FadeIn->GetEndTime());
 	}
 }
 
