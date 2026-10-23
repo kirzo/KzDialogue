@@ -123,10 +123,11 @@ private:
 			{
 				return LOCTEXT("ConnectedHint", "Connected: set externally");
 			}
-			const FString DefaultStr = GraphPinObj->GetDefaultAsString();
-			return DefaultStr.IsEmpty()
-				? LOCTEXT("NoLineIdHint", "Set a Line / Alias")
-				: FText::FromString(DefaultStr);
+			// Without a literal asset there is nothing to pick from: the id has to come wired in.
+			const UEdGraphPin* AssetPin = GraphPinObj->GetOwningNode()->FindPin(KzDialogueK2Nodes::PN_Asset, EGPD_Input);
+			return AssetPin && AssetPin->LinkedTo.Num() > 0
+				? LOCTEXT("AssetConnectedHint", "Asset is connected: wire the line id")
+				: LOCTEXT("NoAssetHint", "Pick an asset first");
 		}
 
 		FGuid Id;

@@ -24,7 +24,7 @@ public:
 	UKzDialogueAsset();
 
 	/** Stable identifier used as the localization namespace suffix for this asset's FTexts. Generated once on creation and preserved across renames. */
-	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue")
 	FGuid AssetId;
 
 	/** Production-facing label shown by tooling (dialogue dashboard) instead of the asset name. Plain string on purpose: an internal label that must not enter the localization gather. */

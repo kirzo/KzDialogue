@@ -67,7 +67,8 @@ public:
 
 	/**
 	 * Resolve a FKzDialogueLineRef to its concrete line without playing it. Useful
-	 * for previewing or driving custom UI without invoking the dialogue subsystem.
+	 * for previewing or driving custom UI without invoking the dialogue subsystem. An alias picks a random line,
+	 * ignoring its SelectionMode and cooldown: those live in the subsystem, which this bypasses.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue")
 	static bool TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);

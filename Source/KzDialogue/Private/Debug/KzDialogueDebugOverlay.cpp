@@ -190,7 +190,7 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 		if (Player->IsPlaying())
 		{
 			const FKzDialogueLine& Line = Player->CurrentLine;
-			const FString LineDesc = FString::Printf(TEXT("(%s) \"%s\""), *Line.Speaker.GetDisplayLabel(Player).ToString(), *Line.GetFormattedText().ToString());
+			const FString LineDesc = FString::Printf(TEXT("(%s) \"%s\""), *Line.Speaker.GetEditorLabel().ToString(), *Line.GetFormattedText().ToString());
 			DrawLabeled(Canvas, X + Indent, Y, TEXT("Line:"), LineDesc);
 
 			if (USoundBase* Sound = Line.Audio.Get())

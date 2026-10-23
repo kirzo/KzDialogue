@@ -29,7 +29,7 @@ class KZDIALOGUE_API UKzWordAsset : public UKzNamedAsset
 
 public:
 	/** Stable identifier used as the localization namespace suffix ("KzWord.<AssetId>"). Generated once on creation and preserved across renames. */
-	UPROPERTY(VisibleAnywhere, Category = "Word")
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Word")
 	FGuid AssetId;
 
 	/** Default form, used when the requested gender has no authored form. */

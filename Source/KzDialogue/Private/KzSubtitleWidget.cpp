@@ -518,7 +518,7 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	}
 	else if (View.SpeakerText)
 	{
-		FString FinalSpeakerName = Line.Speaker.GetDisplayLabel(this).ToString();
+		FString FinalSpeakerName = Line.Speaker.GetSubtitleName(this).ToString();
 
 		for (const FKzSpeakerAffixRule& Rule : GetActiveSpeakerFormattingRules())
 		{

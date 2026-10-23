@@ -35,6 +35,24 @@ namespace KzDialogueK2Nodes
 		return Pin->PinName == PN_LineId && (Node->IsA<UK2Node_PlayDialogueLine>() || Node->IsA<UK2Node_PlayDialogueLineAsync>() || Node->IsA<UK2Node_MakeDialogueLineRef>());
 	}
 
+	void ClearStaleLineIds(UEdGraphNode* Node, const UEdGraphPin* ChangedPin)
+	{
+		if (!Node || !ChangedPin || ChangedPin->PinName != PN_Asset) { return; }
+
+		const UKzDialogueAsset* Asset = GetLiteralAsset(Node);
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			FGuid Id;
+			if (!IsLineIdPin(Pin) || !FGuid::Parse(Pin->DefaultValue, Id) || !Id.IsValid()) { continue; }
+
+			FKzDialogueAlias Alias;
+			if (Asset && (Asset->IndexOfLine(Id) != INDEX_NONE || Asset->TryGetAliasById(Id, Alias))) { continue; }
+
+			Pin->Modify();
+			Pin->GetSchema()->TrySetDefaultValue(*Pin, FString());
+		}
+	}
+
 	FSlateIcon GetIcon(FLinearColor& OutColor)
 	{
 		// FKzDialogueEditorStyle::BrandColor, which this module cannot reach.

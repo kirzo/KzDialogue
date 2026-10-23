@@ -30,6 +30,18 @@ void UK2Node_PlayDialogueLineAsync::AllocateDefaultPins()
 	}
 }
 
+void UK2Node_PlayDialogueLineAsync::PinDefaultValueChanged(UEdGraphPin* Pin)
+{
+	Super::PinDefaultValueChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
+void UK2Node_PlayDialogueLineAsync::PinConnectionListChanged(UEdGraphPin* Pin)
+{
+	Super::PinConnectionListChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
 FText UK2Node_PlayDialogueLineAsync::GetNodeTitle(ENodeTitleType::Type /*TitleType*/) const
 {
 	return LOCTEXT("NodeTitle", "Play Dialogue Line (Async)");

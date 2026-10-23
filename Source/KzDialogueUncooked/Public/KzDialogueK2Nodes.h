@@ -21,6 +21,9 @@ namespace KzDialogueK2Nodes
 	/** True when Pin is a line pin of a line-picking node: LineId, or a Line List's Line_N. */
 	KZDIALOGUEUNCOOKED_API bool IsLineIdPin(const UEdGraphPin* Pin);
 
+	/** After ChangedPin changed on Node: when it is the Asset pin, clears line pins holding ids the new literal asset lacks (all of them once the asset is connected). */
+	KZDIALOGUEUNCOOKED_API void ClearStaleLineIds(UEdGraphNode* Node, const UEdGraphPin* ChangedPin);
+
 	/** The dialogue asset icon and tint every dialogue node shows. */
 	KZDIALOGUEUNCOOKED_API FSlateIcon GetIcon(FLinearColor& OutColor);
 }

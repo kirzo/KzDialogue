@@ -22,6 +22,8 @@ class KZDIALOGUEUNCOOKED_API UK2Node_MakeDialogueLineList : public UK2Node, publ
 public:
 	//~ UEdGraphNode
 	virtual void AllocateDefaultPins() override;
+	virtual void PinDefaultValueChanged(UEdGraphPin* Pin) override;
+	virtual void PinConnectionListChanged(UEdGraphPin* Pin) override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FText GetTooltipText() const override;
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;

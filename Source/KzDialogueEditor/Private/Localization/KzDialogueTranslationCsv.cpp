@@ -820,8 +820,8 @@ bool FKzDialogueTranslationCsv::ExportAssets(const TArray<UKzDialogueAsset*>& As
 	{
 		if (const FKzDialogueLine* Line = Text.Line)
 		{
-			// Empty for narration lines; GetDisplayLabel's "<Narration>" placeholder is editor UI, not translator context.
-			const FString Speaker = Line->Speaker.IsValid() ? Line->Speaker.GetDisplayLabel().ToString() : FString();
+			// Empty for narration lines; GetEditorLabel's "<Narration>" placeholder is editor UI, not translator context.
+			const FString Speaker = Line->Speaker.IsValid() ? Line->Speaker.GetEditorLabel().ToString() : FString();
 			// "no" tells the studio this take deliberately plays in every culture; empty otherwise.
 			const TCHAR* LocalizeAudio = !Line->Audio.IsNull() && !Line->bLocalizeAudio ? TEXT("no") : TEXT("");
 			AddRow(Text.Owner->GetPathName(), Text.Namespace, Text.Key, Speaker, Text.Source, Line->TranslatorNotes, Line->MaxCharacters, Line->Audio.ToSoftObjectPath().ToString(), LocalizeAudio, Text.SourceHash);
@@ -1257,7 +1257,7 @@ bool FKzDialogueTranslationCsv::ExportPoFiles(const TArray<UKzDialogueAsset*>& A
 
 		if (const FKzDialogueLine* Line = Text.Line)
 		{
-			if (Line->Speaker.IsValid()) { Entry.Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line->Speaker.GetDisplayLabel().ToString())); }
+			if (Line->Speaker.IsValid()) { Entry.Comments.Add(FString::Printf(TEXT("Speaker: %s"), *Line->Speaker.GetEditorLabel().ToString())); }
 			if (!Line->TranslatorNotes.IsEmpty()) { Entry.Comments.Add(FString::Printf(TEXT("Notes: %s"), *Line->TranslatorNotes)); }
 			if (Line->MaxCharacters > 0) { Entry.Comments.Add(FString::Printf(TEXT("MaxCharacters: %d"), Line->MaxCharacters)); }
 			if (!Line->Audio.IsNull() && !Line->bLocalizeAudio) { Entry.Comments.Add(TEXT("Audio: do not localize (the source take plays in every culture)")); }

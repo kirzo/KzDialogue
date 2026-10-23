@@ -226,7 +226,9 @@ FText FKzDialogueSection::GetSectionTitle() const
 
 int32 FKzDialogueSection::OnPaintSection(FSequencerSectionPainter& InPainter) const
 {
-	return InPainter.PaintSectionBackground();
+	// A line the track's asset lacks (asset swapped, line deleted) paints red.
+	const bool bMissing = !Section || !Track || !Track->DialogueAsset || Track->DialogueAsset->IndexOfLine(Section->LineId) == INDEX_NONE;
+	return bMissing ? InPainter.PaintSectionBackground(FLinearColor(0.6f, 0.1f, 0.1f)) : InPainter.PaintSectionBackground();
 }
 
 #undef LOCTEXT_NAMESPACE

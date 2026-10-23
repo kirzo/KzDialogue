@@ -114,11 +114,11 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|Events")
 	FKzOnDialogueFinished OnDialogueFinished;
 
-	/** A line has just begun (LineEntering started). */
+	/** A line has just presented: its LineStartDelay gap is over and it shows. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|Events")
 	FKzOnDialogueLineEvent OnLineStarted;
 
-	/** A line has fully ended (LineExiting completed). */
+	/** A line has fully ended (LineExiting completed). Not fired on Abort or Interrupt. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Player|Events")
 	FKzOnDialogueLineEvent OnLineFinished;
 

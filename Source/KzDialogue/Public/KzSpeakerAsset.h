@@ -27,7 +27,7 @@ class KZDIALOGUE_API UKzSpeakerAsset : public UKzNamedAsset
 
 public:
 	/** Stable identifier used as the localization namespace suffix ("KzSpeaker.<AssetId>"). Generated once on creation and preserved across renames. */
-	UPROPERTY(VisibleAnywhere, Category = "Speaker")
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Speaker")
 	FGuid AssetId;
 
 	/** Simple display name. When set it is used as-is and the structured parts are ignored. Always direct text: a character's name is its own. */

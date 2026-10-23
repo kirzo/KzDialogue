@@ -2,6 +2,7 @@
 
 #include "KzBarkComponent.h"
 #include "KzDialogue.h"
+#include "KzDialogueAsset.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "Engine/World.h"

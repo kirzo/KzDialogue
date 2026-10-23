@@ -77,6 +77,7 @@ struct FKzSubtitleMuteRule
  * letting a single widget instance render N channels independently. Any member may
  * be nullptr; the base class skips the corresponding step gracefully (e.g. no
  * LineFadeIn => the player's LineEntering phase auto-completes).
+ * Give each channel its own bundle: two channels sharing an animation fight over it.
  */
 USTRUCT(BlueprintType)
 struct FKzSubtitleChannelView

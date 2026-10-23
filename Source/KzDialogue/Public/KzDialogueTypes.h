@@ -51,8 +51,11 @@ struct KZDIALOGUE_API FKzDialogueSpeaker
 	bool IsValid() const { return Asset != nullptr; }
 	bool operator==(const FKzDialogueSpeaker& Other) const { return Asset == Other.Asset; }
 
-	/** Human-readable label: the asset's resolved name, its asset name as editor fallback, or "<Narration>" when null. With a world context, runtime token overrides (player-chosen names) win over the authored fields. */
-	FText GetDisplayLabel(const UObject* WorldContextObject = nullptr) const;
+	/** Name for subtitles: the resolved name, with runtime token overrides (player-chosen names) from the world context. Empty for narration. */
+	FText GetSubtitleName(const UObject* WorldContextObject) const;
+
+	/** Label for editor UI: the authored name, the asset name while none is authored, or "<Narration>". */
+	FText GetEditorLabel() const;
 };
 
 /**
@@ -111,7 +114,7 @@ enum class EKzLineVoicePolicy : uint8
 UENUM(BlueprintType)
 enum class EKzLineDurationMode : uint8
 {
-	/** Duration if > 0, else the audio's length, else the project default (legacy behavior). */
+	/** Duration if > 0, else the audio's length, else the project default. The default mode. */
 	Auto,
 	/** Use Duration as the line's length, ignoring the audio. */
 	Override,
@@ -137,7 +140,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (ShowOnlyInnerProperties))
 	FKzDialogueSpeaker Speaker;
 
-	/** Localizable subtitle text. */
+	/** Localizable subtitle text. Views show GetFormattedText: this text with the call site's format arguments applied. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line", meta = (MultiLine = true))
 	FText Text;
 
@@ -155,22 +158,22 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * Added on top of the line's resolved duration, and scaled by the player's TimeScale like
 	 * every other line timing.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, Units = "Seconds", EditCondition = "Audio != nullptr"))
 	float AudioStartDelay = 0.0f;
 
 	/** Seconds into the audio asset where playback starts. 0 = from the beginning. Cuts a section out of a larger wave (sound banks, breaths); meant for non-localized audio, since localized takes have their own timing. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, Units = "Seconds", EditCondition = "Audio != nullptr"))
 	float AudioStartTime = 0.0f;
 
 	/** Seconds into the audio asset where playback stops (short fade). 0 = play to the natural end with no extra machinery (the common case). Kept above AudioStartTime and below the wave's length on edit. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, EditCondition = "Audio != nullptr"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio", meta = (ClampMin = 0, Units = "Seconds", EditCondition = "Audio != nullptr"))
 	float AudioEndTime = 0.0f;
 
 	/**
 	 * Duration value in seconds. How it is used depends on DurationMode: as the whole length, as
 	 * an extension on top of the audio, or as the explicit length when > 0 (Auto).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0, Units = "Seconds"))
 	float Duration = 0.0f;
 
 	/** How the line's playback length is derived from Duration and the audio. */
@@ -183,7 +186,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * (the subtitle may still lead the voice). Extends the line's total time and is scaled
 	 * by the player's TimeScale like every other line timing.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Timing", meta = (ClampMin = 0, Units = "Seconds"))
 	float LineStartDelay = 0.0f;
 
 	/** How this line's audio is placed in the world. Resolution chain: line > channel > project settings. */
@@ -290,7 +293,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 			return FText::FromString(TextStr);
 		}
 
-		FText SpeakerLabel = Speaker.GetDisplayLabel();
+		FText SpeakerLabel = Speaker.GetEditorLabel();
 
 		if (MaxTextLength > 0)
 		{
@@ -413,7 +416,7 @@ struct FKzDialogueAlias
 		if (Speaker.IsValid())
 		{
 			return FText::Format(NSLOCTEXT("KzDialogueAlias", "AliasLabelWithSpeaker", "({0}) {1} [{2}]"),
-				Speaker.GetDisplayLabel(),
+				Speaker.GetEditorLabel(),
 				FText::FromString(NameStr),
 				FText::AsNumber(LineIds.Num()));
 		}

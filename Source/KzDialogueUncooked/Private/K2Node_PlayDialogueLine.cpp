@@ -77,6 +77,18 @@ void UK2Node_PlayDialogueLine::AllocateDefaultPins()
 // Cosmetics
 // =======================================================================================
 
+void UK2Node_PlayDialogueLine::PinDefaultValueChanged(UEdGraphPin* Pin)
+{
+	Super::PinDefaultValueChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
+void UK2Node_PlayDialogueLine::PinConnectionListChanged(UEdGraphPin* Pin)
+{
+	Super::PinConnectionListChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
 FText UK2Node_PlayDialogueLine::GetNodeTitle(ENodeTitleType::Type /*TitleType*/) const
 {
 	return LOCTEXT("NodeTitle", "Play Dialogue Line");

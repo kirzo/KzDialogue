@@ -196,6 +196,7 @@ void UKzDialogueNotifyState_PlayMontage::ValidateNotify(TArray<FText>& OutErrors
 void UKzDialogueNotify_PlaySlotAnimation::ValidateNotify(TArray<FText>& OutErrors) const
 {
 	if (!Animation) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "SlotAnimUnset", "Animation is not set.")); }
+	if (NumLoops <= 0) { OutErrors.Add(NSLOCTEXT("KzDialogueNotifies", "SlotAnimLoopsForever", "NumLoops of 0 or less loops forever and a point notify never stops it; use Play Animation (State).")); }
 }
 
 void UKzDialogueNotifyState_PlaySlotAnimation::ValidateNotify(TArray<FText>& OutErrors) const

@@ -16,6 +16,15 @@
 
 #define LOCTEXT_NAMESPACE "KzDialogueValidators"
 
+namespace
+{
+	/** "12 '(Kirzo) Open the door...'": the line's number plus a peek at it, so a message reads without opening the asset. */
+	FText DescribeLine(int32 Index, const FKzDialogueLine& Line)
+	{
+		return FText::Format(INVTEXT("{0} '{1}'"), FText::AsNumber(Index + 1), Line.GetDisplayLabel(40));
+	}
+}
+
 // =======================================================================================
 // Empty lines
 // =======================================================================================
@@ -41,7 +50,7 @@ void UKzDialogueValidator_EmptyLines::Validate_Implementation(const UObject* Ass
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Warning,
-				FText::Format(LOCTEXT("EmptyLine", "Line {0} has neither text nor audio."), FText::AsNumber(i + 1)),
+				FText::Format(LOCTEXT("EmptyLine", "Line {0} has neither text nor audio."), DescribeLine(i, Line)),
 				Id,
 				Line.LineId);
 			Issue.ContextIndex = i;
@@ -77,7 +86,7 @@ void UKzDialogueValidator_BrokenAudio::Validate_Implementation(const UObject* As
 				EKzValidationSeverity::Error,
 				FText::Format(
 					LOCTEXT("BrokenAudio", "Line {0} references audio that does not exist: {1}"),
-					FText::AsNumber(i + 1),
+					DescribeLine(i, Line),
 					FText::FromString(Line.Audio.ToString())),
 				Id,
 				Line.LineId);
@@ -105,14 +114,28 @@ void UKzDialogueValidator_AudioRange::Validate_Implementation(const UObject* Ass
 	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
 	{
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
-		const bool bHasRange = Line.AudioStartTime > 0.0f || Line.AudioEndTime > 0.0f;
-		if (Line.Audio.IsNull() || !bHasRange) { continue; }
+		if (Line.Audio.IsNull())
+		{
+			// Hidden in the details once the audio is gone, but it still lengthens the line.
+			if (Line.AudioStartDelay > 0.0f)
+			{
+				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
+					EKzValidationSeverity::Warning,
+					FText::Format(LOCTEXT("AudioDelayNoAudio", "Line {0}: AudioStartDelay ({1}s) is set but the line has no audio; it still lengthens the line."), DescribeLine(i, Line), Line.AudioStartDelay),
+					Id,
+					Line.LineId);
+				Issue.ContextIndex = i;
+				OutIssues.Add(Issue);
+			}
+			continue;
+		}
+		if (Line.AudioStartTime <= 0.0f && Line.AudioEndTime <= 0.0f) { continue; }
 
 		if (Line.AudioEndTime > 0.0f && Line.AudioEndTime <= Line.AudioStartTime)
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Error,
-				FText::Format(LOCTEXT("AudioRangeEmpty", "Line {0}: AudioEndTime must be greater than AudioStartTime."), FText::AsNumber(i + 1)),
+				FText::Format(LOCTEXT("AudioRangeEmpty", "Line {0}: AudioEndTime must be greater than AudioStartTime."), DescribeLine(i, Line)),
 				Id,
 				Line.LineId);
 			Issue.ContextIndex = i;
@@ -123,7 +146,7 @@ void UKzDialogueValidator_AudioRange::Validate_Implementation(const UObject* Ass
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Warning,
-				FText::Format(LOCTEXT("AudioRangeLocalized", "Line {0}: custom playback range on audio marked for localization; localized takes have their own timing. Uncheck Localize Audio or clear the range."), FText::AsNumber(i + 1)),
+				FText::Format(LOCTEXT("AudioRangeLocalized", "Line {0}: custom playback range on audio marked for localization; localized takes have their own timing. Uncheck Localize Audio or clear the range."), DescribeLine(i, Line)),
 				Id,
 				Line.LineId);
 			Issue.ContextIndex = i;
@@ -137,7 +160,7 @@ void UKzDialogueValidator_AudioRange::Validate_Implementation(const UObject* Ass
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 				EKzValidationSeverity::Warning,
-				FText::Format(LOCTEXT("AudioRangePastEnd", "Line {0}: AudioStartTime ({1}s) is at or beyond the audio's length ({2}s)."), FText::AsNumber(i + 1), Line.AudioStartTime, AudioDuration),
+				FText::Format(LOCTEXT("AudioRangePastEnd", "Line {0}: AudioStartTime ({1}s) is at or beyond the audio's length ({2}s)."), DescribeLine(i, Line), Line.AudioStartTime, AudioDuration),
 				Id,
 				Line.LineId);
 			Issue.ContextIndex = i;
@@ -172,7 +195,7 @@ void UKzDialogueValidator_StaleAudio::Validate_Implementation(const UObject* Ass
 				EKzValidationSeverity::Warning,
 				FText::Format(
 					LOCTEXT("StaleAudio", "Line {0}: text changed after its audio was recorded. Assign the new take, or accept the current text from the Localization tab."),
-					FText::AsNumber(i + 1)),
+					DescribeLine(i, Line)),
 				Id,
 				Line.LineId);
 			Issue.ContextIndex = i;
@@ -205,7 +228,7 @@ void UKzDialogueValidator_DuplicateLineIds::Validate_Implementation(const UObjec
 		{
 			FKzValidationIssue Issue = FKzValidationIssue::WithContextIndex(
 				EKzValidationSeverity::Error,
-				FText::Format(LOCTEXT("InvalidGuid", "Line {0} has an invalid GUID."), FText::AsNumber(i + 1)),
+				FText::Format(LOCTEXT("InvalidGuid", "Line {0} has an invalid GUID."), DescribeLine(i, Line)),
 				Id, i);
 			OutIssues.Add(Issue);
 			continue;
@@ -217,7 +240,7 @@ void UKzDialogueValidator_DuplicateLineIds::Validate_Implementation(const UObjec
 				EKzValidationSeverity::Error,
 				FText::Format(
 					LOCTEXT("DuplicateGuid", "Line {0} shares its GUID with line {1}."),
-					FText::AsNumber(i + 1), FText::AsNumber(*Earlier + 1)),
+					DescribeLine(i, Line), FText::AsNumber(*Earlier + 1)),
 				Id, Line.LineId);
 			Issue.ContextIndex = i;
 			OutIssues.Add(Issue);
@@ -341,8 +364,8 @@ void UKzDialogueValidator_AliasSpeakerMismatch::Validate_Implementation(const UO
 					FText::Format(LOCTEXT("AliasSpeakerMismatch",
 						"Alias '{0}' (speaker: {1}) references a line with a different speaker ({2})."),
 						FText::FromName(Alias.AliasName),
-						Alias.Speaker.GetDisplayLabel(),
-						Line.Speaker.GetDisplayLabel()),
+						Alias.Speaker.GetEditorLabel(),
+						Line.Speaker.GetEditorLabel()),
 					Id, Alias.AliasId);
 				Issue.ContextIndex = i;
 				OutIssues.Add(Issue);
@@ -414,7 +437,7 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 		ResolveCtx.LineDuration = LineDuration;
 		ResolveCtx.Audio = Audio;
 
-		const FText LineLabel = FText::AsNumber(i + 1);
+		const FText LineLabel = DescribeLine(i, Line);
 		const FGuid LineId = Line.LineId;
 
 		for (int32 t = 0; t < Timeline->Tracks.Num(); ++t)
@@ -529,7 +552,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		if (KzAnchorText(Anchored, TextId.Key, TextId.Value))
 		{
 			AddIssue(EKzValidationSeverity::Warning,
-				FText::Format(LOCTEXT("UnstableKey", "Line {0}: text is not anchored to its stable localization key; resave the asset to rebind it."), FText::AsNumber(i + 1)),
+				FText::Format(LOCTEXT("UnstableKey", "Line {0}: text is not anchored to its stable localization key; resave the asset to rebind it."), DescribeLine(i, Line)),
 				Line.LineId, i);
 		}
 	}
@@ -570,7 +593,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 				if (!Path)
 				{
 					AddIssue(EKzValidationSeverity::Warning,
-						FText::Format(LOCTEXT("UnknownNamedToken", "Line {0}: no named asset claims the token '{1}' referenced by '`{{2}`}'."), FText::AsNumber(i + 1), FText::FromString(TokenPart), FText::FromString(Arg)),
+						FText::Format(LOCTEXT("UnknownNamedToken", "Line {0}: no named asset claims the token '{1}' referenced by '`{{2}`}'."), DescribeLine(i, Line), FText::FromString(TokenPart), FText::FromString(Arg)),
 						Line.LineId, i);
 					continue;
 				}
@@ -579,7 +602,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 				if (Named && !Named->GetNameParts().Contains(FName(*Modifier)))
 				{
 					AddIssue(EKzValidationSeverity::Warning,
-						FText::Format(LOCTEXT("UnknownNamePart", "Line {0}: '{1}' is not a name part of '{2}' (see the token picker for the valid ones)."), FText::AsNumber(i + 1), FText::FromString(Modifier), FText::FromString(Named->GetName())),
+						FText::Format(LOCTEXT("UnknownNamePart", "Line {0}: '{1}' is not a name part of '{2}' (see the token picker for the valid ones)."), DescribeLine(i, Line), FText::FromString(Modifier), FText::FromString(Named->GetName())),
 						Line.LineId, i);
 				}
 			}
@@ -612,6 +635,13 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		return TSet<FString>(Args);
 	};
 
+	auto JoinSorted = [](const TSet<FString>& Args)
+	{
+		TArray<FString> Sorted = Args.Array();
+		Sorted.Sort();
+		return FText::FromString(FString::Join(Sorted, TEXT(", ")));
+	};
+
 	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
 	{
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
@@ -638,7 +668,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 			if (Entry->Source.Text != *SourceString)
 			{
 				AddIssue(EKzValidationSeverity::Warning,
-					FText::Format(LOCTEXT("StaleTranslation", "Line {0}: the '{1}' translation predates the current source text; needs review."), FText::AsNumber(i + 1), FText::FromString(Culture)),
+					FText::Format(LOCTEXT("StaleTranslation", "Line {0}: the '{1}' translation predates the current source text; needs review."), DescribeLine(i, Line), FText::FromString(Culture)),
 					Line.LineId, i);
 				continue;
 			}
@@ -646,7 +676,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 			if (Line.MaxCharacters > 0 && Translation.Len() > Line.MaxCharacters)
 			{
 				AddIssue(EKzValidationSeverity::Warning,
-					FText::Format(LOCTEXT("MaxCharsExceeded", "Line {0}: the '{1}' translation is {2} characters long, over the line's MaxCharacters ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::AsNumber(Translation.Len()), FText::AsNumber(Line.MaxCharacters)),
+					FText::Format(LOCTEXT("MaxCharsExceeded", "Line {0}: the '{1}' translation is {2} characters long, over the line's MaxCharacters ({3})."), DescribeLine(i, Line), FText::FromString(Culture), FText::AsNumber(Translation.Len()), FText::AsNumber(Line.MaxCharacters)),
 					Line.LineId, i);
 			}
 
@@ -671,7 +701,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 			if (Problems.Num() > 0)
 			{
 				AddIssue(EKzValidationSeverity::Error,
-					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), FText::AsNumber(i + 1), FText::FromString(Culture), FText::FromString(FString::Join(TranslationArgs, TEXT(", "))), FText::FromString(FString::Join(SourceArgs, TEXT(", ")))),
+					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), DescribeLine(i, Line), FText::FromString(Culture), JoinSorted(TranslationArgs), JoinSorted(SourceArgs)),
 					Line.LineId, i);
 			}
 		}

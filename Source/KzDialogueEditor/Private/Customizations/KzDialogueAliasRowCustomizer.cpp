@@ -35,7 +35,7 @@ FText FKzDialogueAliasRowCustomizer::GetTooltipText(TSharedPtr<IPropertyHandle> 
 {
 	if (FKzDialogueAlias* Alias = ResolveAlias(Handle))
 	{
-		const FString Speaker = Alias->Speaker.GetDisplayLabel().ToString();
+		const FString Speaker = Alias->Speaker.GetEditorLabel().ToString();
 		return FText::Format(LOCTEXT("AliasTooltip", "{0}\nSpeaker: {1}\n{2} line(s) referenced."),
 			FText::FromName(Alias->AliasName),
 			FText::FromString(Speaker.IsEmpty() ? TEXT("(none)") : Speaker),

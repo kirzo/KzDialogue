@@ -41,6 +41,18 @@ void UK2Node_MakeDialogueLineRef::AllocateDefaultPins()
 // Cosmetics
 // =======================================================================================
 
+void UK2Node_MakeDialogueLineRef::PinDefaultValueChanged(UEdGraphPin* Pin)
+{
+	Super::PinDefaultValueChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
+void UK2Node_MakeDialogueLineRef::PinConnectionListChanged(UEdGraphPin* Pin)
+{
+	Super::PinConnectionListChanged(Pin);
+	KzDialogueK2Nodes::ClearStaleLineIds(this, Pin);
+}
+
 FText UK2Node_MakeDialogueLineRef::GetNodeTitle(ENodeTitleType::Type /*TitleType*/) const
 {
 	return LOCTEXT("NodeTitle", "Make Dialogue Line Ref");

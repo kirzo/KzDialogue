@@ -75,7 +75,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	TObjectPtr<UKzDialogueAsset> DialogueAsset;
 
-	/** Channel the lines will be pushed onto. */
+	/** Channel the lines play on. Empty resolves each line's own channel (line, asset, settings). */
 	UPROPERTY(EditAnywhere, Category = "Dialogue")
 	FGameplayTag Channel;
 

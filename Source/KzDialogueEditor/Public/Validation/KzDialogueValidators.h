@@ -32,6 +32,7 @@ public:
  * Reports broken custom audio playback ranges: an empty range (AudioEndTime at or before
  * AudioStartTime), a start beyond the wave, or a range on audio that is also marked for
  * localization (localized takes have their own timing, so a source-wave cut cannot apply).
+ * Also an AudioStartDelay left on a line without audio.
  */
 UCLASS()
 class KZDIALOGUEEDITOR_API UKzDialogueValidator_AudioRange : public UKzAssetValidator

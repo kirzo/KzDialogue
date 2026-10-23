@@ -42,11 +42,11 @@ float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
 	return Length + FMath::Max(0.0f, AudioStartDelay);
 }
 
-FText FKzDialogueSpeaker::GetDisplayLabel(const UObject* WorldContextObject) const
+FText FKzDialogueSpeaker::GetSubtitleName(const UObject* WorldContextObject) const
 {
 	if (!Asset)
 	{
-		return NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
+		return FText::GetEmpty();
 	}
 
 	const FKzNamedTokenOverride* Override = UKzNamedTokenSubsystem::FindOverrideFor(WorldContextObject, Asset->Token);
@@ -56,8 +56,13 @@ FText FKzDialogueSpeaker::GetDisplayLabel(const UObject* WorldContextObject) con
 		return Resolved;
 	}
 
-	// Editor fallback for a freshly created asset with no name authored yet.
+	// A freshly created asset with no name authored yet.
 	return FText::FromString(FName::NameToDisplayString(Asset->GetName(), false));
+}
+
+FText FKzDialogueSpeaker::GetEditorLabel() const
+{
+	return Asset ? GetSubtitleName(nullptr) : NSLOCTEXT("KzDialogue", "Narration", "<Narration>");
 }
 
 bool FKzDialogueLineRef::TryResolve(FKzDialogueLine& OutLine) const
