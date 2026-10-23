@@ -50,7 +50,6 @@ A `UPrimaryDataAsset` describing a dialogue as an ordered list of lines. Each li
 * **Localizable text** (`FText`) and an optional `USoundBase` audio clip.
 * **Explicit duration**, with fallback to the audio length and finally to a default.
 * **Tags** (`FGameplayTagContainer`) for mood, intent, channel hints, etc.
-* **Audio params** (`FInstancedPropertyBag`) forwarded to the spawned `UAudioComponent` (bool, int, float, name, object, sound wave).
 * **Actions** (`UKzDialogueAction`, `Instanced`) that fire on line start/end without coupling the core to specific gameplay code.
 
 Each line has a stable `FGuid` ID, automatically generated and preserved across edits and duplications, so external references (Sequencer sections, save data) survive reorders.
@@ -59,15 +58,15 @@ Each line has a stable `FGuid` ID, automatically generated and preserved across 
 
 `UKzDialogueProvider` is the abstract source of lines consumed by the player. Two implementations ship out of the box:
 
-* `UKzAssetDialogueProvider`: linear playback of a `UKzDialogueAsset`, with optional start/end line clamps.
 * `UKzManualDialogueProvider`: ad-hoc single line, ideal for system messages and barks.
+* `UKzLineListDialogueProvider`: pre-resolved lines played as one dialogue (line lists, line refs, each run of an asset).
 
 ### 🎬 Player (`UKzDialoguePlayer`)
 
 The engine of the system: a non-widget `UObject` with an explicit state machine (`Idle → Entering → LineEntering → LinePlaying → LineExiting → Exiting`), audio management, line timing, and a clean event API.
 
 * **Inversion of control**: views drive their own animations and notify the player when ready (`NotifyEnterFinished`, `NotifyLineEnterFinished`, ...). Views without animations skip those phases automatically.
-* **Commands**: `Play`, `Pause`, `Resume`, `Stop`, `Abort`, `Interrupt`, `Next`.
+* **Commands**: `Pause`, `Resume`, `Stop`, `Abort`, `Interrupt`, `Next`. Playback starts through the subsystem, which arbitrates the channel first.
 * **Multicast events**: `OnDialogueStarted/Finished`, `OnLineStarted/Finished`, `OnPaused/Resumed`, plus per-phase view request events.
 
 ### 🎚️ Subsystem & Channels (`UKzDialogueSubsystem`)

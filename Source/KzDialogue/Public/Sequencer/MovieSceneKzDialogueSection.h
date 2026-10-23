@@ -28,10 +28,6 @@ public:
   UPROPERTY(EditAnywhere, Category = "Dialogue")
   FGuid LineId;
 
-  /** Cached display preview, kept up to date by the editor for nicer track UI. */
-  UPROPERTY(VisibleAnywhere, Category = "Dialogue")
-  FString DisplayName;
-
   //~ UMovieSceneSection
   virtual EMovieSceneChannelProxyType CacheChannelProxy() override;
 };

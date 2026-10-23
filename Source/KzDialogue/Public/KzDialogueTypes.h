@@ -6,7 +6,6 @@
 #include "GameplayTagContainer.h"
 #include "StructUtils/InstancedStruct.h"
 #include "InstancedStructContainer.h"
-#include "StructUtils/PropertyBag.h"
 #include "NativeGameplayTags.h"
 #include "KzDialogueTypes.generated.h"
 
@@ -209,14 +208,6 @@ struct KZDIALOGUE_API FKzDialogueLine
 	FGameplayTagContainer Tags;
 
 	/**
-	 * Audio parameter overrides applied to the spawned UAudioComponent. Backed by
-	 * FInstancedPropertyBag so any property type (bool, int, float, name, object,
-	 * sound wave) can be stored without a custom variant.
-	 */
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Line|Audio")
-	FInstancedPropertyBag AudioParams;
-
-	/**
 	 * Named arguments for a templated Text ("{Count}", "{PlayerName}"), applied by views at
 	 * display time via GetFormattedText. Runtime data set by the call site on its line copy
 	 * (see UKzDialogueFunctionLibrary::SetLine*Argument), never authored or serialized; empty
@@ -253,7 +244,6 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** What having NO audio means for this line: pending recording work, or text-only by design. Inherit = the project settings default; a text-only game sets it once there. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Audio", meta = (EditCondition = "Audio == nullptr"))
 	EKzLineVoicePolicy VoicePolicy = EKzLineVoicePolicy::Inherit;
-#endif
 
 	/** Shared localization identity of Text: when valid, the text keys under KzDialogue.Shared/<SharedTextId>, sharing ONE translation with every line carrying the same id. Text only; audio, timing and VO are per line and unrelated. Editing the text detaches automatically (SharedTextSourceHash). */
 	UPROPERTY()
@@ -270,6 +260,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** CRC32 of Text's source string at the moment Audio was last assigned. Compared against SourceTextHash to flag lines whose text changed after their audio was recorded. 0 = no audio. */
 	UPROPERTY()
 	uint32 RecordedTextHash = 0;
+#endif
 
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 

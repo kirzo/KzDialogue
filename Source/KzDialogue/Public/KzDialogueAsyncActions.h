@@ -92,7 +92,6 @@ protected:
 
 	FGameplayTag Channel;
 	int32 Priority = -1;
-	bool bStartImmediately = true;
 	bool bResolved = false;
 	FGuid LineBindingHandle;
 };
@@ -109,8 +108,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLine : public UKzAsyncDialogueAction
 
 public:
 	/** Plays a dialogue line and waits for that specific line to finish. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Ref (Async)", AutoCreateRefTerm = "Line", AdvancedDisplay = "Channel,Priority,bStartImmediately"))
-	static UKzAsyncPlayDialogueLine* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Ref (Async)", AutoCreateRefTerm = "Line", AdvancedDisplay = "Channel,Priority"))
+	static UKzAsyncPlayDialogueLine* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
 	/** Fired right after the line is requested. Carries the channel player; Line is not set yet. */
 	UPROPERTY(BlueprintAssignable)
@@ -147,8 +146,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineInline : public UKzAsyncPlayDialogu
 
 public:
 	/** Plays a line from a dialogue asset and waits for that specific line to finish. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line From Asset (Async)", AdvancedDisplay = "Channel,Priority,bStartImmediately"))
-	static UKzAsyncPlayDialogueLineInline* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line From Asset (Async)", AdvancedDisplay = "Channel,Priority"))
+	static UKzAsyncPlayDialogueLineInline* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 };
 
 /**
@@ -211,8 +210,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineList : public UKzAsyncDialogueSeque
 
 public:
 	/** Plays a list of dialogue lines sequentially and waits until the last one finishes. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority,bStartImmediately"))
-	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
+	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
 protected:
 	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const override;
@@ -230,8 +229,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineRefs : public UKzAsyncDialogueSeque
 
 public:
 	/** Plays an array of dialogue line refs sequentially and waits until the last one finishes. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority,bStartImmediately"))
-	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, bool bStartImmediately = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
+	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
 protected:
 	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const override;
@@ -253,8 +252,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueAsset : public UKzAsyncDialogueAction
 
 public:
 	/** Plays a dialogue asset and waits until the whole dialogue finishes. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,bStartImmediately,AdvanceMode"))
-	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,AdvanceMode"))
+	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Fired right after the asset is requested. Carries the channel player; Line is not set yet. */
 	UPROPERTY(BlueprintAssignable)

@@ -152,16 +152,6 @@ void FKzDialogueTrackEditor::HandleAddSection(FKzDialogueAssetReference Referenc
 	UMovieSceneKzDialogueSection* Section = NewObject<UMovieSceneKzDialogueSection>(Track, NAME_None, RF_Transactional);
 	Section->LineId = LineId;
 	Section->SetRange(TRange<FFrameNumber>(StartFrame, EndFrame));
-
-	if (UKzDialogueAsset* Asset = Track->DialogueAsset)
-	{
-		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(LineId, Line))
-		{
-			Section->DisplayName = Line.Text.ToString().Left(60);
-		}
-	}
-
 	Track->AddSection(*Section);
 
 	if (SequencerPin.IsValid())
@@ -231,7 +221,7 @@ FText FKzDialogueSection::GetSectionTitle() const
 			return Line.GetDisplayLabel(MaxLen);
 		}
 	}
-	return FText::FromString(Section->DisplayName);
+	return LOCTEXT("MissingLine", "<missing line>");
 }
 
 int32 FKzDialogueSection::OnPaintSection(FSequencerSectionPainter& InPainter) const

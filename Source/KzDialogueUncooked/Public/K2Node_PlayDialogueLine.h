@@ -38,7 +38,6 @@ public:
 	/** Pin name constants; Asset and LineId live in KzDialogueK2Nodes. */
 	static const FName PN_Channel;
 	static const FName PN_Priority;
-	static const FName PN_StartImmediately;
 	static const FName PN_WorldContext;
 	static const FName PN_ReturnValue;
 };

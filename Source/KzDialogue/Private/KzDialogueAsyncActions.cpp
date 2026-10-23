@@ -133,14 +133,13 @@ void UKzAsyncDialogueAction::Interrupt()
 // UKzAsyncPlayDialogueLine
 // ------------------------------------------------------------------------------------------------
 
-UKzAsyncPlayDialogueLine* UKzAsyncPlayDialogueLine::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, FGameplayTag InChannel, int32 InPriority, bool bInStartImmediately)
+UKzAsyncPlayDialogueLine* UKzAsyncPlayDialogueLine::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, FGameplayTag InChannel, int32 InPriority)
 {
 	UKzAsyncPlayDialogueLine* Action = NewObject<UKzAsyncPlayDialogueLine>();
 	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
 	Action->LaunchRef = Line;
 	Action->Channel = InChannel;
 	Action->Priority = InPriority;
-	Action->bStartImmediately = bInStartImmediately;
 	if (WorldContextObject)
 	{
 		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
@@ -170,7 +169,7 @@ void UKzAsyncPlayDialogueLine::Activate()
 		return;
 	}
 
-	UKzDialoguePlayer* Result = UKzDialogueFunctionLibrary::PlayDialogueLine(WorldContext, LaunchRef, Channel, Priority, bStartImmediately);
+	UKzDialoguePlayer* Result = UKzDialogueFunctionLibrary::PlayDialogueLine(WorldContext, LaunchRef, Channel, Priority);
 	if (Result != DialoguePlayer)
 	{
 		NotifyCancelled();
@@ -210,7 +209,7 @@ bool UKzAsyncPlayDialogueLine::IsOwnContent(UKzDialoguePlayer& Player, const FKz
 // UKzAsyncPlayDialogueLineInline
 // ------------------------------------------------------------------------------------------------
 
-UKzAsyncPlayDialogueLineInline* UKzAsyncPlayDialogueLineInline::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 InPriority, bool bInStartImmediately)
+UKzAsyncPlayDialogueLineInline* UKzAsyncPlayDialogueLineInline::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 InPriority)
 {
 	UKzAsyncPlayDialogueLineInline* Action = NewObject<UKzAsyncPlayDialogueLineInline>();
 	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
@@ -218,7 +217,6 @@ UKzAsyncPlayDialogueLineInline* UKzAsyncPlayDialogueLineInline::PlayDialogueLine
 	Action->LaunchRef.LineId = LineId;
 	Action->Channel = InChannel;
 	Action->Priority = InPriority;
-	Action->bStartImmediately = bInStartImmediately;
 	if (WorldContextObject)
 	{
 		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
@@ -309,14 +307,13 @@ bool UKzAsyncDialogueSequenceAction::IsOwnContent(UKzDialoguePlayer& Player, con
 // UKzAsyncPlayDialogueLineList
 // ------------------------------------------------------------------------------------------------
 
-UKzAsyncPlayDialogueLineList* UKzAsyncPlayDialogueLineList::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, FGameplayTag InChannel, int32 InPriority, bool bInStartImmediately)
+UKzAsyncPlayDialogueLineList* UKzAsyncPlayDialogueLineList::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, FGameplayTag InChannel, int32 InPriority)
 {
 	UKzAsyncPlayDialogueLineList* Action = NewObject<UKzAsyncPlayDialogueLineList>();
 	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
 	Action->LaunchList = Lines;
 	Action->Channel = InChannel;
 	Action->Priority = InPriority;
-	Action->bStartImmediately = bInStartImmediately;
 	if (WorldContextObject)
 	{
 		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
@@ -342,21 +339,20 @@ UKzDialoguePlayer* UKzAsyncPlayDialogueLineList::LaunchPlayback()
 	UKzDialogueAsset* Loaded = LaunchList.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, bStartImmediately, Subsystem->ResolveAdvanceMode(EKzDialogueAdvanceMode::Inherit, Loaded));
+	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, Subsystem->ResolveAdvanceMode(EKzDialogueAdvanceMode::Inherit, Loaded));
 }
 
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncPlayDialogueLineRefs
 // ------------------------------------------------------------------------------------------------
 
-UKzAsyncPlayDialogueLineRefs* UKzAsyncPlayDialogueLineRefs::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, FGameplayTag InChannel, int32 InPriority, bool bInStartImmediately)
+UKzAsyncPlayDialogueLineRefs* UKzAsyncPlayDialogueLineRefs::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, FGameplayTag InChannel, int32 InPriority)
 {
 	UKzAsyncPlayDialogueLineRefs* Action = NewObject<UKzAsyncPlayDialogueLineRefs>();
 	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
 	Action->LaunchRefs = Lines;
 	Action->Channel = InChannel;
 	Action->Priority = InPriority;
-	Action->bStartImmediately = bInStartImmediately;
 	if (WorldContextObject)
 	{
 		Action->RegisterWithGameInstance(const_cast<UObject*>(WorldContextObject));
@@ -371,20 +367,19 @@ void UKzAsyncPlayDialogueLineRefs::GatherEntryRefs(TArray<FKzDialogueLineRef>& O
 
 UKzDialoguePlayer* UKzAsyncPlayDialogueLineRefs::LaunchPlayback()
 {
-	return UKzDialogueFunctionLibrary::PlayDialogueLineRefs(WorldContext, LaunchRefs, Channel, Priority, bStartImmediately);
+	return UKzDialogueFunctionLibrary::PlayDialogueLineRefs(WorldContext, LaunchRefs, Channel, Priority);
 }
 
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncPlayDialogueAsset
 // ------------------------------------------------------------------------------------------------
 
-UKzAsyncPlayDialogueAsset* UKzAsyncPlayDialogueAsset::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* InAsset, FGameplayTag InChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
+UKzAsyncPlayDialogueAsset* UKzAsyncPlayDialogueAsset::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* InAsset, FGameplayTag InChannel, EKzDialogueAdvanceMode InAdvanceMode)
 {
 	UKzAsyncPlayDialogueAsset* Action = NewObject<UKzAsyncPlayDialogueAsset>();
 	Action->WorldContext = const_cast<UObject*>(WorldContextObject);
 	Action->Asset = InAsset;
 	Action->Channel = InChannel;
-	Action->bStartImmediately = bInStartImmediately;
 	Action->AdvanceMode = InAdvanceMode;
 	if (WorldContextObject)
 	{
@@ -405,7 +400,7 @@ void UKzAsyncPlayDialogueAsset::Activate()
 
 	// The session resolves each line's channel and chains runs across channel changes, finishing ONCE
 	// for the whole asset. We wait on it instead of a single channel player.
-	Session = UKzDialogueFunctionLibrary::PlayDialogueAsset(WorldContext, Asset, Channel, bStartImmediately, AdvanceMode);
+	Session = UKzDialogueFunctionLibrary::PlayDialogueAsset(WorldContext, Asset, Channel, AdvanceMode);
 	if (!Session)
 	{
 		NotifyCancelled();

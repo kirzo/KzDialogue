@@ -5,7 +5,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueAsset.h"
 
-void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
+void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode)
 {
 	TArray<FGuid> EntryIds;
 	if (InAsset)
@@ -16,15 +16,14 @@ void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialog
 			EntryIds.Add(Line.LineId);
 		}
 	}
-	StartEntries(InSubsystem, InAsset, EntryIds, ExplicitChannel, UKzDialogueSubsystem::InheritPriority, bInStartImmediately, InAdvanceMode);
+	StartEntries(InSubsystem, InAsset, EntryIds, ExplicitChannel, UKzDialogueSubsystem::InheritPriority, InAdvanceMode);
 }
 
-void UKzDialogueAssetSession::StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode)
+void UKzDialogueAssetSession::StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode)
 {
 	Subsystem = InSubsystem;
 	Asset = InAsset;
 	Priority = InPriority;
-	bStartImmediately = bInStartImmediately;
 	ResolvedAdvanceMode = (InSubsystem && InAsset) ? InSubsystem->ResolveAdvanceMode(InAdvanceMode, InAsset) : EKzDialogueAdvanceMode::Automatic;
 
 	// Split the entries into maximal consecutive runs sharing a resolved channel. A valid explicit
@@ -73,9 +72,8 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 
 	// Pass the run's channel EXPLICITLY (bypasses the internal first-entry resolution, so playback channel
 	// == grouping channel) and the caller's priority (InheritPriority by default -> the asset's Priority
-	// hint). Chained runs start immediately; run 0 honours bStartImmediately.
-	const bool bStart = (RunIndex == 0) ? bStartImmediately : true;
-	UKzDialoguePlayer* Player = Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, bStart, ResolvedAdvanceMode);
+	// hint).
+	UKzDialoguePlayer* Player = Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, ResolvedAdvanceMode);
 
 	if (!Player)
 	{

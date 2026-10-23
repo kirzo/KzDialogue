@@ -60,10 +60,10 @@ public:
 	void Interrupt();
 
 	/** Subsystem entry point: split the asset into runs and start. Call UKzDialogueSubsystem::PlayAsset, not this. */
-	void Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode);
+	void Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode);
 
 	/** Subsystem entry point: same as Start, but over an explicit ordered subset of the asset's entries (lines or aliases). Call UKzDialogueSubsystem::PlayLineList, not this. */
-	void StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, bool bInStartImmediately, EKzDialogueAdvanceMode InAdvanceMode);
+	void StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode);
 
 private:
 	void LaunchRun(int32 RunIndex);
@@ -98,7 +98,6 @@ private:
 	int32 Priority = -1;
 	EKzDialogueAdvanceMode ResolvedAdvanceMode = EKzDialogueAdvanceMode::Automatic;
 	EKzDialogueFinishReason FinishReason = EKzDialogueFinishReason::Completed;
-	bool bStartImmediately = true;
 	bool bActive = false;
 	bool bFinished = false;
 };

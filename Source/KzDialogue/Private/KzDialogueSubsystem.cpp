@@ -239,7 +239,7 @@ UKzDialogueSubsystem::EKzPlayAdmission UKzDialogueSubsystem::Admit(const UKzDial
 	return Result;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (Player.IsPlaying() || IsValid(Player.GetProvider()))
 	{
@@ -256,14 +256,11 @@ UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player
 	Player.AdvanceMode = (AdvanceMode == EKzDialogueAdvanceMode::Inherit) ? EKzDialogueAdvanceMode::Automatic : AdvanceMode;
 	Player.SetProvider(Provider);
 
-	if (bStartImmediately)
-	{
-		Player.StartDialogue();
-	}
+	Player.StartDialogue();
 	return &Player;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Provider))
 	{
@@ -280,10 +277,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 	{
 		return nullptr;
 	}
-	return StartOnPlayer(*Player, Provider, ResolvedPriority, /*bInterruptible=*/true, bStartImmediately, AdvanceMode);
+	return StartOnPlayer(*Player, Provider, ResolvedPriority, /*bInterruptible=*/true, AdvanceMode);
 }
 
-UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset))
 	{
@@ -294,11 +291,11 @@ UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset
 	// chaining them. A valid InChannel forces every line onto it -> one run, identical to the old play.
 	UKzDialogueAssetSession* Session = NewObject<UKzDialogueAssetSession>(this);
 	AssetSessions.Add(Session);
-	Session->Start(this, Asset, InChannel, bStartImmediately, AdvanceMode);
+	Session->Start(this, Asset, InChannel, AdvanceMode);
 	return Session;
 }
 
-UKzDialogueAssetSession* UKzDialogueSubsystem::PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialogueAssetSession* UKzDialogueSubsystem::PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset))
 	{
@@ -308,7 +305,7 @@ UKzDialogueAssetSession* UKzDialogueSubsystem::PlayLineList(UKzDialogueAsset* As
 	// Same session machinery as PlayAsset, over the caller's subset: per-entry channels, chained runs.
 	UKzDialogueAssetSession* Session = NewObject<UKzDialogueAssetSession>(this);
 	AssetSessions.Add(Session);
-	Session->StartEntries(this, Asset, LineIds, InChannel, Priority, bStartImmediately, AdvanceMode);
+	Session->StartEntries(this, Asset, LineIds, InChannel, Priority, AdvanceMode);
 	return Session;
 }
 
@@ -327,7 +324,7 @@ static bool IsPlayingManualLine(const UKzDialoguePlayer& Player, const FGuid& Li
 	return ManualProv && ManualProv->Line.LineId == LineId;
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority)
 {
 	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
 	// paths (PlayAssetLine/-List, PlayLineRefs) do this via ResolveAssetEntry; an ad-hoc line has none.
@@ -342,10 +339,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 
 	if (IsPlayingManualLine(*Player, Line.LineId)) { return Player; }
 	if (Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
-	return CommitLine(*Player, Line, ResolvedPriority, /*bInterruptible=*/true, bStartImmediately);
+	return CommitLine(*Player, Line, ResolvedPriority, /*bInterruptible=*/true);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible)
 {
 	if (IsPlayingManualLine(Player, Line.LineId)) { return &Player; }
 
@@ -360,7 +357,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, c
 		return &Player;
 	}
 
-	return StartOnPlayer(Player, UKzManualDialogueProvider::Create(this, Line), Priority, bInterruptible, bStartImmediately, EKzDialogueAdvanceMode::Automatic);
+	return StartOnPlayer(Player, UKzManualDialogueProvider::Create(this, Line), Priority, bInterruptible, EKzDialogueAdvanceMode::Automatic);
 }
 
 bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine)
@@ -382,7 +379,7 @@ bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGui
 	return Asset->TryGetLineById(LineIdToPlay, OutLine);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority)
 {
 	if (!IsValid(Asset) || !LineId.IsValid()) { return nullptr; }
 
@@ -401,10 +398,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 	// Aliases resolve only once admitted, so a refused request leaves their cooldown and shuffle bag untouched.
 	FKzDialogueLine Line;
 	if (!ResolveAssetEntry(Asset, LineId, Line)) { return nullptr; }
-	return CommitLine(*Player, Line, ResolvedPriority, Asset->bInterruptible, bStartImmediately);
+	return CommitLine(*Player, Line, ResolvedPriority, Asset->bInterruptible);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
 {
 	if (!IsValid(Asset) || LineIds.IsEmpty()) { return nullptr; }
 
@@ -436,10 +433,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 	if (Lines.IsEmpty()) { return nullptr; }
 
-	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, Asset->bInterruptible, bStartImmediately, AdvanceMode);
+	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, Asset->bInterruptible, AdvanceMode);
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority, bool bStartImmediately)
+UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority)
 {
 	if (Refs.IsEmpty()) { return nullptr; }
 
@@ -475,7 +472,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLi
 
 	if (Lines.IsEmpty()) { return nullptr; }
 
-	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, !FirstAsset || FirstAsset->bInterruptible, bStartImmediately, EKzDialogueAdvanceMode::Automatic);
+	return StartOnPlayer(*Player, UKzLineListDialogueProvider::Create(this, Lines), ResolvedPriority, !FirstAsset || FirstAsset->bInterruptible, EKzDialogueAdvanceMode::Automatic);
 }
 
 void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)

@@ -173,7 +173,7 @@ void UKzBarkComponent::PlayBark()
 	}
 
 	const TArray<FKzDialogueLineRef> Refs = { Bark };
-	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority, true);
+	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority);
 	if (!Player)
 	{
 		// Rejected (priority / cooldown / unresolvable) — try again after another interval.

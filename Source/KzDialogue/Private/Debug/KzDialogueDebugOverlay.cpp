@@ -57,17 +57,7 @@ namespace KzDialogueDebugDraw
 
 	static FString ProviderTypeName(const UKzDialogueProvider* Provider)
 	{
-		if (!IsValid(Provider)) { return TEXT("none"); }
-		if (const UKzAssetDialogueProvider* Asset = Cast<UKzAssetDialogueProvider>(Provider))
-		{
-			const FString AssetName = IsValid(Asset->Asset) ? Asset->Asset->GetName() : TEXT("<null>");
-			return FString::Printf(TEXT("AssetProvider (%s)"), *AssetName);
-		}
-		if (Provider->IsA<UKzManualDialogueProvider>())
-		{
-			return TEXT("ManualProvider");
-		}
-		return Provider->GetClass()->GetName();
+		return IsValid(Provider) ? Provider->GetClass()->GetName() : TEXT("none");
 	}
 
 	/** Draw a single line of text and advance Y. */

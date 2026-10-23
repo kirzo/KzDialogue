@@ -7,9 +7,7 @@
 #include "KzDialogueTypes.h"
 #include "KzDialogueProvider.generated.h"
 
-class UKzDialogueAsset;
-
-/** Abstract source of the lines a player consumes, whatever their origin (asset, manual push, runtime generation). */
+/** Abstract source of the lines a player consumes, whatever their origin (manual push, a resolved list, runtime generation). */
 UCLASS(Abstract, Blueprintable, EditInlineNew, DefaultToInstanced)
 class KZDIALOGUE_API UKzDialogueProvider : public UObject
 {
@@ -26,65 +24,10 @@ public:
 	FKzDialogueLine Advance();
 	virtual FKzDialogueLine Advance_Implementation() PURE_VIRTUAL(UKzDialogueProvider::Advance, return {};);
 
-	/** Returns the line at the cursor without advancing. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
-	FKzDialogueLine Current() const;
-	virtual FKzDialogueLine Current_Implementation() const PURE_VIRTUAL(UKzDialogueProvider::Current, return {};);
-
-	/** True if the cursor is on (or before) the first line. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
-	bool IsFirst() const;
-	virtual bool IsFirst_Implementation() const { return CursorIndex <= 0; }
-
-	/** True if the cursor is on the last line. */
-	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
-	bool IsLast() const;
-	virtual bool IsLast_Implementation() const { return !HasNext(); }
-
 	/** Reset the cursor so playback can start over. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
 	void Reset();
-	virtual void Reset_Implementation() { CursorIndex = INDEX_NONE; }
-
-protected:
-	/** Index into the currently active line list. INDEX_NONE means "before first". */
-	UPROPERTY(Transient)
-	int32 CursorIndex = INDEX_NONE;
-};
-
-// ---------------------------------------------------------------------------------------
-// Asset provider: linear playback of a UKzDialogueAsset.
-// ---------------------------------------------------------------------------------------
-
-UCLASS(BlueprintType, DisplayName = "Dialogue Provider (Asset)")
-class KZDIALOGUE_API UKzAssetDialogueProvider : public UKzDialogueProvider
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Provider")
-	TObjectPtr<UKzDialogueAsset> Asset;
-
-	/** Optional starting line. If invalid, starts from the beginning. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Provider")
-	FGuid StartLineId;
-
-	/** Optional ending line (inclusive). If invalid, plays until the asset ends. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Provider")
-	FGuid EndLineId;
-
-	/** Convenience factory. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Provider", meta = (DefaultToSelf = "Outer"))
-	static UKzAssetDialogueProvider* Create(UObject* Outer, UKzDialogueAsset* InAsset);
-
-	virtual bool HasNext_Implementation() const override;
-	virtual FKzDialogueLine Advance_Implementation() override;
-	virtual FKzDialogueLine Current_Implementation() const override;
-	virtual void Reset_Implementation() override;
-
-private:
-	int32 ResolveStartIndex() const;
-	int32 ResolveEndIndex() const;
+	virtual void Reset_Implementation() {}
 };
 
 // ---------------------------------------------------------------------------------------
@@ -116,9 +59,6 @@ public:
 
 	virtual bool HasNext_Implementation() const override { return !bConsumed; }
 	virtual FKzDialogueLine Advance_Implementation() override;
-	virtual FKzDialogueLine Current_Implementation() const override { return Line; }
-	virtual bool IsFirst_Implementation() const override { return !bConsumed; }
-	virtual bool IsLast_Implementation() const override { return true; }
 	virtual void Reset_Implementation() override { bConsumed = false; }
 };
 
@@ -144,5 +84,10 @@ public:
 
 	virtual bool HasNext_Implementation() const override { return CursorIndex + 1 < Lines.Num(); }
 	virtual FKzDialogueLine Advance_Implementation() override;
-	virtual FKzDialogueLine Current_Implementation() const override;
+	virtual void Reset_Implementation() override { CursorIndex = INDEX_NONE; }
+
+private:
+	/** Index of the line being played; INDEX_NONE before the first. */
+	UPROPERTY(Transient)
+	int32 CursorIndex = INDEX_NONE;
 };

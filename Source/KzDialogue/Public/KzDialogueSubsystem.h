@@ -71,8 +71,10 @@ public:
 	 * the playing dialogue refuse interruption; a channel only playing its exit animations takes anything.
 	 * Returns the player, or nullptr when refused. InheritPriority falls back to the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
-	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode"))
+	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
+
+	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 
 	/**
 	 * Play a whole dialogue asset, resolving EACH line's channel and chaining runs across channel changes.
@@ -80,43 +82,38 @@ public:
 	 * OnDialogueFinished / IsPlaying). A valid InChannel forces every line onto it (single-channel,
 	 * single run). AdvanceMode defaults to the asset's.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
-	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/**
 	 * Play an ordered subset of an asset's entries (lines or aliases) with the same per-entry channel
 	 * resolution and run chaining as PlayAsset. Returns a session that completes once for the whole list.
 	 * A valid InChannel forces every entry onto it (single run); InheritPriority falls back to the asset
-	 * hint / channel default. BP callers go through UKzDialogueFunctionLibrary::PlayDialogueLineList.
+	 * hint / channel default.
 	 */
-	UKzDialogueAssetSession* PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = InheritPriority, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UKzDialogueAssetSession* PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = InheritPriority, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
 	/** Convenience wrapper: build a manual single-line provider and play it. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1);
 
 	/**
 	 * Play a line or alias from a dialogue asset by GUID. The asset checks both
 	 * Lines and Aliases tables internally, so the same call site works for either.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1);
 
 	/**
 	 * Play several lines or aliases from one dialogue asset as a SINGLE sequential dialogue.
 	 * Aliases are resolved at launch (stateful: shuffle bags, cooldowns...); entries that fail
 	 * to resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately,AdvanceMode"))
-	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
+	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
 
 	/**
 	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
 	 * sequential dialogue. Aliases are resolved at launch (stateful); entries that fail to
 	 * resolve are skipped. The first ref's asset gives the channel, priority hint and interruptibility.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "bStartImmediately"))
-	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1, bool bStartImmediately = true);
+	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1);
 
 	/** Stop the dialogue on every channel matching the scope (graceful, with exit animations). E.g. Dialogue.Channel.Bark stops all bark channels; a leaf tag stops just that one. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
@@ -216,10 +213,10 @@ private:
 	EKzPlayAdmission Admit(const UKzDialoguePlayer& Player, int32 Priority, const FKzDialogueChannelDefinition* ChannelDef) const;
 
 	/** Ends whatever occupies the admitted player and starts Provider on it. Null when a listener of that ending took the channel first. */
-	UKzDialoguePlayer* StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, bool bStartImmediately, EKzDialogueAdvanceMode AdvanceMode);
+	UKzDialoguePlayer* StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, EKzDialogueAdvanceMode AdvanceMode);
 
 	/** Plays one resolved line on an admitted player: hot-swaps a playing manual line, else starts a fresh manual provider. */
-	UKzDialoguePlayer* CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible, bool bStartImmediately);
+	UKzDialoguePlayer* CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible);
 
 	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
 	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);

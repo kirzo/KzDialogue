@@ -63,12 +63,6 @@ void UKzDialoguePlayer::BeginDestroy()
 // Public commands
 // ---------------------------------------------------------------------------------------
 
-void UKzDialoguePlayer::Play(UKzDialogueProvider* InProvider)
-{
-	SetProvider(InProvider);
-	StartDialogue();
-}
-
 void UKzDialoguePlayer::SetProvider(UKzDialogueProvider* InProvider)
 {
 	if (!IsValid(InProvider)) return;
@@ -636,72 +630,6 @@ void UKzDialoguePlayer::StartLineAudioNow()
 		ActiveAudio->bIsUISound = !World->IsGameWorld();
 	}
 	ActiveAudio->bAutoDestroy = true;
-
-	// Apply audio params from the property bag. Each value is forwarded to the audio
-	// component using the type-appropriate setter.
-	const FInstancedPropertyBag& Bag = CurrentLine.AudioParams;
-	if (const UPropertyBag* Desc = Bag.GetPropertyBagStruct())
-	{
-		for (const FPropertyBagPropertyDesc& Prop : Desc->GetPropertyDescs())
-		{
-			const FName ParamName = Prop.Name;
-			if (ParamName.IsNone()) { continue; }
-
-			switch (Prop.ValueType)
-			{
-			case EPropertyBagPropertyType::Bool:
-			{
-				if (auto Result = Bag.GetValueBool(ParamName); Result.HasValue())
-				{
-					ActiveAudio->SetBoolParameter(ParamName, Result.GetValue());
-				}
-				break;
-			}
-			case EPropertyBagPropertyType::Int32:
-			{
-				if (auto Result = Bag.GetValueInt32(ParamName); Result.HasValue())
-				{
-					ActiveAudio->SetIntParameter(ParamName, Result.GetValue());
-				}
-				break;
-			}
-			case EPropertyBagPropertyType::Float:
-			case EPropertyBagPropertyType::Double:
-			{
-				if (auto Result = Bag.GetValueDouble(ParamName); Result.HasValue())
-				{
-					ActiveAudio->SetFloatParameter(ParamName, static_cast<float>(Result.GetValue()));
-				}
-				break;
-			}
-			case EPropertyBagPropertyType::Name:
-			{
-				if (auto Result = Bag.GetValueName(ParamName); Result.HasValue())
-				{
-					ActiveAudio->SetStringParameter(ParamName, Result.GetValue().ToString());
-				}
-				break;
-			}
-			case EPropertyBagPropertyType::Object:
-			{
-				if (auto Result = Bag.GetValueObject(ParamName); Result.HasValue())
-				{
-					if (USoundWave* Wave = Cast<USoundWave>(Result.GetValue()))
-					{
-						ActiveAudio->SetWaveParameter(ParamName, Wave);
-					}
-					else
-					{
-						ActiveAudio->SetObjectParameter(ParamName, Result.GetValue());
-					}
-				}
-				break;
-			}
-			default:
-				break;
-			}
-		}
-	}
 
 	// Bind BEFORE Play: the engine captures whether to run the envelope follower (bUpdateSingleEnvelopeValue)
 	// from OnAudioSingleEnvelopeValue.IsBound() at sound-start time, so binding after Play never fires it.

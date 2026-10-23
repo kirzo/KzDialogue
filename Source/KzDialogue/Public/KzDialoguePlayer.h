@@ -85,7 +85,7 @@ public:
 	 * Automatic: each line auto-advances after its duration. Manual: each line holds until
 	 * Next() is called (RPG-style). Set per session by the subsystem (asset > callsite override).
 	 */
-	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Player")
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")
 	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic;
 
 	/** Channel this player is associated with (set by the subsystem on creation). */
@@ -154,12 +154,7 @@ public:
 	// Public API (commands)
 	// -------------------------------------------------------------------------------
 
-	/** Assigns a provider and immediately starts playback. Cancels current session. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
-	void Play(UKzDialogueProvider* InProvider);
-
-	/** Assigns a provider WITHOUT starting playback. Use StartDialogue() later. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
+	/** Assigns a provider WITHOUT starting playback, cancelling the current session; StartDialogue starts it. Blueprints play through the subsystem, which admits the request first. */
 	void SetProvider(UKzDialogueProvider* InProvider);
 
 	/** Starts playback of the currently assigned provider. */
