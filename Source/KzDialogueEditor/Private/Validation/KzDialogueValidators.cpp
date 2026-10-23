@@ -299,8 +299,7 @@ void UKzDialogueValidator_AliasInvalidLine::Validate_Implementation(const UObjec
 		const FKzDialogueAlias& Alias = Dialogue->Aliases[i];
 		for (const FGuid& LineId : Alias.LineIds)
 		{
-			FKzDialogueLine Found;
-			if (!Dialogue->TryGetLineById(LineId, Found))
+			if (!Dialogue->FindLine(LineId))
 			{
 				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 					EKzValidationSeverity::Error,
@@ -333,10 +332,10 @@ void UKzDialogueValidator_AliasSpeakerMismatch::Validate_Implementation(const UO
 
 		for (const FGuid& LineId : Alias.LineIds)
 		{
-			FKzDialogueLine Line;
-			if (!Dialogue->TryGetLineById(LineId, Line)) { continue; } // covered by InvalidLine validator
+			const FKzDialogueLine* Line = Dialogue->FindLine(LineId);
+			if (!Line) { continue; } // covered by InvalidLine validator
 
-			if (!(Line.Speaker == Alias.Speaker))
+			if (!(Line->Speaker == Alias.Speaker))
 			{
 				FKzValidationIssue Issue = FKzValidationIssue::WithContextId(
 					EKzValidationSeverity::Error,
@@ -344,7 +343,7 @@ void UKzDialogueValidator_AliasSpeakerMismatch::Validate_Implementation(const UO
 						"Alias '{0}' (speaker: {1}) references a line with a different speaker ({2})."),
 						FText::FromName(Alias.AliasName),
 						Alias.Speaker.GetEditorLabel(),
-						Line.Speaker.GetEditorLabel()),
+						Line->Speaker.GetEditorLabel()),
 					Id, Alias.AliasId);
 				Issue.ContextIndex = i;
 				OutIssues.Add(Issue);

@@ -597,6 +597,7 @@ bool KzDialogueL10N::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats
 	BeginLogPage(Log, FText::Format(LOCTEXT("SourceFixPage", "Source fixes {0}"), FText::FromString(FPaths::GetCleanFilename(CsvPath))));
 
 	TMap<FString, UObject*> LoadedAssets;
+	TSet<UObject*> FixedAssets;
 	for (int32 RowIdx = 1; RowIdx < Rows.Num(); ++RowIdx)
 	{
 		const TArray<const TCHAR*>& Cells = Rows[RowIdx];
@@ -732,9 +733,15 @@ bool KzDialogueL10N::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats
 
 		Asset->Modify();
 		*TargetText = FText::ChangeKey(CurrentNamespace.GetValue(), CurrentKey.GetValue(), FText::FromString(CsvSource));
+		FixedAssets.Add(Asset);
+		++OutStats.Fixed;
+	}
+
+	// One refresh per asset, not per row: it re-keys and re-hashes every text of the asset.
+	for (UObject* Asset : FixedAssets)
+	{
 		Asset->PostEditChange();
 		Asset->MarkPackageDirty();
-		++OutStats.Fixed;
 	}
 
 	Log.Info(FText::Format(LOCTEXT("SourceFixLogSummary", "{0} fixed, {1} conflicted, {2} unchanged, {3} unresolved. Save the dirty assets and re-run Gather."), OutStats.Fixed, OutStats.Conflicted, OutStats.Unchanged, OutStats.Unresolved));

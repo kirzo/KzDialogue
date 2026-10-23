@@ -76,6 +76,9 @@ private:
 		TArray<TSharedPtr<FKzTokenNode>> Children;
 	};
 
+	/** Base nodes (parts included) of the named assets read so far, by asset: a garbage-collected asset is unchanged since then, so it is not reloaded. */
+	static TMap<FSoftObjectPath, TSharedPtr<FKzTokenNode>> NodeCache;
+
 	/** Every base token with its part children, built once from the asset registry. */
 	TArray<TSharedPtr<FKzTokenNode>> AllNodes;
 	/** Distinct named-asset type display names, for the type filter. */

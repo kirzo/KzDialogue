@@ -620,11 +620,10 @@ TSet<FGuid> UKzDialoguePlayer::ResolveLineRefToMatchSet(const FKzDialogueLineRef
 	}
 
 	// Otherwise try as alias and expand to all referenced line ids.
-	FKzDialogueAlias Alias;
-	if (Asset->TryGetAliasById(LineRef.LineId, Alias))
+	if (const FKzDialogueAlias* Alias = Asset->FindAlias(LineRef.LineId))
 	{
-		Result.Reserve(Alias.LineIds.Num());
-		for (const FGuid& Id : Alias.LineIds)
+		Result.Reserve(Alias->LineIds.Num());
+		for (const FGuid& Id : Alias->LineIds)
 		{
 			Result.Add(Id);
 		}

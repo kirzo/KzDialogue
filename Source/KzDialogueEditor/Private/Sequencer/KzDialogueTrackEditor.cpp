@@ -193,8 +193,7 @@ FText FKzDialogueSection::GetSectionTitle() const
 
 	if (Track && Track->DialogueAsset)
 	{
-		FKzDialogueLine Line;
-		if (Track->DialogueAsset->TryGetLineById(Section->LineId, Line))
+		if (const FKzDialogueLine* Line = Track->DialogueAsset->FindLine(Section->LineId))
 		{
 			// Scale the truncation length to the section's duration: short sections
 			// get a tight title, long sections get more text. This roughly mirrors how
@@ -218,7 +217,7 @@ FText FKzDialogueSection::GetSectionTitle() const
 				}
 			}
 
-			return Line.GetDisplayLabel(MaxLen);
+			return Line->GetDisplayLabel(MaxLen);
 		}
 	}
 	return LOCTEXT("MissingLine", "<missing line>");

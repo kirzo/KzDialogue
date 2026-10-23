@@ -82,6 +82,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	int32 IndexOfLine(const FGuid& LineId) const;
 
+	/** The authored line, or null: a view for reading fields, without the timeline and asset tags TryGetLineById adds. */
+	const FKzDialogueLine* FindLine(const FGuid& LineId) const;
+
+	/** The alias with that id, or null. */
+	const FKzDialogueAlias* FindAlias(const FGuid& AliasId) const;
+
 	/** Find the notify timeline owned by the given line id, or null. */
 	UKzDialogueTimeline* FindTimelineForLine(const FGuid& LineId) const;
 

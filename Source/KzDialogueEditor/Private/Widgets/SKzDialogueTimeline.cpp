@@ -93,6 +93,7 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 {
 	Timeline = InTimeline;
 	DisplayDuration = InArgs._DisplayDuration;
+	RefreshDuration();
 	OnModified = InArgs._OnModified;
 	OnRequestHostRefresh = InArgs._OnRequestHostRefresh;
 	PreviewAudioKey = FString::Printf(TEXT("Timeline_%p"), this);
@@ -211,8 +212,13 @@ SKzDialogueTimeline::~SKzDialogueTimeline()
 
 float SKzDialogueTimeline::Duration() const
 {
+	return CachedDuration;
+}
+
+void SKzDialogueTimeline::RefreshDuration()
+{
 	const float D = DisplayDuration.Get(0.f);
-	return D > UE_KINDA_SMALL_NUMBER ? D : 1.f;
+	CachedDuration = D > UE_KINDA_SMALL_NUMBER ? D : 1.f;
 }
 
 float SKzDialogueTimeline::GetViewStart() const
@@ -364,10 +370,9 @@ USoundBase* SKzDialogueTimeline::ResolveLineAudio() const
 	{
 		if (const UKzDialogueAsset* Asset = T->GetTypedOuter<UKzDialogueAsset>())
 		{
-			FKzDialogueLine Line;
-			if (Asset->TryGetLineById(T->OwningLineId, Line))
+			if (const FKzDialogueLine* Line = Asset->FindLine(T->OwningLineId))
 			{
-				return Line.Audio.LoadSynchronous();
+				return Line->Audio.LoadSynchronous();
 			}
 		}
 	}
@@ -380,10 +385,9 @@ float SKzDialogueTimeline::GetAudioTimeOffset() const
 	{
 		if (const UKzDialogueAsset* Asset = T->GetTypedOuter<UKzDialogueAsset>())
 		{
-			FKzDialogueLine Line;
-			if (Asset->TryGetLineById(T->OwningLineId, Line))
+			if (const FKzDialogueLine* Line = Asset->FindLine(T->OwningLineId))
 			{
-				return Line.GetAudioTimelineOffset();
+				return Line->GetAudioTimelineOffset();
 			}
 		}
 	}
@@ -413,6 +417,7 @@ bool SKzDialogueTimeline::RefreshWaveformPreview()
 void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+	RefreshDuration();
 
 	// The hosting details panel's tree only re-measures on RequestTreeRefresh or when its own
 	// geometry changes size (that is why an external resize used to "fix" the stale scrollbar).

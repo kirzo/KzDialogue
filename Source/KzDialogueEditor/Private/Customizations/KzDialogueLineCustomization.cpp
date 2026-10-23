@@ -1,4 +1,4 @@
-﻿// Copyright 2026 kirzo
+// Copyright 2026 kirzo
 
 #include "Customizations/KzDialogueLineCustomization.h"
 #include "KzDialogueAudition.h"
@@ -26,6 +26,7 @@
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Widgets/SKzTokenTextEditor.h"
 
+#include "AssetRegistry/IAssetRegistry.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
 
@@ -262,8 +263,11 @@ float FKzDialogueLineCustomization::GetDisplayDuration() const
 		if (StructHandle->GetValueData(RawData) == FPropertyAccess::Success && RawData)
 		{
 			const FKzDialogueLine* Line = reinterpret_cast<const FKzDialogueLine*>(RawData);
-			const USoundBase* Sound = Line->Audio.LoadSynchronous();
-			return FMath::Max(0.1f, Line->ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.f));
+			// The registry tag unless the wave is loaded: the timeline reads this every tick.
+			float AudioDuration = 0.f;
+			if (const USoundBase* Sound = Line->Audio.Get()) { AudioDuration = Sound->GetDuration(); }
+			else if (!Line->Audio.IsNull()) { IAssetRegistry::GetChecked().GetAssetByObjectPath(Line->Audio.ToSoftObjectPath()).GetTagValue(GET_MEMBER_NAME_CHECKED(USoundBase, Duration), AudioDuration); }
+			return FMath::Max(0.1f, Line->ResolveTotalDuration(AudioDuration));
 		}
 	}
 

@@ -86,22 +86,27 @@ void UKzDialogueAsset::FinalizeResolvedLine(FKzDialogueLine& OutLine) const
 	OutLine.Tags.AppendTags(Tags);
 }
 
-bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& OutLine) const
+const FKzDialogueLine* UKzDialogueAsset::FindLine(const FGuid& LineId) const
 {
-	for (const FKzDialogueLine& Line : Lines)
-	{
-		if (Line.LineId == InLineId)
-		{
-			OutLine = Line;
-			// Inject the asset's runtime data (timeline + asset-wide tags) so every asset-line lookup
-			// carries it, not just the iterating provider (single-line and Sequencer paths go through here).
-			FinalizeResolvedLine(OutLine);
-			return true;
-		}
-	}
-	return false;
+	return Lines.FindByPredicate([&LineId](const FKzDialogueLine& L) { return L.LineId == LineId; });
 }
 
+const FKzDialogueAlias* UKzDialogueAsset::FindAlias(const FGuid& AliasId) const
+{
+	return AliasId.IsValid() ? Aliases.FindByPredicate([&AliasId](const FKzDialogueAlias& A) { return A.AliasId == AliasId; }) : nullptr;
+}
+
+bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& OutLine) const
+{
+	const FKzDialogueLine* Line = FindLine(InLineId);
+	if (!Line) { return false; }
+
+	// Inject the asset's runtime data (timeline + asset-wide tags) so every asset-line lookup
+	// carries it, not just the iterating provider (single-line and Sequencer paths go through here).
+	OutLine = *Line;
+	FinalizeResolvedLine(OutLine);
+	return true;
+}
 bool UKzDialogueAsset::TryGetAliasByName(FName AliasName, FKzDialogueAlias& OutAlias) const
 {
 	if (AliasName.IsNone()) { return false; }
@@ -118,45 +123,28 @@ bool UKzDialogueAsset::TryGetAliasByName(FName AliasName, FKzDialogueAlias& OutA
 
 bool UKzDialogueAsset::TryGetAliasById(const FGuid& InAliasId, FKzDialogueAlias& OutAlias) const
 {
-	if (!InAliasId.IsValid()) { return false; }
-	for (const FKzDialogueAlias& Alias : Aliases)
-	{
-		if (Alias.AliasId == InAliasId)
-		{
-			OutAlias = Alias;
-			return true;
-		}
-	}
-	return false;
+	const FKzDialogueAlias* Alias = FindAlias(InAliasId);
+	if (!Alias) { return false; }
+	OutAlias = *Alias;
+	return true;
 }
 
 bool UKzDialogueAsset::TryResolveAlias(const FGuid& InAliasId, FKzDialogueLine& OutLine) const
 {
-	FKzDialogueAlias Alias;
-	if (!TryGetAliasById(InAliasId, Alias)) { return false; }
+	const FKzDialogueAlias* Alias = FindAlias(InAliasId);
+	if (!Alias) { return false; }
 
-	// Filter to LineIds that still exist in the asset (to gracefully ignore stale ids).
-	TArray<int32> ValidIndices;
-	ValidIndices.Reserve(Alias.LineIds.Num());
-	for (int32 i = 0; i < Alias.LineIds.Num(); ++i)
+	// Stale ids are skipped, not picked.
+	TArray<FGuid> ValidIds;
+	ValidIds.Reserve(Alias->LineIds.Num());
+	for (const FGuid& LineId : Alias->LineIds)
 	{
-		for (const FKzDialogueLine& Line : Lines)
-		{
-			if (Line.LineId == Alias.LineIds[i])
-			{
-				ValidIndices.Add(i);
-				break;
-			}
-		}
+		if (FindLine(LineId)) { ValidIds.Add(LineId); }
 	}
 
-	if (ValidIndices.Num() == 0) { return false; }
-
-	const int32 PickIdx = FMath::RandRange(0, ValidIndices.Num() - 1);
-	const FGuid PickedId = Alias.LineIds[ValidIndices[PickIdx]];
-	return TryGetLineById(PickedId, OutLine);
+	if (ValidIds.Num() == 0) { return false; }
+	return TryGetLineById(ValidIds[FMath::RandRange(0, ValidIds.Num() - 1)], OutLine);
 }
-
 bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& OutLine) const
 {
 	if (!Id.IsValid()) { return false; }

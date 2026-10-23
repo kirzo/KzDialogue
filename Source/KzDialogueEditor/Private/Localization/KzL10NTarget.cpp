@@ -321,7 +321,8 @@ bool FKzLocQuery::GetArchiveEntry(const FString& Namespace, const FString& Key, 
 bool FKzLocQuery::IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const
 {
 	FString LocalizedPackage;
-	return FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackageName, Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage);
+	// The registry's package list, not the disk: the coverage asks per line and culture on every refresh.
+	return FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackageName, Culture, LocalizedPackage) && IAssetRegistry::GetChecked().DoesPackageExistOnDisk(FName(*LocalizedPackage));
 }
 
 void FKzLocQuery::EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace, const FString& Key, const FString& Source)> Callback) const

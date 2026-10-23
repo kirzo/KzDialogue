@@ -45,8 +45,7 @@ namespace KzDialogueK2Nodes
 			FGuid Id;
 			if (!IsLineIdPin(Pin) || !FGuid::Parse(Pin->DefaultValue, Id) || !Id.IsValid()) { continue; }
 
-			FKzDialogueAlias Alias;
-			if (Asset && (Asset->IndexOfLine(Id) != INDEX_NONE || Asset->TryGetAliasById(Id, Alias))) { continue; }
+			if (Asset && (Asset->FindLine(Id) || Asset->FindAlias(Id))) { continue; }
 
 			Pin->Modify();
 			Pin->GetSchema()->TrySetDefaultValue(*Pin, FString());

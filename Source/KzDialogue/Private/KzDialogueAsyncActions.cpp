@@ -124,7 +124,7 @@ void UKzAsyncDialogueAction::Interrupt()
 		// line's fades and audio are still live. Foreign content on the channel is never touched.
 		if (UKzDialoguePlayer* Late = WeakDialoguePlayer.Get())
 		{
-			if (!Late->IsPlaying() || IsOwnContent(*Late, Late->GetCurrentLine()))
+			if (!Late->IsPlaying() || IsOwnContent(*Late, Late->GetCurrentLineId()))
 			{
 				Late->Interrupt();
 			}
@@ -209,9 +209,9 @@ void UKzAsyncPlayDialogueLine::NotifyCancelled()
 	SetReadyToDestroy();
 }
 
-bool UKzAsyncPlayDialogueLine::IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const
+bool UKzAsyncPlayDialogueLine::IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const
 {
-	return Player.ResolveLineRefToMatchSet(LaunchRef).Contains(Line.LineId);
+	return Player.ResolveLineRefToMatchSet(LaunchRef).Contains(LineId);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -300,11 +300,11 @@ void UKzAsyncDialogueSequenceAction::NotifyCancelled()
 	SetReadyToDestroy();
 }
 
-bool UKzAsyncDialogueSequenceAction::IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const
+bool UKzAsyncDialogueSequenceAction::IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const
 {
 	for (const FKzDialogueLineRef& Ref : EntryRefs)
 	{
-		if (Player.ResolveLineRefToMatchSet(Ref).Contains(Line.LineId))
+		if (Player.ResolveLineRefToMatchSet(Ref).Contains(LineId))
 		{
 			return true;
 		}

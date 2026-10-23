@@ -18,6 +18,7 @@
 #define LOCTEXT_NAMESPACE "SKzTokenPicker"
 
 TArray<FString> SKzTokenPicker::RecentTokens;
+TMap<FSoftObjectPath, TSharedPtr<SKzTokenPicker::FKzTokenNode>> SKzTokenPicker::NodeCache;
 
 void SKzTokenPicker::Construct(const FArguments& InArgs)
 {
@@ -142,32 +143,43 @@ void SKzTokenPicker::BuildNodes()
 		if (!Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), Token) || Token.IsNone() || Seen.Contains(Token)) { continue; }
 		Seen.Add(Token);
 
-		const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Data.ToSoftObjectPath().TryLoad());
-		if (!Named) { continue; }
+		// A loaded asset is read fresh (it may have been edited); an unloaded one comes from the cache, loading only the first time.
+		const FString TokenText = FString::Printf(TEXT("{%s}"), *Token.ToString());
+		const FSoftObjectPath Path = Data.ToSoftObjectPath();
+		const UKzNamedAsset* Named = Cast<UKzNamedAsset>(Data.FastGetAsset(/*bLoad=*/false));
+		TSharedPtr<FKzTokenNode>* Cached = NodeCache.Find(Path);
+		if (!Named && (!Cached || (*Cached)->TokenText != TokenText)) { Named = Cast<UKzNamedAsset>(Path.TryLoad()); }
 
-		TSharedPtr<FKzTokenNode> Base = MakeShared<FKzTokenNode>();
-		Base->TokenText = FString::Printf(TEXT("{%s}"), *Token.ToString());
-		Base->Preview = Named->ResolveName();
-		Base->TypeName = Named->GetClass()->GetDisplayNameText().ToString();
-		Base->AssetPath = Data.GetObjectPathString();
-		Base->bEmptyPreview = Base->Preview.IsEmpty();
-		TypeNames.AddUnique(Base->TypeName);
-
-		if (!bBaseTokensOnly)
+		if (Named)
 		{
+			TSharedPtr<FKzTokenNode> Built = MakeShared<FKzTokenNode>();
+			Built->TokenText = TokenText;
+			Built->Preview = Named->ResolveName();
+			Built->TypeName = Named->GetClass()->GetDisplayNameText().ToString();
+			Built->AssetPath = Data.GetObjectPathString();
+			Built->bEmptyPreview = Built->Preview.IsEmpty();
 			for (const FName Part : Named->GetNameParts())
 			{
 				TSharedPtr<FKzTokenNode> Child = MakeShared<FKzTokenNode>();
 				Child->TokenText = FString::Printf(TEXT("{%s:%s}"), *Token.ToString(), *Part.ToString());
 				Child->Preview = Named->ResolveName(Part);
 				Child->Description = Named->GetNamePartDescription(Part);
-				Child->TypeName = Base->TypeName;
-				Child->AssetPath = Base->AssetPath;
+				Child->TypeName = Built->TypeName;
+				Child->AssetPath = Built->AssetPath;
 				Child->bEmptyPreview = Child->Preview.IsEmpty();
-				Base->Children.Add(Child);
+				Built->Children.Add(Child);
 			}
+			Cached = &NodeCache.Add(Path, Built);
 		}
+		if (!Cached) { continue; }
 
+		TSharedPtr<FKzTokenNode> Base = *Cached;
+		if (bBaseTokensOnly)
+		{
+			Base = MakeShared<FKzTokenNode>(**Cached);
+			Base->Children.Reset();
+		}
+		TypeNames.AddUnique(Base->TypeName);
 		AllNodes.Add(Base);
 	}
 

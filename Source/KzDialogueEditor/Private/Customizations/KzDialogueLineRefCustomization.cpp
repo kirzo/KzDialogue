@@ -186,16 +186,13 @@ FText FKzDialogueLineRefCustomization::GetCurrentLineLabel() const
 		return LOCTEXT("PickLine", "Select line or alias...");
 	}
 
-	FKzDialogueLine Line;
-	if (AssetPtr->TryGetLineById(Id, Line))
+	if (const FKzDialogueLine* Line = AssetPtr->FindLine(Id))
 	{
-		return Line.GetDisplayLabel(60);
+		return Line->GetDisplayLabel(60);
 	}
-
-	FKzDialogueAlias Alias;
-	if (AssetPtr->TryGetAliasById(Id, Alias))
+	if (const FKzDialogueAlias* Alias = AssetPtr->FindAlias(Id))
 	{
-		return Alias.GetDisplayLabel();
+		return Alias->GetDisplayLabel();
 	}
 
 	return LOCTEXT("UnknownEntry", "(unknown)");

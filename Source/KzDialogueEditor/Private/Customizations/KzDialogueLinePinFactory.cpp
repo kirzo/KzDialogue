@@ -138,16 +138,13 @@ private:
 			return LOCTEXT("PickLineOrAlias", "Select line or alias...");
 		}
 
-		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(Id, Line))
+		if (const FKzDialogueLine* Line = Asset->FindLine(Id))
 		{
-			return Line.GetDisplayLabel();
+			return Line->GetDisplayLabel();
 		}
-
-		FKzDialogueAlias Alias;
-		if (Asset->TryGetAliasById(Id, Alias))
+		if (const FKzDialogueAlias* Alias = Asset->FindAlias(Id))
 		{
-			return Alias.GetDisplayLabel();
+			return Alias->GetDisplayLabel();
 		}
 
 		return LOCTEXT("UnknownEntry", "(unknown)");

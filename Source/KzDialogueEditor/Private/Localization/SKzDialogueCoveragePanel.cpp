@@ -618,7 +618,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 					++AudioTotal;
 					FString LocalizedPackage;
 					const FSoftObjectPath SourcePath = Line.Audio.ToSoftObjectPath();
-					if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePath.GetLongPackageName(), Culture, LocalizedPackage) && FPackageName::DoesPackageExist(LocalizedPackage))
+					if (FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePath.GetLongPackageName(), Culture, LocalizedPackage) && IAssetRegistry::GetChecked().DoesPackageExistOnDisk(FName(*LocalizedPackage)))
 					{
 						++AudioDone;
 						LocalizedAudioPath = FSoftObjectPath(FString::Printf(TEXT("%s.%s"), *LocalizedPackage, *SourcePath.GetAssetName()));

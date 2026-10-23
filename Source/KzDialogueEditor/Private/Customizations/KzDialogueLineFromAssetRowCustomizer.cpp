@@ -34,11 +34,8 @@ TSharedRef<SWidget> FKzDialogueLineFromAssetRowCustomizer::BuildLeadingWidget(TS
 						const FGuid Id = ReadGuid(Handle);
 						if (!Asset || !Id.IsValid()) { return FAppStyle::GetBrush("Icons.WarningWithColor"); }
 
-						FKzDialogueLine Line;
-						if (Asset->TryGetLineById(Id, Line)) { return FAppStyle::GetBrush("ClassIcon.SoundCue"); }
-
-						FKzDialogueAlias Alias;
-						if (Asset->TryGetAliasById(Id, Alias)) { return FAppStyle::GetBrush("Sequencer.KeyDiamond"); }
+						if (Asset->FindLine(Id)) { return FAppStyle::GetBrush("ClassIcon.SoundCue"); }
+						if (Asset->FindAlias(Id)) { return FAppStyle::GetBrush("Sequencer.KeyDiamond"); }
 
 						return FAppStyle::GetBrush("Icons.WarningWithColor");
 					})
@@ -96,11 +93,8 @@ FText FKzDialogueLineFromAssetRowCustomizer::GetDisplayText(TSharedPtr<IProperty
 			FText::FromString(Id.ToString(EGuidFormats::Digits)));
 	}
 
-	FKzDialogueLine Line;
-	if (Asset->TryGetLineById(Id, Line)) { return Line.GetDisplayLabel(80); }
-
-	FKzDialogueAlias Alias;
-	if (Asset->TryGetAliasById(Id, Alias)) { return Alias.GetDisplayLabel(); }
+	if (const FKzDialogueLine* Line = Asset->FindLine(Id)) { return Line->GetDisplayLabel(80); }
+	if (const FKzDialogueAlias* Alias = Asset->FindAlias(Id)) { return Alias->GetDisplayLabel(); }
 
 	return FText::Format(LOCTEXT("MissingUnknown", "(missing entry: {0})"),
 		FText::FromString(Id.ToString(EGuidFormats::Digits)));

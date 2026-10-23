@@ -145,6 +145,10 @@ private:
 
 	TWeakObjectPtr<UKzDialogueTimeline> Timeline;
 	TAttribute<float> DisplayDuration;
+
+	/** DisplayDuration read once per Tick: the host's binding may load and measure the wave, and every lane asks each paint. */
+	float CachedDuration = 1.f;
+	void RefreshDuration();
 	FSimpleDelegate OnModified;
 	FSimpleDelegate OnRequestHostRefresh;
 

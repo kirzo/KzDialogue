@@ -75,11 +75,11 @@ protected:
 	virtual void NotifyCancelled() {}
 
 	/**
-	 * True when Line is content this action launched (the awaited ref / entries). Drives the
+	 * True when LineId is content this action launched (the awaited ref / entries). Drives the
 	 * post-resolve Interrupt's ours-only check: the specific-line Finished fires when the line's
 	 * EXIT starts, so the action can be resolved while its own dialogue (fades, audio) still runs.
 	 */
-	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const { return false; }
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const { return false; }
 
 	UPROPERTY(Transient)
 	TObjectPtr<UObject> WorldContext;
@@ -132,7 +132,7 @@ protected:
 	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
 	virtual void NotifyCancelled() override;
-	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const override;
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const override;
 
 	/** Line awaited by this action. */
 	FKzDialogueLineRef LaunchRef;
@@ -196,7 +196,7 @@ protected:
 
 	virtual void HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason) override;
 	virtual void NotifyCancelled() override;
-	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FKzDialogueLine& Line) const override;
+	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const override;
 
 	UFUNCTION()
 	void HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line);

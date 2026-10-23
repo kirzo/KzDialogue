@@ -94,7 +94,7 @@ void UKzBarkComponent::StopBarking()
 		{
 			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(ResolveBarkChannel()))
 			{
-				if (Player->IsPlaying() && Player->ResolveLineRefToMatchSet(Bark).Contains(Player->GetCurrentLine().LineId))
+				if (Player->IsPlaying() && Player->ResolveLineRefToMatchSet(Bark).Contains(Player->GetCurrentLineId()))
 				{
 					Player->Stop();
 				}

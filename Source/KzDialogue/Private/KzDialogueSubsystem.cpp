@@ -10,7 +10,11 @@
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 #include "Algo/RandomShuffle.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/PackageName.h"
+#include "Sound/AudioSettings.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundClass.h"
 
 void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -88,26 +92,36 @@ void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialo
 	}
 }
 
+// The audio's SoundClass without loading the wave when it is not loaded yet: the asset registry tags it.
+static const USoundClass* FindAudioSoundClass(const TSoftObjectPtr<USoundBase>& Audio)
+{
+	if (const USoundBase* Loaded = Audio.Get()) { return Loaded->GetSoundClass(); }
+
+	const FAssetData Data = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().GetAssetByObjectPath(Audio.ToSoftObjectPath());
+	FString ClassPath;
+	if (!Data.GetTagValue(GET_MEMBER_NAME_CHECKED(USoundBase, SoundClassObject), ClassPath))
+	{
+		const USoundBase* Sound = Audio.LoadSynchronous();
+		return Sound ? Sound->GetSoundClass() : nullptr;
+	}
+
+	// An unset class falls back to the project default, as USoundBase::GetSoundClass does.
+	const FSoftObjectPath Path(FPackageName::ExportTextPathToObjectPath(ClassPath));
+	return Path.IsValid() ? TSoftObjectPtr<USoundClass>(Path).LoadSynchronous() : GetDefault<UAudioSettings>()->GetDefaultSoundClass();
+}
+
 // Line-level resolution: the line's own channel, else the channel mapped to its audio's
 // SoundClass in project settings. Empty when neither applies: the chain moves to the asset.
-// The SoundClass step is skipped when the line has no audio, the audio fails to load or has
-// no SoundClass, or settings don't map it (invalid mappings also count as unmapped).
+// The SoundClass step is skipped when the line has no audio or settings don't map its class
+// (invalid mappings also count as unmapped).
 static FGameplayTag ResolveLineLevelChannel(const FKzDialogueLine& Line)
 {
 	if (Line.DefaultChannel.IsValid()) { return Line.DefaultChannel; }
 
-	if (!Line.Audio.IsNull())
-	{
-		if (const USoundBase* Sound = Line.Audio.LoadSynchronous())
-		{
-			if (const UKzDialogueSettings* Settings = UKzDialogueSettings::Get())
-			{
-				return Settings->FindChannelForSoundClass(Sound->GetSoundClass());
-			}
-		}
-	}
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	if (Line.Audio.IsNull() || !Settings || Settings->SoundClassChannels.IsEmpty()) { return FGameplayTag(); }
 
-	return FGameplayTag();
+	return Settings->FindChannelForSoundClass(FindAudioSoundClass(Line.Audio));
 }
 
 // Returns the channel shared by every resolvable line of the alias, or empty when they disagree.
@@ -118,15 +132,15 @@ static FGameplayTag GetAliasUnanimousChannel(const UKzDialogueAsset& Asset, cons
 
 	for (const FGuid& LineId : Alias.LineIds)
 	{
-		FKzDialogueLine Line;
-		if (!Asset.TryGetLineById(LineId, Line)) { continue; }
+		const FKzDialogueLine* Line = Asset.FindLine(LineId);
+		if (!Line) { continue; }
 
 		if (bFirst)
 		{
-			Unanimous = Line.DefaultChannel;
+			Unanimous = Line->DefaultChannel;
 			bFirst = false;
 		}
-		else if (Line.DefaultChannel != Unanimous)
+		else if (Line->DefaultChannel != Unanimous)
 		{
 			return FGameplayTag();
 		}
@@ -142,10 +156,9 @@ FGameplayTag UKzDialogueSubsystem::ResolveChannelForEntry(FGameplayTag ExplicitC
 	if (IsValid(Asset) && EntryId.IsValid())
 	{
 		// Line entry: the line's own channel, else its audio's SoundClass mapping.
-		FKzDialogueLine Line;
-		if (Asset->TryGetLineById(EntryId, Line))
+		if (const FKzDialogueLine* Line = Asset->FindLine(EntryId))
 		{
-			const FGameplayTag LineLevel = ResolveLineLevelChannel(Line);
+			const FGameplayTag LineLevel = ResolveLineLevelChannel(*Line);
 			if (LineLevel.IsValid())
 			{
 				return LineLevel;
@@ -153,15 +166,14 @@ FGameplayTag UKzDialogueSubsystem::ResolveChannelForEntry(FGameplayTag ExplicitC
 		}
 
 		// Alias entry: the alias's own channel, else its lines' unanimous one.
-		FKzDialogueAlias Alias;
-		if (Asset->TryGetAliasById(EntryId, Alias))
+		if (const FKzDialogueAlias* Alias = Asset->FindAlias(EntryId))
 		{
-			if (Alias.DefaultChannel.IsValid())
+			if (Alias->DefaultChannel.IsValid())
 			{
-				return Alias.DefaultChannel;
+				return Alias->DefaultChannel;
 			}
 
-			const FGameplayTag Unanimous = GetAliasUnanimousChannel(*Asset, Alias);
+			const FGameplayTag Unanimous = GetAliasUnanimousChannel(*Asset, *Alias);
 			if (Unanimous.IsValid())
 			{
 				return Unanimous;
@@ -378,10 +390,9 @@ bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGui
 
 	FGuid LineIdToPlay = LineId;
 
-	FKzDialogueAlias Alias;
-	if (Asset->TryGetAliasById(LineId, Alias))
+	if (const FKzDialogueAlias* Alias = Asset->FindAlias(LineId))
 	{
-		LineIdToPlay = ResolveAliasInternal(Alias);
+		LineIdToPlay = ResolveAliasInternal(*Alias);
 		if (!LineIdToPlay.IsValid())
 		{
 			return false;

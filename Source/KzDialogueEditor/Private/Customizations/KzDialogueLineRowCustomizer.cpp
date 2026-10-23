@@ -5,6 +5,7 @@
 
 #include "KzDialogueAsset.h"
 
+#include "AssetRegistry/IAssetRegistry.h"
 #include "PropertyHandle.h"
 #include "Sound/SoundBase.h"
 
@@ -14,6 +15,15 @@
 #include "Widgets/Layout/SBox.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueLineRowCustomizer"
+
+namespace
+{
+	// A registry lookup, not a load: the row asks every frame, and a missing asset would hit the disk each time.
+	bool IsAudioMissing(const FKzDialogueLine& Line)
+	{
+		return !Line.Audio.IsNull() && !Line.Audio.Get() && !IAssetRegistry::GetChecked().GetAssetByObjectPath(Line.Audio.ToSoftObjectPath()).IsValid();
+	}
+}
 
 TSharedRef<SWidget> FKzDialogueLineRowCustomizer::BuildLeadingWidget(TSharedPtr<IPropertyHandle> Handle)
 {
@@ -32,9 +42,9 @@ TSharedRef<SWidget> FKzDialogueLineRowCustomizer::BuildLeadingWidget(TSharedPtr<
 					{
 						const FKzDialogueLine* Line = ResolveLine(Handle);
 						if (!Line || Line->Audio.IsNull()) { return FText::GetEmpty(); }
-						return Line->Audio.LoadSynchronous()
-							? LOCTEXT("HasAudioTip", "This line has a valid audio asset.")
-							: LOCTEXT("BrokenAudioTip", "Audio asset failed to load.");
+						return IsAudioMissing(*Line)
+							? LOCTEXT("MissingAudioTip", "The audio asset does not exist.")
+							: LOCTEXT("HasAudioTip", "This line has a valid audio asset.");
 					})
 		];
 }
@@ -114,7 +124,7 @@ FReply FKzDialogueLineRowCustomizer::OnPlayClicked(TSharedPtr<IPropertyHandle> H
 const FSlateBrush* FKzDialogueLineRowCustomizer::GetAudioStatusBrush(TSharedPtr<IPropertyHandle> Handle) const
 {
 	const FKzDialogueLine* Line = ResolveLine(Handle);
-	const bool bBroken = Line && !Line->Audio.IsNull() && !Line->Audio.LoadSynchronous();
+	const bool bBroken = Line && IsAudioMissing(*Line);
 	return FAppStyle::GetBrush(bBroken ? "Icons.WarningWithColor" : "ClassIcon.SoundCue");
 }
 
