@@ -84,7 +84,7 @@ void UKzBarkComponent::StopBarking()
 
 	UnbindChannelPlayer();
 
-	// Cut a bark that's currently playing — ours only. bBarkInFlight can be stale after a hot-swap
+	// Cut a bark that's currently playing, ours only. bBarkInFlight can be stale after a hot-swap
 	// (story content replacing our bark on a shared channel), and StopChannel would kill that
 	// content; only stop the player when its current line actually is one of our bark's lines.
 	// Subsystem may be gone during teardown.
@@ -134,7 +134,7 @@ void UKzBarkComponent::ResumeBarking()
 	}
 	else if (!bBarkInFlight)
 	{
-		ScheduleNextBark(); // the bark finished during the pause — restart the cadence
+		ScheduleNextBark(); // the bark finished during the pause: restart the cadence
 	}
 	// else: a bark is still playing; its finish reschedules now that we're unpaused.
 }
@@ -182,13 +182,13 @@ void UKzBarkComponent::PlayBark()
 	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority);
 	if (!Player)
 	{
-		// Rejected (priority / cooldown / unresolvable) — try again after another interval.
+		// Rejected (priority / cooldown / unresolvable): try again after another interval.
 		ScheduleNextBark();
 		return;
 	}
 
 	// Set in-flight only AFTER the play request: launching may interrupt prior content on the channel,
-	// which fires OnDialogueFinished synchronously here — we must ignore that, not treat it as our bark.
+	// which fires OnDialogueFinished synchronously here; we must ignore that, not treat it as our bark.
 	bBarkInFlight = true;
 	OnBarkPlayed.Broadcast(Player);
 	// No scheduling here: HandleBarkFinished reschedules when this bark ends.
@@ -207,7 +207,7 @@ void UKzBarkComponent::HandleBarkFinished(UKzDialoguePlayer* Player, EKzDialogue
 	{
 		return; // stopped, or paused (resume will reschedule)
 	}
-	ScheduleNextBark(); // reschedule on ANY end reason — the loop survives cancel / interrupt
+	ScheduleNextBark(); // reschedule on ANY end reason: the loop survives cancel / interrupt
 }
 
 void UKzBarkComponent::BindChannelPlayer()

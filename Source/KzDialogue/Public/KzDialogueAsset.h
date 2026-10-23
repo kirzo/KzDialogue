@@ -66,7 +66,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueLine> Lines;
 
-	/** Reusable named groups of lines selected randomly at playback time. */
+	/** Reusable named groups of lines; each play picks one by the alias's SelectionMode. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueAlias> Aliases;
 

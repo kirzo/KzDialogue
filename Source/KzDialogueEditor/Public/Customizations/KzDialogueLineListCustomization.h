@@ -13,8 +13,8 @@ class FKzDialogueLineFromAssetRowCustomizer;
  *
  * Header: shows "(N lines)" or "(empty)".
  * Children:
- *   1. "Asset" — standard soft-object picker.
- *   2. "Lines" — SKzPropertyStack of FGuid entries, each resolved against the asset
+ *   1. "Asset": standard soft-object picker.
+ *   2. "Lines": SKzPropertyStack of FGuid entries, each resolved against the asset
  *      via FKzDialogueLineFromAssetRowCustomizer. The "Add" button opens the line
  *      picker scoped to the selected asset (no speaker filter, aliases shown).
  */

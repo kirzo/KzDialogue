@@ -14,7 +14,7 @@ UMovieSceneKzDialogueSection::UMovieSceneKzDialogueSection(const FObjectInitiali
 
 EMovieSceneChannelProxyType UMovieSceneKzDialogueSection::CacheChannelProxy()
 {
-	// No animatable channels — we only carry a LineId payload, so an empty proxy suffices.
+	// No animatable channels: we only carry a LineId payload, so an empty proxy suffices.
 	ChannelProxy = MakeShared<FMovieSceneChannelProxy>();
 	return EMovieSceneChannelProxyType::Static;
 }

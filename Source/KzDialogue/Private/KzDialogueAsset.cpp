@@ -144,6 +144,7 @@ bool UKzDialogueAsset::TryResolveAlias(const FGuid& InAliasId, FKzDialogueLine& 
 	if (ValidIds.Num() == 0) { return false; }
 	return TryGetLineById(ValidIds[FMath::RandRange(0, ValidIds.Num() - 1)], OutLine);
 }
+
 bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& OutLine) const
 {
 	if (!Id.IsValid()) { return false; }
@@ -151,8 +152,7 @@ bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& O
 	// Try lines first (cheaper than alias resolution which loops twice).
 	if (TryGetLineById(Id, OutLine)) { return true; }
 
-	// Fall back to alias resolution. RefreshLineMetadata guarantees Lines and Aliases
-	// don't share GUIDs, so a hit here is unambiguous.
+	// Lines win a clash; ids are fresh GUIDs, deduplicated per table, so one is practically impossible.
 	return TryResolveAlias(Id, OutLine);
 }
 

@@ -112,7 +112,7 @@ public:
 	/**
 	 * Effective tags of a resolved line: its own Tags, which already include the asset-wide tags merged in
 	 * at resolve time. A view only ever gets the resolved line, so this (and the LineHas* helpers below)
-	 * are all it needs — no asset reference required.
+	 * are all it needs: no asset reference required.
 	 */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
 	static FGameplayTagContainer GetLineTags(const FKzDialogueLine& Line);

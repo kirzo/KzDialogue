@@ -346,9 +346,10 @@ enum class EKzAliasSelectionMode : uint8
 };
 
 /**
- * A randomized group of dialogue lines that share a speaker.
+ * A group of interchangeable dialogue lines that share a speaker.
  *
- * When played, the asset picks one of the referenced LineIds at random. Useful for
+ * When played, the subsystem picks one of the referenced LineIds by SelectionMode, honoring
+ * the cooldown. Useful for
  * variations of the same beat ("greet the player" with 4 different lines, "react to
  * surprise" with 3, etc.) without needing to wire a SoundCue with a Random selector
  * (which can't carry per-variant subtitles).
@@ -394,7 +395,7 @@ struct FKzDialogueAlias
 	/**
 	 * Minimum seconds that must elapse between successful resolutions of this alias.
 	 * If the alias is resolved within this window, the resolution is rejected (returns
-	 * an invalid GUID, callers get a null player). Useful for "bark cooldowns" — three
+	 * an invalid GUID, callers get a null player). Useful for "bark cooldowns": three
 	 * variations of "ouch!" that shouldn't fire back-to-back even if the gameplay code
 	 * triggers them rapidly.
 	 *
@@ -498,7 +499,7 @@ struct KZDIALOGUE_API FKzDialogueLineRef
  * asset. Equivalent to a TArray<FKzDialogueLineRef> where every element shares the
  * same Asset, with a stricter shape: one asset reference, many ids.
  *
- * Useful for "a sequence of related lines" — barks, intros, multi-step events —
+ * Useful for "a sequence of related lines" (barks, intros, multi-step events)
  * where forcing the designer to repeat the asset per element is noise.
  */
 USTRUCT(BlueprintType)
@@ -580,7 +581,7 @@ struct FKzDialogueChannelDefinition
 
 	/**
 	 * When this channel is active, other channels' audio is reduced by DuckedVolume.
-	 * Implementation pending — flag is honored by the API but does not yet affect
+	 * Implementation pending: the flag is honored by the API but does not yet affect
 	 * audio mixing.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking")
@@ -625,7 +626,7 @@ enum class EKzDialogueFinishReason : uint8
 	Stopped,
 	/** Abort() was called; ended immediately without animation. */
 	Aborted,
-	/** Pre-empted by a higher-priority dialogue on the same channel. */
+	/** Pre-empted by an equal or higher priority dialogue on the same channel. */
 	Interrupted
 };
 
@@ -658,7 +659,7 @@ struct FKzSpeakingLevelSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0, ClampMax = 1.0))
 	float Threshold = 0.02f;
 
-	/** Opening rate per second (CONSTANT, units of level/sec) — caps how fast the mouth opens, so the first jump from 0 ramps instead of snapping. Higher = faster. */
+	/** Opening rate per second (CONSTANT, units of level/sec): caps how fast the mouth opens, so the first jump from 0 ramps instead of snapping. Higher = faster. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Speaking", meta = (ClampMin = 0.0))
 	float AttackSpeed = 12.0f;
 

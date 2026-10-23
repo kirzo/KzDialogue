@@ -10,7 +10,6 @@
  * Track editor for UMovieSceneKzDialogueTrack. Adds:
  *   - Add Track menu entry under "Tracks" in the Sequencer
  *   - Section creation: pick a line from the asset bound to the track
- *   - Section right-click menu: "Change line..." reusing the same picker
  *   - Outliner icon and native-style "+ Section" button
  */
 class FKzDialogueTrackEditor : public FMovieSceneTrackEditor

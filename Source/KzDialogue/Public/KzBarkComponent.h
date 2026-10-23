@@ -18,7 +18,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkFinished, EKzDialogueFinish
 /**
  * Periodically plays a bark (a line or alias from a dialogue asset) on a channel, with a random gap
  * [MinInterval, MaxInterval] measured end-to-end, plus start / stop / pause / resume. Reschedules after
- * EVERY bark ends — finished OR cancelled / interrupted — so the loop survives a bark being pre-empted by
+ * EVERY bark ends (finished OR cancelled / interrupted), so the loop survives a bark being pre-empted by
  * higher-priority dialogue. Gate it from the outside with Start / Stop or Pause / Resume.
  *
  * Line variety and per-line cooldown come from the dialogue alias itself (SelectionMode / CooldownSeconds),

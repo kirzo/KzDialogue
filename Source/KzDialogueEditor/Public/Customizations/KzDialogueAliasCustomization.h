@@ -8,13 +8,12 @@
 
 class IPropertyHandle;
 class IPropertyTypeCustomizationUtils;
-class FKzDialogueAliasLineRowCustomizer;
 
 /**
  * Property customization for FKzDialogueAlias.
  *
  * Renders AliasName and Speaker as standard rows, then replaces the LineIds array
- * with a SKzPropertyStack driven by FKzDialogueAliasLineRowCustomizer (resolved
+ * with a SKzPropertyStack driven by FKzDialogueLineFromAssetRowCustomizer (resolved
  * line labels + picker-based "Add" button filtered by the alias's speaker).
  */
 class FKzDialogueAliasCustomization : public IPropertyTypeCustomization

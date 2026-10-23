@@ -18,7 +18,7 @@ TSharedRef<SWidget> FKzDialogueAliasRowCustomizer::BuildLeadingWidget(TSharedPtr
 			SNew(SImage)
 				.Image(FAppStyle::GetBrush("Sequencer.KeyDiamond"))
 				.ColorAndOpacity(FSlateColor::UseForeground())
-				.ToolTipText(LOCTEXT("AliasTip", "Alias — resolves to a random line at runtime."))
+				.ToolTipText(LOCTEXT("AliasTip", "Alias: resolves to one of its lines at runtime, by its selection mode."))
 		];
 }
 

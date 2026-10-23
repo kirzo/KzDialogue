@@ -102,7 +102,7 @@ TSharedRef<SWidget> FKzDialogueTrackEditor::BuildAddSectionMenu(UMovieSceneKzDia
 	UKzDialogueAsset* Asset = Track ? Track->DialogueAsset : nullptr;
 	if (!IsValid(Asset))
 	{
-		// No asset yet — bail with a hint instead of an empty searchable list.
+		// No asset yet: bail with a hint instead of an empty searchable list.
 		return SNew(SBox)
 			.Padding(FMargin(8.f))
 			[

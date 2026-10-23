@@ -58,7 +58,7 @@ void FKzDialogueAliasCustomization::CustomizeHeader(TSharedRef<IPropertyHandle> 
 
 void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle> StructPropertyHandle, IDetailChildrenBuilder& StructBuilder, IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
 {
-	// LineIds is rendered manually below as a SKzPropertyStack — everything else gets default UI.
+	// LineIds is rendered manually below as a SKzPropertyStack; everything else gets default UI.
 	FKzPropertyHandleUtils::AddChildrenHonoringInnerProperties(StructBuilder, StructPropertyHandle,
 		{ GET_MEMBER_NAME_CHECKED(FKzDialogueAlias, LineIds) });
 
@@ -101,7 +101,7 @@ void FKzDialogueAliasCustomization::CustomizeChildren(TSharedRef<IPropertyHandle
 				return Alias ? Alias->Speaker.Asset.Get() : nullptr;
 			});
 
-		// Aliases can't reference other aliases — picker only shows lines.
+		// Aliases can't reference other aliases: the picker only shows lines.
 		LineRowCustomizer->SetShowAliases(false);
 
 		StructBuilder.AddCustomRow(LOCTEXT("LineIdsRowFilter", "Line Ids"))
