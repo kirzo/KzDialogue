@@ -149,6 +149,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static bool IsDialogueChannelPlaying(const UObject* WorldContextObject, FGameplayTag Channel);
 
+	/** Outcome of the last play request: why a play node returned nothing, or that it waits in the channel's queue. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
+	static EKzDialoguePlayResult GetLastDialoguePlayResult(const UObject* WorldContextObject);
+
 	/** Stop the dialogue on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static void StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);

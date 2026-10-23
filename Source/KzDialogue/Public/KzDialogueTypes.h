@@ -541,10 +541,44 @@ struct KZDIALOGUE_API FKzDialogueLineList
 	void GetLineRefs(TArray<FKzDialogueLineRef>& OutRefs) const;
 };
 
+/** What a channel does with a request it refuses (a higher priority holds it, or it is not interruptible). */
+UENUM(BlueprintType)
+enum class EKzChannelBusyPolicy : uint8
+{
+	/** The request is dropped. */
+	Reject,
+	/** The request waits and plays when the channel frees: higher priority first, then arrival order. */
+	Queue,
+	/** Only the newest request waits; it displaces the one already waiting. For hints where only the latest matters. */
+	Replace
+};
+
+/** Outcome of a play request (UKzDialogueSubsystem::GetLastPlayResult). */
+UENUM(BlueprintType)
+enum class EKzDialoguePlayResult : uint8
+{
+	/** It plays now. */
+	Started,
+	/** The same line was already showing; the request joined it. */
+	Joined,
+	/** The channel is busy and its busy policy keeps the request waiting. */
+	Queued,
+	/** A higher-priority dialogue holds the channel. */
+	RejectedPriority,
+	/** The channel or its playing dialogue refuses interruption. */
+	RejectedNotInterruptible,
+	/** The channel is busy and its queue is full. */
+	RejectedQueueFull,
+	/** Nothing resolved to play: an alias in cooldown, ids that no longer exist, an empty list. */
+	RejectedNothingToPlay,
+	/** The world is tearing down. */
+	RejectedTearingDown
+};
+
 /**
  * Per-channel configuration. Lives in UKzDialogueSettings and is consulted by the
  * subsystem on every Play() call to decide default priorities, interruption rules,
- * and (eventually) cross-channel ducking.
+ * busy policy and (eventually) cross-channel ducking.
  */
 USTRUCT(BlueprintType)
 struct FKzDialogueChannelDefinition
@@ -570,6 +604,18 @@ struct FKzDialogueChannelDefinition
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	bool bAllowInterruption = true;
+
+	/** What happens to a request the channel refuses: dropped, queued, or kept as the only one waiting. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Queue")
+	EKzChannelBusyPolicy BusyPolicy = EKzChannelBusyPolicy::Reject;
+
+	/** Requests that may wait at once under Queue; a request beyond it is rejected. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Queue", meta = (ClampMin = 1, EditCondition = "BusyPolicy == EKzChannelBusyPolicy::Queue"))
+	int32 MaxQueueLength = 4;
+
+	/** Seconds a request may wait; one older than this is dropped when its turn comes. 0 waits forever. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Queue", meta = (ClampMin = 0.0, Units = "Seconds", EditCondition = "BusyPolicy != EKzChannelBusyPolicy::Reject"))
+	float QueueTimeout = 0.0f;
 
 	/** Default audio interruption policy for lines on this channel. Lines may override per-line. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")

@@ -106,6 +106,7 @@ bool UKzDialogueAsset::TryGetLineById(const FGuid& InLineId, FKzDialogueLine& Ou
 	FinalizeResolvedLine(OutLine);
 	return true;
 }
+
 bool UKzDialogueAsset::TryGetAliasByName(FName AliasName, FKzDialogueAlias& OutAlias) const
 {
 	if (AliasName.IsNone()) { return false; }

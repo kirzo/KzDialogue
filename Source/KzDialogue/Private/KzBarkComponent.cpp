@@ -180,6 +180,12 @@ void UKzBarkComponent::PlayBark()
 
 	const TArray<FKzDialogueLineRef> Refs = { Bark };
 	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority);
+	if (Player && Subsystem->GetLastPlayResult() == EKzDialoguePlayResult::Queued)
+	{
+		// Barks are ambient: a busy channel means try later, not wait behind it.
+		Subsystem->CancelQueuedRequest(Subsystem->GetLastQueuedRequestId());
+		Player = nullptr;
+	}
 	if (!Player)
 	{
 		// Rejected (priority / cooldown / unresolvable): try again after another interval.

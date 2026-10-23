@@ -96,6 +96,12 @@ void UKzDialogueFunctionLibrary::GetDialogueLineRefsFromList(const FKzDialogueLi
 	List.GetLineRefs(OutRefs);
 }
 
+EKzDialoguePlayResult UKzDialogueFunctionLibrary::GetLastDialoguePlayResult(const UObject* WorldContextObject)
+{
+	const UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
+	return IsValid(Sub) ? Sub->GetLastPlayResult() : EKzDialoguePlayResult::RejectedNothingToPlay;
+}
+
 bool UKzDialogueFunctionLibrary::IsDialogueChannelPlaying(const UObject* WorldContextObject, FGameplayTag Channel)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);

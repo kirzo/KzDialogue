@@ -96,6 +96,18 @@ private:
 	UFUNCTION()
 	void HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line);
 
+	/** The current run waits in its channel's queue: it starts, or it will never play. */
+	UFUNCTION()
+	void HandleQueuedRunStarted(FGameplayTag InChannel, FGuid RequestId);
+
+	UFUNCTION()
+	void HandleQueuedRunDropped(FGameplayTag InChannel, FGuid RequestId);
+
+	void StopTrackingQueue();
+
+	/** Cancels the current run's queued request. False when the run is not waiting. */
+	bool WithdrawQueuedRun();
+
 	/** Broadcasts OnDialogueFinished once and releases from the subsystem. Idempotent. */
 	void FinishSession(EKzDialogueFinishReason Reason);
 
@@ -126,6 +138,9 @@ private:
 	bool bActive = false;
 	bool bFinished = false;
 
-	/** The current run's dialogue started; finishes before that belong to the content it preempted. */
+	/** The current run's dialogue started; finishes before that belong to the content it preempted, or the one it waits behind. */
 	bool bRunStarted = false;
+
+	/** The current run's request id while it waits in its channel's queue. */
+	FGuid QueuedRequestId;
 };

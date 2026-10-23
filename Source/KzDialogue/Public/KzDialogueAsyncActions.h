@@ -59,8 +59,22 @@ protected:
 	/** Subscribes the dialogue-finished watchdog. Call only after playback has been requested. */
 	void SubscribeDialogueFinished();
 
-	/** Removes every binding this action made on the player. */
+	/** Removes every binding this action made on the player and the subsystem. */
 	void CleanupBindings();
+
+	/** Call right after the play call: when it was queued, the player's finishes and lines belong to whatever holds the channel until the request starts. */
+	void TrackQueuedRequest();
+
+	/** True while the launched request waits in its channel's queue. */
+	bool IsQueued() const { return QueuedRequestId.IsValid(); }
+
+	UFUNCTION()
+	void HandleQueuedRequestStarted(FGameplayTag InChannel, FGuid RequestId);
+
+	UFUNCTION()
+	void HandleQueuedRequestDropped(FGameplayTag InChannel, FGuid RequestId);
+
+	void StopTrackingQueue();
 
 	/** False when the action already resolved: every Finished / Cancelled goes through it, so each fires at most once. */
 	bool MarkResolved();
@@ -94,6 +108,9 @@ protected:
 	int32 Priority = -1;
 	bool bResolved = false;
 	FGuid LineBindingHandle;
+
+	/** The launched request's id while it waits in the channel's queue. */
+	FGuid QueuedRequestId;
 };
 
 /**

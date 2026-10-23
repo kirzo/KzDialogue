@@ -93,7 +93,48 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 		// Refused (a higher-priority dialogue holds this run's channel) or nothing resolved: terminal,
 		// so the session can't stall waiting for a finish that will never come.
 		FinishSession(EKzDialogueFinishReason::Interrupted);
+		return;
 	}
+
+	if (Subsystem->GetLastPlayResult() == EKzDialoguePlayResult::Queued)
+	{
+		QueuedRequestId = Subsystem->GetLastQueuedRequestId();
+		Subsystem->OnQueuedRequestStarted.AddDynamic(this, &UKzDialogueAssetSession::HandleQueuedRunStarted);
+		Subsystem->OnQueuedRequestDropped.AddDynamic(this, &UKzDialogueAssetSession::HandleQueuedRunDropped);
+	}
+}
+
+void UKzDialogueAssetSession::HandleQueuedRunStarted(FGameplayTag InChannel, FGuid RequestId)
+{
+	if (RequestId == QueuedRequestId) { StopTrackingQueue(); }
+}
+
+void UKzDialogueAssetSession::HandleQueuedRunDropped(FGameplayTag InChannel, FGuid RequestId)
+{
+	if (RequestId != QueuedRequestId) { return; }
+	StopTrackingQueue();
+	FinishSession(EKzDialogueFinishReason::Interrupted);
+}
+
+bool UKzDialogueAssetSession::WithdrawQueuedRun()
+{
+	if (!QueuedRequestId.IsValid()) { return false; }
+
+	// Unbound first, so the drop it reports does not finish the session with the wrong reason.
+	const FGuid RequestId = QueuedRequestId;
+	StopTrackingQueue();
+	if (Subsystem) { Subsystem->CancelQueuedRequest(RequestId); }
+	return true;
+}
+
+void UKzDialogueAssetSession::StopTrackingQueue()
+{
+	if (Subsystem)
+	{
+		Subsystem->OnQueuedRequestStarted.RemoveAll(this);
+		Subsystem->OnQueuedRequestDropped.RemoveAll(this);
+	}
+	QueuedRequestId.Invalidate();
 }
 
 void UKzDialogueAssetSession::UnbindPlayer(UKzDialoguePlayer* Player)
@@ -108,16 +149,19 @@ void UKzDialogueAssetSession::UnbindPlayer(UKzDialoguePlayer* Player)
 
 void UKzDialogueAssetSession::HandleRunStarted(UKzDialoguePlayer* Player)
 {
-	bRunStarted = true;
+	// While queued, what starts is someone else's dialogue taking the channel first.
+	if (!QueuedRequestId.IsValid()) { bRunStarted = true; }
 }
 
 void UKzDialogueAssetSession::HandleLineStarted(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
 {
+	if (!bRunStarted) { return; }
 	OnLineStarted.Broadcast(Player, Line);
 }
 
 void UKzDialogueAssetSession::HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
 {
+	if (!bRunStarted) { return; }
 	OnLineFinished.Broadcast(Player, Line);
 }
 
@@ -154,6 +198,13 @@ void UKzDialogueAssetSession::Stop()
 {
 	if (!bActive || bFinished) { return; }
 
+	// A queued run withdraws; what plays now is someone else's.
+	if (WithdrawQueuedRun())
+	{
+		FinishSession(EKzDialogueFinishReason::Stopped);
+		return;
+	}
+
 	if (CurrentPlayer)
 	{
 		// Finishes as Stopped once the exit animations end (synchronously without views): HandleRunFinished resolves the session.
@@ -168,6 +219,12 @@ void UKzDialogueAssetSession::Stop()
 void UKzDialogueAssetSession::Interrupt()
 {
 	if (!bActive || bFinished) { return; }
+
+	if (WithdrawQueuedRun())
+	{
+		FinishSession(EKzDialogueFinishReason::Interrupted);
+		return;
+	}
 
 	if (CurrentPlayer)
 	{
@@ -190,6 +247,7 @@ void UKzDialogueAssetSession::FinishSession(EKzDialogueFinishReason Reason)
 	UKzDialoguePlayer* LastPlayer = CurrentPlayer;
 	CurrentPlayer = nullptr;
 	UnbindPlayer(LastPlayer);
+	StopTrackingQueue();
 	UKzDialogueSubsystem* Sub = Subsystem;
 
 	// Broadcast while still alive, then release LAST and touch nothing after (mirrors FinishWithReason).

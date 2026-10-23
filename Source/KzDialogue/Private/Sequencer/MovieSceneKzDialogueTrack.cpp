@@ -143,7 +143,11 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 					{
 						if (bSuppressAudio) { LineCopy.Audio = nullptr; }
 						if (SectionDurationSeconds > 0.f) { LineCopy.Duration = SectionDurationSeconds; }
-						Sub->PlayLine(LineCopy, EffectiveChannel);
+						// The sequence owns the timing: a line that would wait for its channel is dropped, not played late.
+						if (Sub->PlayLine(LineCopy, EffectiveChannel) && Sub->GetLastPlayResult() == EKzDialoguePlayResult::Queued)
+						{
+							Sub->CancelQueuedRequest(Sub->GetLastQueuedRequestId());
+						}
 					}
 				}
 			}

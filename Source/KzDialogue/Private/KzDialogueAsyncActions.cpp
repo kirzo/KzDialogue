@@ -70,6 +70,7 @@ void UKzAsyncDialogueAction::SubscribeDialogueFinished()
 
 void UKzAsyncDialogueAction::CleanupBindings()
 {
+	StopTrackingQueue();
 	if (DialoguePlayer)
 	{
 		DialoguePlayer->UnbindSpecificLine(LineBindingHandle);
@@ -77,6 +78,44 @@ void UKzAsyncDialogueAction::CleanupBindings()
 		DialoguePlayer->OnLineFinished.RemoveAll(this);
 	}
 	LineBindingHandle.Invalidate();
+}
+
+static UKzDialogueSubsystem* FindDialogueSubsystem(const UObject* WorldContext)
+{
+	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
+	return World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+}
+
+void UKzAsyncDialogueAction::TrackQueuedRequest()
+{
+	UKzDialogueSubsystem* Subsystem = FindDialogueSubsystem(WorldContext);
+	if (!Subsystem || Subsystem->GetLastPlayResult() != EKzDialoguePlayResult::Queued) { return; }
+
+	QueuedRequestId = Subsystem->GetLastQueuedRequestId();
+	Subsystem->OnQueuedRequestStarted.AddDynamic(this, &UKzAsyncDialogueAction::HandleQueuedRequestStarted);
+	Subsystem->OnQueuedRequestDropped.AddDynamic(this, &UKzAsyncDialogueAction::HandleQueuedRequestDropped);
+}
+
+void UKzAsyncDialogueAction::HandleQueuedRequestStarted(FGameplayTag InChannel, FGuid RequestId)
+{
+	if (RequestId == QueuedRequestId) { StopTrackingQueue(); }
+}
+
+void UKzAsyncDialogueAction::HandleQueuedRequestDropped(FGameplayTag InChannel, FGuid RequestId)
+{
+	if (RequestId != QueuedRequestId) { return; }
+	StopTrackingQueue();
+	NotifyCancelled();
+}
+
+void UKzAsyncDialogueAction::StopTrackingQueue()
+{
+	if (UKzDialogueSubsystem* Subsystem = FindDialogueSubsystem(WorldContext))
+	{
+		Subsystem->OnQueuedRequestStarted.RemoveAll(this);
+		Subsystem->OnQueuedRequestDropped.RemoveAll(this);
+	}
+	QueuedRequestId.Invalidate();
 }
 
 bool UKzAsyncDialogueAction::MarkResolved()
@@ -88,6 +127,9 @@ bool UKzAsyncDialogueAction::MarkResolved()
 
 void UKzAsyncDialogueAction::HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
+	// Still waiting in the queue: the dialogue that ended is the one holding the channel.
+	if (IsQueued()) { return; }
+
 	// Still alive here means the awaited line(s) never completed: the dialogue was stopped,
 	// aborted, interrupted, or ran out without playing them.
 	NotifyCancelled();
@@ -105,6 +147,13 @@ void UKzAsyncDialogueAction::SetReadyToDestroy()
 void UKzAsyncDialogueAction::Stop()
 {
 	if (!DialoguePlayer) return;
+
+	// Still queued: withdraw the request; what plays now is someone else's.
+	if (IsQueued())
+	{
+		if (UKzDialogueSubsystem* Subsystem = FindDialogueSubsystem(WorldContext)) { Subsystem->CancelQueuedRequest(QueuedRequestId); }
+		return;
+	}
 
 	// Unbind first so the player's OnDialogueFinished (fired by Stop) doesn't also route through the
 	// watchdog; then resolve as cancelled ourselves.
@@ -129,6 +178,12 @@ void UKzAsyncDialogueAction::Interrupt()
 				Late->Interrupt();
 			}
 		}
+		return;
+	}
+
+	if (IsQueued())
+	{
+		if (UKzDialogueSubsystem* Subsystem = FindDialogueSubsystem(WorldContext)) { Subsystem->CancelQueuedRequest(QueuedRequestId); }
 		return;
 	}
 
@@ -184,6 +239,8 @@ void UKzAsyncPlayDialogueLine::Activate()
 		NotifyCancelled();
 		return;
 	}
+
+	TrackQueuedRequest();
 
 	// After playing: an alias hot-swap ends the previous line of the same alias inside the call above.
 	BindSpecificLineFinished(LaunchRef);
@@ -267,8 +324,9 @@ void UKzAsyncDialogueSequenceAction::Activate()
 		return;
 	}
 
-	// The sequence is the player's whole dialogue from here until it finishes, so every line it
-	// finishes is ours; entries skipped at launch (alias cooldowns) simply never show up.
+	// From the moment it starts, the sequence is the player's whole dialogue until it finishes, so every
+	// line finished then is ours; entries skipped at launch (alias cooldowns) simply never show up.
+	TrackQueuedRequest();
 	DialoguePlayer->OnLineFinished.AddDynamic(this, &UKzAsyncDialogueSequenceAction::HandleLineFinished);
 	SubscribeDialogueFinished();
 	Started.Broadcast(DialoguePlayer, NoLine());
@@ -276,12 +334,16 @@ void UKzAsyncDialogueSequenceAction::Activate()
 
 void UKzAsyncDialogueSequenceAction::HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
 {
+	if (IsQueued()) { return; }
+
 	LastFinishedLine = Line;
 	LineFinished.Broadcast(Player, Line);
 }
 
 void UKzAsyncDialogueSequenceAction::HandleDialogueFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
+	if (IsQueued()) { return; }
+
 	if (Reason != EKzDialogueFinishReason::Completed)
 	{
 		NotifyCancelled();
