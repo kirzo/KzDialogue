@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Fonts/SlateFontInfo.h"
 #include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
 #include "KzSubtitleWidget.generated.h"
@@ -11,6 +12,28 @@
 class UTextBlock;
 class UWidgetAnimation;
 class UKzDialoguePlayer;
+
+/** The player's subtitle options, shared by every subtitle widget and applied live (UKzSubtitleWidget::SetSubtitleProfile). */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzSubtitleProfile
+{
+	GENERATED_BODY()
+
+	/** Multiplies the designed font size of the speaker and subtitle texts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = 0.5, ClampMax = 4.0))
+	float TextScale = 1.0f;
+
+	/** Alpha of each view's Background. Below 0 keeps the designed one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = -1.0, ClampMax = 1.0))
+	float BackgroundOpacity = -1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowSpeakerNames = true;
+
+	/** Off hides the channels flagged bClosedCaptions in the dialogue settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowClosedCaptions = true;
+};
 
 /** Enum to define where the affix will be placed relative to the speaker's name. */
 UENUM(BlueprintType)
@@ -90,6 +113,10 @@ struct FKzSubtitleChannelView
 	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
 	TObjectPtr<UTextBlock> SubtitlesText = nullptr;
 
+	/** Border or Image behind the text. The subtitle profile's BackgroundOpacity sets its brush alpha, not its render opacity, so the text inside keeps showing. */
+	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
+	TObjectPtr<UWidget> Background = nullptr;
+
 	UPROPERTY(BlueprintReadWrite, Category = "Dialogue|Subtitles")
 	TObjectPtr<UWidgetAnimation> StartFadeIn = nullptr;
 
@@ -167,9 +194,16 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsViewEnabled() const { return bViewEnabled; }
 
-	/** True when Channel is currently muted on this widget by any rule in MuteRules. */
+	/** True when Channel is currently muted on this widget by any rule in MuteRules, or is a closed-caption channel the profile hides. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsChannelMuted(FGameplayTag Channel) const;
+
+	/** Applies the player's subtitle options to every subtitle widget, live. Process-wide and not saved; apply it from the game's options at startup. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	static void SetSubtitleProfile(const FKzSubtitleProfile& Profile);
+
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
+	static FKzSubtitleProfile GetSubtitleProfile();
 
 protected:
 	/**
@@ -222,7 +256,7 @@ protected:
 	bool CanShowLine(FGameplayTag Channel, const FKzDialogueLine& Line) const;
 	virtual bool CanShowLine_Implementation(FGameplayTag Channel, const FKzDialogueLine& Line) const;
 
-	/** Optional Blueprint hooks. Override for custom per-line presentation. */
+	/** Custom per-line presentation, after the text, speaker color and subtitle profile are applied. Fires again for the line on screen when the culture or the profile changes. */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Setup Line"))
 	void ReceiveSetupLine(FGameplayTag Channel, const FKzDialogueLine& Line);
 
@@ -292,8 +326,14 @@ private:
 	/** The speaker's subtitle name with the active culture's affix rules. */
 	FText MakeSpeakerLabel(const FKzDialogueLine& Line) const;
 
-	/** The line text is a live FText and retranslates itself; the composed speaker label is rebuilt here. */
-	void HandleCultureChanged();
+	/** The speaker color and the subtitle profile on a view showing Line, always starting from the designed look. */
+	void ApplyProfileToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line);
+
+	/** Re-applies the line of every view showing one: the speaker label after a culture change, the look after a profile change. */
+	void ReapplyShownLines();
+
+	void HandleCultureChanged() { ReapplyShownLines(); }
+	void HandleProfileChanged();
 
 	/** Speaker formatting rules for the active culture: the per-culture override when one matches the culture priority chain, SpeakerFormattingRules otherwise. */
 	const TArray<FKzSpeakerAffixRule>& GetActiveSpeakerFormattingRules() const;
@@ -315,4 +355,15 @@ private:
 
 	/** Master switch set by SetViewEnabled. Disabled = every player behaves as muted. */
 	bool bViewEnabled = true;
+
+	/** A view widget as designed, captured the first time the profile touches it. */
+	struct FDesignedLook
+	{
+		FSlateFontInfo Font;
+		FSlateColor Color;
+		ESlateVisibility Visibility = ESlateVisibility::Visible;
+	};
+	TMap<TWeakObjectPtr<UWidget>, FDesignedLook> DesignedLooks;
+
+	FDesignedLook FindOrCaptureDesignedLook(UWidget* Widget);
 };

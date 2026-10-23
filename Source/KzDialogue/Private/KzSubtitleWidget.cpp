@@ -2,12 +2,33 @@
 
 #include "KzSubtitleWidget.h"
 
+#include "Components/Border.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 #include "Animation/WidgetAnimation.h"
 #include "Internationalization/Culture.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
+#include "KzSpeakerAsset.h"
+#include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
+
+namespace
+{
+	FKzSubtitleProfile GSubtitleProfile;
+	FSimpleMulticastDelegate GOnSubtitleProfileChanged;
+}
+
+void UKzSubtitleWidget::SetSubtitleProfile(const FKzSubtitleProfile& Profile)
+{
+	GSubtitleProfile = Profile;
+	GOnSubtitleProfileChanged.Broadcast();
+}
+
+FKzSubtitleProfile UKzSubtitleWidget::GetSubtitleProfile()
+{
+	return GSubtitleProfile;
+}
 
 void UKzSubtitleWidget::NativeConstruct()
 {
@@ -19,6 +40,7 @@ void UKzSubtitleWidget::NativeConstruct()
 	// box flow, speaker label side. Opted in here, on the root, so subclasses cannot forget it.
 	SetFlowDirectionPreference(EFlowDirectionPreference::Culture);
 	FInternationalization::Get().OnCultureChanged().AddUObject(this, &UKzSubtitleWidget::HandleCultureChanged);
+	GOnSubtitleProfileChanged.AddUObject(this, &UKzSubtitleWidget::HandleProfileChanged);
 
 	BindFromListenedChannels();
 }
@@ -34,6 +56,7 @@ void UKzSubtitleWidget::NativeDestruct()
 	}
 
 	FInternationalization::Get().OnCultureChanged().RemoveAll(this);
+	GOnSubtitleProfileChanged.RemoveAll(this);
 	UnbindAllPlayers();
 	Super::NativeDestruct();
 }
@@ -394,6 +417,12 @@ void UKzSubtitleWidget::SetViewEnabled(bool bEnabled)
 
 bool UKzSubtitleWidget::IsChannelMuted(FGameplayTag Channel) const
 {
+	if (!GSubtitleProfile.bShowClosedCaptions)
+	{
+		const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(Channel);
+		if (ChannelDef && ChannelDef->bClosedCaptions) { return true; }
+	}
+
 	for (const FKzSubtitleMuteRule& Rule : MuteRules)
 	{
 		if (!Rule.Channel.IsValid() || !Channel.MatchesAny(Rule.MutedChannels))
@@ -544,7 +573,51 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 		View.SubtitlesText->SetText(Line.GetFormattedText());
 	}
 
+	ApplyProfileToView(View, Line);
 	ReceiveSetupLine(Channel, Line);
+}
+
+UKzSubtitleWidget::FDesignedLook UKzSubtitleWidget::FindOrCaptureDesignedLook(UWidget* Widget)
+{
+	if (const FDesignedLook* Found = DesignedLooks.Find(Widget)) { return *Found; }
+
+	FDesignedLook Look;
+	Look.Visibility = Widget->GetVisibility();
+	if (const UTextBlock* Text = Cast<UTextBlock>(Widget))
+	{
+		Look.Font = Text->GetFont();
+		Look.Color = Text->GetColorAndOpacity();
+	}
+	else if (const UBorder* Border = Cast<UBorder>(Widget)) { Look.Color = Border->GetBrushColor(); }
+	else if (const UImage* Image = Cast<UImage>(Widget)) { Look.Color = Image->GetColorAndOpacity(); }
+	return DesignedLooks.Add(Widget, Look);
+}
+
+void UKzSubtitleWidget::ApplyProfileToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line)
+{
+	for (UTextBlock* Text : { View.SpeakerText.Get(), View.SubtitlesText.Get() })
+	{
+		if (!Text) { continue; }
+		FSlateFontInfo Font = FindOrCaptureDesignedLook(Text).Font;
+		Font.Size *= GSubtitleProfile.TextScale;
+		Text->SetFont(Font);
+	}
+
+	if (UTextBlock* Speaker = View.SpeakerText)
+	{
+		const FDesignedLook Look = FindOrCaptureDesignedLook(Speaker);
+		const UKzSpeakerAsset* Asset = Line.Speaker.Asset;
+		Speaker->SetColorAndOpacity(Asset && Asset->bUseSubtitleColor ? FSlateColor(Asset->SubtitleColor) : Look.Color);
+		Speaker->SetVisibility(GSubtitleProfile.bShowSpeakerNames ? Look.Visibility : ESlateVisibility::Collapsed);
+	}
+
+	if (UWidget* Background = View.Background)
+	{
+		FLinearColor Color = FindOrCaptureDesignedLook(Background).Color.GetSpecifiedColor();
+		if (GSubtitleProfile.BackgroundOpacity >= 0.0f) { Color.A = GSubtitleProfile.BackgroundOpacity; }
+		if (UBorder* Border = Cast<UBorder>(Background)) { Border->SetBrushColor(Color); }
+		else if (UImage* Image = Cast<UImage>(Background)) { Image->SetColorAndOpacity(Color); }
+	}
 }
 
 FText UKzSubtitleWidget::MakeSpeakerLabel(const FKzDialogueLine& Line) const
@@ -565,7 +638,7 @@ FText UKzSubtitleWidget::MakeSpeakerLabel(const FKzDialogueLine& Line) const
 	return FText::FromString(Label);
 }
 
-void UKzSubtitleWidget::HandleCultureChanged()
+void UKzSubtitleWidget::ReapplyShownLines()
 {
 	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
 	{
@@ -576,13 +649,15 @@ void UKzSubtitleWidget::HandleCultureChanged()
 		const EKzDialogueState State = Player->GetState();
 		if (State != EKzDialogueState::LineEntering && State != EKzDialogueState::LinePlaying && State != EKzDialogueState::LineExiting && State != EKzDialogueState::Paused) { continue; }
 
-		const FKzDialogueLine Line = Player->GetCurrentLine();
-		const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
-		if (View.SpeakerText && Line.Speaker.IsValid())
-		{
-			View.SpeakerText->SetText(MakeSpeakerLabel(Line));
-		}
+		ApplyLineToView(GetViewForChannel(Player->Channel), Player->GetCurrentLine(), Player->Channel);
 	}
+}
+
+void UKzSubtitleWidget::HandleProfileChanged()
+{
+	// Captions may have been toggled: hide or re-show those channels before restyling what is on screen.
+	RefreshMuteStates();
+	ReapplyShownLines();
 }
 
 const TArray<FKzSpeakerAffixRule>& UKzSubtitleWidget::GetActiveSpeakerFormattingRules() const

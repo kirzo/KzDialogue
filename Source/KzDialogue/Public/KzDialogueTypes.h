@@ -611,6 +611,10 @@ struct FKzDialogueChannelDefinition
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	bool bAllowInterruption = true;
 
+	/** Captions for sound effects ("[door creaks]"), played as manual lines; subtitle widgets hide the channel while the player's subtitle profile turns captions off. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	bool bClosedCaptions = false;
+
 	/** What happens to a request the channel refuses: dropped, queued, or kept as the only one waiting. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Queue")
 	EKzChannelBusyPolicy BusyPolicy = EKzChannelBusyPolicy::Reject;

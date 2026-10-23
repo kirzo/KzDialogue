@@ -38,6 +38,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker")
 	EKzGender Gender = EKzGender::Unspecified;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker", meta = (InlineEditConditionToggle))
+	bool bUseSubtitleColor = false;
+
+	/** Color of this speaker's name in subtitles, so players tell speakers apart. Off keeps the widget's designed color. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker", meta = (EditCondition = "bUseSubtitleColor"))
+	FLinearColor SubtitleColor = FLinearColor::White;
+
 	/** Given (first) name, composed per culture when DisplayName is empty. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText GivenName;
