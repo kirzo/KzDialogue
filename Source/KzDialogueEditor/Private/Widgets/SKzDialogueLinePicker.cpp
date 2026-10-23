@@ -144,7 +144,6 @@ void SKzDialogueLinePicker::BuildAllItems()
 		Entry->DisplayText = Line.GetDisplayLabel().ToString();
 		Entry->Speaker = Line.Speaker.Asset;
 		Entry->LineTags = Line.Tags;
-		Entry->bHasAudio = !Line.Audio.IsNull();
 		Entry->DefaultDuration = Line.ResolveTotalDuration(AudioDuration);
 
 		// Haystack: speaker + text, lowercase.
@@ -161,7 +160,6 @@ void SKzDialogueLinePicker::BuildAllItems()
 		Entry->DisplayText = Alias.GetDisplayLabel().ToString();
 		Entry->Speaker = Alias.Speaker.Asset;
 		Entry->LineTags = FGameplayTagContainer();
-		Entry->bHasAudio = false;
 		Entry->DefaultDuration = 2.f;
 
 		Entry->SearchHaystack = (SpeakerHaystack(Alias.Speaker.Asset) + TEXT(" ") + Alias.AliasName.ToString()).ToLower();

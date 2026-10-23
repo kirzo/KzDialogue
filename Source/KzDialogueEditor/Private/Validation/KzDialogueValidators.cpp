@@ -256,27 +256,6 @@ void UKzDialogueValidator_DuplicateLineIds::Validate_Implementation(const UObjec
 // Alias validators
 // =======================================================================================
 
-bool UKzDialogueValidator_AliasMissingSpeaker::CanValidate_Implementation(const UObject* Asset) const
-{
-	return Asset && Asset->IsA<UKzDialogueAsset>();
-}
-
-void UKzDialogueValidator_AliasMissingSpeaker::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
-{
-	const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset);
-	if (!Dialogue) { return; }
-
-	const FName Id = GetValidatorId();
-	for (int32 i = 0; i < Dialogue->Aliases.Num(); ++i)
-	{
-		const FKzDialogueAlias& Alias = Dialogue->Aliases[i];
-		// "No speaker" is valid (narration aliases). We only flag when the array is
-		// non-empty but lines reference different speakers and the alias defines none.
-		// That case is handled by the SpeakerMismatch validator. Here we simply skip.
-		(void)Alias; (void)i; (void)Id;
-	}
-}
-
 bool UKzDialogueValidator_AliasEmpty::CanValidate_Implementation(const UObject* Asset) const
 {
 	return Asset && Asset->IsA<UKzDialogueAsset>();

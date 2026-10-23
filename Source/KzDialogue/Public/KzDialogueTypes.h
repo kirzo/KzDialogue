@@ -267,8 +267,6 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	FKzDialogueLine() : LineId(FGuid::NewGuid()) {}
 
-	bool IsValid() const { return !Text.IsEmpty() || !Audio.IsNull(); }
-
 	/** Text with FormatArguments applied; Text as-is when there are none (the common case). */
 	FText GetFormattedText() const;
 

@@ -157,13 +157,6 @@ bool UKzDialogueAsset::TryResolveAlias(const FGuid& InAliasId, FKzDialogueLine& 
 	return TryGetLineById(PickedId, OutLine);
 }
 
-bool UKzDialogueAsset::TryResolveAlias(FName AliasName, FKzDialogueLine& OutLine) const
-{
-	FKzDialogueAlias Alias;
-	if (!TryGetAliasByName(AliasName, Alias)) { return false; }
-	return TryResolveAlias(Alias.AliasId, OutLine);
-}
-
 bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& OutLine) const
 {
 	if (!Id.IsValid()) { return false; }
@@ -174,14 +167,6 @@ bool UKzDialogueAsset::TryResolveLineOrAlias(const FGuid& Id, FKzDialogueLine& O
 	// Fall back to alias resolution. RefreshLineMetadata guarantees Lines and Aliases
 	// don't share GUIDs, so a hit here is unambiguous.
 	return TryResolveAlias(Id, OutLine);
-}
-
-bool UKzDialogueAsset::TryResolveReference(const FKzDialogueAssetReference& Reference, FKzDialogueLine& OutLine) const
-{
-	if (!Reference.IsValid()) { return false; }
-	return Reference.bIsAlias
-		? TryResolveAlias(Reference.Id, OutLine)
-		: TryGetLineById(Reference.Id, OutLine);
 }
 
 FPrimaryAssetId UKzDialogueAsset::GetPrimaryAssetId() const

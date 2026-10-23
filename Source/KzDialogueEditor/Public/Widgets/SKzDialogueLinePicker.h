@@ -29,7 +29,6 @@ namespace KzDialoguePickerInternal
 		/** Speaker asset of the line/alias. Null = narration. */
 		TWeakObjectPtr<const UKzSpeakerAsset> Speaker;
 		FGameplayTagContainer LineTags;
-		bool bHasAudio = false;
 	};
 	using FEntryPtr = TSharedPtr<FEntry>;
 }
