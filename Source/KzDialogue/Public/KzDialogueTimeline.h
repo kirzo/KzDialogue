@@ -87,6 +87,9 @@ struct KZDIALOGUE_API FKzDialogueTimeSource_AudioMarker : public FKzDialogueTime
 	float FallbackTime = 0.0f;
 
 	virtual void Resolve(const FKzDialogueTimeResolveContext& Context, float& OutStart, float& OutEnd) const override;
+
+	/** The marker's window in Audio; false when Audio is not a USoundWave or has no cue point with MarkerName. */
+	bool FindMarker(const USoundBase* Audio, float& OutStart, float& OutEnd) const;
 };
 
 /**

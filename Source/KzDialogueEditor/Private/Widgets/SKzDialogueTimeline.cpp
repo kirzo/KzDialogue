@@ -164,10 +164,11 @@ public:
 	DECLARE_DELEGATE_RetVal_OneParam(TSharedRef<SWidget>, FOnBuildEventMenu, int32 /*EventIndex*/);
 	DECLARE_DELEGATE_ThreeParams(FOnZoom, float /*CursorSeconds*/, float /*WheelDelta*/, bool /*bPan*/);
 	DECLARE_DELEGATE_OneParam(FOnPan, float /*DeltaSeconds*/);
-	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*TargetTrack*/);
+	DECLARE_DELEGATE_TwoParams(FOnMoveToTrack, int32 /*EventIndex*/, int32 /*RowDelta*/);
+	DECLARE_DELEGATE_OneParam(FOnDragRow, int32 /*RowDelta*/);
 	DECLARE_DELEGATE_OneParam(FOnActivateEvent, int32 /*EventIndex*/);
 
-	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _AudioTimeOffset(0.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
+	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _AudioTimeOffset(0.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f), _IsDropTarget(false) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
 		SLATE_ARGUMENT(int32, TrackIndex)
 		SLATE_ATTRIBUTE(TSharedPtr<FKzWaveformPreview>, Waveform)
@@ -180,6 +181,7 @@ public:
 		SLATE_ATTRIBUTE(float, SelectionEnd)
 		SLATE_ATTRIBUTE(int32, SelectedEvent)
 		SLATE_ATTRIBUTE(float, Playhead)
+		SLATE_ATTRIBUTE(bool, IsDropTarget)
 		SLATE_EVENT(FOnSelectEvent, OnSelect)
 		SLATE_EVENT(FSimpleDelegate, OnBeginRetime)
 		SLATE_EVENT(FOnRetimeEvent, OnRetime)
@@ -190,6 +192,7 @@ public:
 		SLATE_EVENT(FOnZoom, OnZoom)
 		SLATE_EVENT(FOnPan, OnPan)
 		SLATE_EVENT(FOnMoveToTrack, OnMoveToTrack)
+		SLATE_EVENT(FOnDragRow, OnDragRow)
 		SLATE_EVENT(FOnActivateEvent, OnActivateEvent)
 	SLATE_END_ARGS()
 
@@ -217,8 +220,16 @@ public:
 		OnZoom = InArgs._OnZoom;
 		OnPan = InArgs._OnPan;
 		OnMoveToTrack = InArgs._OnMoveToTrack;
+		OnDragRow = InArgs._OnDragRow;
 		OnActivateEvent = InArgs._OnActivateEvent;
+		IsDropTarget = InArgs._IsDropTarget;
 		SetClipping(EWidgetClipping::ClipToBounds);
+
+		// Over a marker it describes the marker; over empty space it lists the gestures nothing else shows.
+		if (TrackIndex != INDEX_NONE)
+		{
+			SetToolTipText(TAttribute<FText>::CreateSP(this, &SKzTimelineTrack::GetHoverToolTip));
+		}
 	}
 
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(100.f, 28.f); }
@@ -230,8 +241,12 @@ public:
 		const FKzTimelineView View = MakeView(W);
 		const FSlateBrush* Box = FAppStyle::GetBrush("WhiteBrush");
 
-		// Lane background so an empty track still reads as a drop area.
+		// Lane background so an empty track still reads as a drop area; lit while a dragged marker would land here.
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), Box, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.15f));
+		if (IsDropTarget.Get(false))
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(), Box, ESlateDrawEffect::None, FLinearColor(0.98f, 0.86f, 0.36f, 0.15f));
+		}
 
 		// Grid, separator and bound/selection lines are drawn for every row -- including the
 		// decorative "Notifies" group row (TrackIndex == INDEX_NONE), which has no events.
@@ -254,6 +269,15 @@ public:
 			const FLinearColor WaveColor(0.40f, 0.62f, 0.88f, 0.55f);
 			KzPaintWaveform(*Wave, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), View.Start + AudioTimeOffset.Get(), View.SecondsPerPixel(),
 				[&WaveColor](float) { return WaveColor; });
+		}
+		else if (Waveform.IsBound())
+		{
+			// A SoundCue or MetaSound has no single wave to draw.
+			if (const USoundBase* Audio = LineAudio.Get(nullptr))
+			{
+				const FText Hint = FText::Format(LOCTEXT("NoWaveform", "No waveform for a {0}"), FText::FromString(Audio->GetClass()->GetName()));
+				PaintHint(AllottedGeometry, OutDrawElements, LayerId + 1, Hint);
+			}
 		}
 
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(W, 1.f), FSlateLayoutTransform(FVector2f(0.f, H - 1.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.08f));
@@ -293,23 +317,37 @@ public:
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 8);
 		const TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 
+		if (Track.Events.Num() == 0)
+		{
+			PaintHint(AllottedGeometry, OutDrawElements, LayerId + 1, LOCTEXT("EmptyTrackHint", "Right-click to add a notify"));
+		}
+
 		for (int32 e = 0; e < Track.Events.Num(); ++e)
 		{
+			const FKzDialogueNotifyEvent& Event = Track.Events[e];
 			float StartSec, EndSec; bool bState;
-			GetEventBounds(Track.Events[e], Dur, StartSec, EndSec, bState);
+			const bool bPastEnd = GetDrawnBounds(Event, Dur, StartSec, EndSec, bState);
 
 			const float L = View.TimeToX(StartSec);
 			const float R = View.TimeToX(EndSec);
 			const bool bSelected = (e == Sel);
-			FLinearColor Color = bSelected ? FLinearColor(0.98f, 0.86f, 0.36f) : (Track.Events[e].Notify ? Track.Events[e].Notify->GetEditorColor() : FLinearColor(0.46f, 0.62f, 0.85f));
+			// No notify, a start past the line end or a missing audio marker never fire as authored: red.
+			const bool bBroken = !Event.Notify || bPastEnd || IsMarkerMissing(Event);
+			FLinearColor Color = bSelected ? FLinearColor(0.98f, 0.86f, 0.36f) : (bBroken ? FLinearColor(0.85f, 0.20f, 0.20f) : Event.Notify->GetEditorColor());
 			FLinearColor TextColor = Color.GetLuminance() > 0.5f ? FLinearColor::Black : FLinearColor::White;
-			if (!Track.Events[e].bEnabled)
+			if (!Event.bEnabled)
 			{
 				Color.A *= 0.35f;
 				TextColor.A *= 0.5f;
 			}
-			const FText Label = Track.Events[e].Notify ? Track.Events[e].Notify->GetNotifyName() : LOCTEXT("Empty", "(empty)");
+			const FText Label = Event.Notify ? Event.Notify->GetNotifyName() : LOCTEXT("Empty", "(empty)");
 			const FVector2D LabelExtent = FontMeasure->Measure(Label.ToString(), Font);
+
+			// Anchored to an audio marker: a dot at the foot of its time, so it reads as not draggable.
+			if (!IsRetimable(Event))
+			{
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(6.f, 6.f), FSlateLayoutTransform(FVector2f(L - 3.f, H - 7.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 0.55f, 0.10f));
+			}
 
 			if (bState)
 			{
@@ -328,6 +366,18 @@ public:
 				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(BoxW, BoxH), FSlateLayoutTransform(FVector2f(L, 1.f))), Box, ESlateDrawEffect::None, Color);
 				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(LabelExtent.X), static_cast<float>(LabelExtent.Y)), FSlateLayoutTransform(FVector2f(L + 4.f, 3.f))), Label, Font, ESlateDrawEffect::None, TextColor);
 			}
+		}
+
+		// The dragged marker's time, next to the cursor.
+		if (bDragStarted && Track.Events.IsValidIndex(DragIndex) && IsRetimable(Track.Events[DragIndex]))
+		{
+			float StartSec, EndSec; bool bState;
+			GetDrawnBounds(Track.Events[DragIndex], Dur, StartSec, EndSec, bState);
+			const FText TimeText = FText::FromString(bState ? FString::Printf(TEXT("%.2f - %.2f s"), StartSec, EndSec) : FString::Printf(TEXT("%.2f s"), StartSec));
+			const FVector2D Extent = FontMeasure->Measure(TimeText.ToString(), Font);
+			const FVector2f Pos(FMath::Min(DragCursorX + 12.f, W - static_cast<float>(Extent.X) - 4.f), H - static_cast<float>(Extent.Y) - 2.f);
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(Extent.X) + 4.f, static_cast<float>(Extent.Y)), FSlateLayoutTransform(Pos - FVector2f(2.f, 0.f))), Box, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.7f));
+			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 5, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(Extent.X), static_cast<float>(Extent.Y)), FSlateLayoutTransform(Pos)), TimeText, Font, ESlateDrawEffect::None, FLinearColor::White);
 		}
 		return LayerId + 6;
 	}
@@ -360,7 +410,7 @@ public:
 			if (Hit != INDEX_NONE && T->Tracks[TrackIndex].Events.IsValidIndex(Hit))
 			{
 				float StartSec, EndSec; bool bState;
-				GetEventBounds(T->Tracks[TrackIndex].Events[Hit], Dur, StartSec, EndSec, bState);
+				GetDrawnBounds(T->Tracks[TrackIndex].Events[Hit], Dur, StartSec, EndSec, bState);
 				const float CursorSec = MakeView(W).XToTime(LocalX);
 
 				// Anchor-based events cannot be retimed or resized; the drag stays alive only
@@ -371,7 +421,7 @@ public:
 				DragMode = Mode;
 				DragGrabOffsetSec = CursorSec - StartSec;
 				DragOrigLenSec = EndSec - StartSec;
-				DragStartLocalX = LocalX;
+				DragStartLocal = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
 				bDragStarted = false;
 			}
 			return FReply::Handled().CaptureMouse(SharedThis(this));
@@ -387,7 +437,10 @@ public:
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
 		const float W = MyGeometry.GetLocalSize().X;
-		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
+		const FVector2f Local = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition());
+		const float LocalX = Local.X;
+		HoverX = LocalX;
+		HoverWidth = W;
 
 		if (bPanning && MouseEvent.IsMouseButtonDown(EKeys::MiddleMouseButton))
 		{
@@ -406,12 +459,17 @@ public:
 		// Anchor-based events keep their time; the drag only serves move-to-track on release.
 		const bool bRetimable = IsRetimable(T->Tracks[TrackIndex].Events[DragIndex]);
 
+		// Measured in both axes, so a purely vertical drag (move to another track) starts too.
 		if (!bDragStarted)
 		{
-			if (FMath::Abs(LocalX - DragStartLocalX) < DragThreshold) { return FReply::Handled(); }
+			if (FVector2f::Distance(Local, DragStartLocal) < DragThreshold) { return FReply::Handled(); }
 			if (bRetimable) { OnBeginRetime.ExecuteIfBound(); }
 			bDragStarted = true;
 		}
+
+		const float H = MyGeometry.GetLocalSize().Y;
+		if (H > 0.f) { OnDragRow.ExecuteIfBound(FMath::FloorToInt(Local.Y / H)); }
+		DragCursorX = LocalX;
 
 		if (!bRetimable) { return FReply::Handled(); }
 
@@ -419,7 +477,7 @@ public:
 		const float CursorSec = View.XToTime(LocalX);
 
 		float CurStart, CurEnd; bool bState;
-		GetEventBounds(T->Tracks[TrackIndex].Events[DragIndex], Dur, CurStart, CurEnd, bState);
+		GetDrawnBounds(T->Tracks[TrackIndex].Events[DragIndex], Dur, CurStart, CurEnd, bState);
 
 		float NewStart, NewEnd;
 		switch (DragMode)
@@ -471,13 +529,13 @@ public:
 			const bool bWasRetiming = (DragIndex != INDEX_NONE && bDragStarted);
 			const int32 DraggedEvent = DragIndex;
 
-			// Released over another row? Move the dragged notify to that track.
-			int32 TargetTrack = TrackIndex;
+			// Released over another row? Move the dragged notify there; the host maps rows to visible tracks.
+			int32 RowDelta = 0;
 			if (bWasRetiming)
 			{
 				const float H = MyGeometry.GetLocalSize().Y;
 				const float LocalY = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).Y;
-				if (H > 0.f) { TargetTrack = TrackIndex + FMath::FloorToInt(LocalY / H); }
+				if (H > 0.f) { RowDelta = FMath::FloorToInt(LocalY / H); }
 			}
 
 			DragIndex = INDEX_NONE;
@@ -487,7 +545,7 @@ public:
 			if (bWasRetiming)
 			{
 				OnEndRetime.ExecuteIfBound();
-				if (TargetTrack != TrackIndex) { OnMoveToTrack.ExecuteIfBound(DraggedEvent, TargetTrack); }
+				if (RowDelta != 0) { OnMoveToTrack.ExecuteIfBound(DraggedEvent, RowDelta); }
 			}
 			else
 			{
@@ -616,10 +674,83 @@ private:
 		}
 	}
 
+	/** Bounds as drawn and hit: a start past the line end is pinned to the end so the marker stays visible. True when pinned. */
+	bool GetDrawnBounds(const FKzDialogueNotifyEvent& Event, float Dur, float& OutStartSec, float& OutEndSec, bool& bOutState) const
+	{
+		GetEventBounds(Event, Dur, OutStartSec, OutEndSec, bOutState);
+		const bool bPastEnd = OutStartSec > Dur + UE_KINDA_SMALL_NUMBER;
+		OutStartSec = FMath::Min(OutStartSec, Dur);
+		OutEndSec = FMath::Clamp(OutEndSec, OutStartSec, Dur);
+		return bPastEnd;
+	}
+
 	/** Only Relative sources are draggable; anchor-based ones take their time from the audio. */
 	static bool IsRetimable(const FKzDialogueNotifyEvent& Event)
 	{
 		return Event.TimeSource.GetPtr<FKzDialogueTimeSource_Relative>() != nullptr;
+	}
+
+	/** An audio-marker source whose marker the line's audio lacks: it fires at its fallback time. */
+	bool IsMarkerMissing(const FKzDialogueNotifyEvent& Event) const
+	{
+		const FKzDialogueTimeSource_AudioMarker* Marker = Event.TimeSource.GetPtr<FKzDialogueTimeSource_AudioMarker>();
+		float Start = 0.f;
+		float End = 0.f;
+		return Marker && !Marker->FindMarker(LineAudio.Get(nullptr), Start, End);
+	}
+
+	/** Dim text at the lane's left edge, for states the lane cannot otherwise show. */
+	static void PaintHint(const FGeometry& Geometry, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FText& Hint)
+	{
+		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Italic", 8);
+		const float Y = FMath::Max(0.f, (Geometry.GetLocalSize().Y - 12.f) * 0.5f);
+		FSlateDrawElement::MakeText(OutDrawElements, LayerId, Geometry.ToPaintGeometry(FVector2f(Geometry.GetLocalSize().X, 12.f), FSlateLayoutTransform(FVector2f(6.f, Y))), Hint, Font, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.35f));
+	}
+
+	FText GetHoverToolTip() const
+	{
+		UKzDialogueTimeline* T = Timeline.Get();
+		const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
+		EDragMode Mode;
+		const int32 Hit = (T && T->Tracks.IsValidIndex(TrackIndex)) ? HitTest(HoverX, HoverWidth, Dur, Mode) : INDEX_NONE;
+		if (Hit == INDEX_NONE)
+		{
+			return LOCTEXT("TrackGestures", "Right-click: add a notify here, or open a marker's menu.\nDrag a marker to retime it (a state's edges resize it); hold Shift to snap to the grid.\nDrag it onto another row to move it to that track; Esc cancels the drag.\nDouble-click a Blueprint notify to open it.\nWheel zooms; Shift+wheel or middle-drag pans.\nCtrl+C copies, Ctrl+V pastes at the playhead, Ctrl+D duplicates, Delete removes.");
+		}
+
+		const FKzDialogueNotifyEvent& Event = T->Tracks[TrackIndex].Events[Hit];
+		float StartSec, EndSec; bool bState;
+		GetEventBounds(Event, Dur, StartSec, EndSec, bState);
+
+		const FText Name = Event.Notify ? FText::Format(INVTEXT("{0} ({1})"), Event.Notify->GetNotifyName(), FText::FromString(Event.Notify->GetClass()->GetName())) : LOCTEXT("NoNotifyTip", "No notify assigned: it does nothing.");
+		const FText Time = FText::FromString(bState ? FString::Printf(TEXT("%.2f - %.2f s"), StartSec, EndSec) : FString::Printf(TEXT("%.2f s"), StartSec));
+
+		FText Source = LOCTEXT("NoSourceTip", "no time source");
+		if (const FKzDialogueTimeSource_Relative* Rel = Event.TimeSource.GetPtr<FKzDialogueTimeSource_Relative>())
+		{
+			Source = Rel->bNormalized ? LOCTEXT("RelativeNormalizedTip", "relative, scaled to the line") : LOCTEXT("RelativeTip", "relative");
+		}
+		else if (const FKzDialogueTimeSource_AudioMarker* Marker = Event.TimeSource.GetPtr<FKzDialogueTimeSource_AudioMarker>())
+		{
+			Source = IsMarkerMissing(Event)
+				? FText::Format(LOCTEXT("MarkerMissingTip", "audio marker '{0}', not in the line's audio: fires at its fallback time"), FText::FromName(Marker->MarkerName))
+				: FText::Format(LOCTEXT("MarkerTip", "audio marker '{0}'"), FText::FromName(Marker->MarkerName));
+		}
+		else if (const UScriptStruct* SourceStruct = Event.TimeSource.GetScriptStruct())
+		{
+			Source = SourceStruct->GetDisplayNameText();
+		}
+
+		FText Tip = FText::Format(INVTEXT("{0}\n{1}, {2}"), Name, Time, Source);
+		if (StartSec > Dur + UE_KINDA_SMALL_NUMBER)
+		{
+			Tip = FText::Format(LOCTEXT("PastEndTip", "{0}\nStarts past the line end ({1} s): it never fires."), Tip, FText::AsNumber(Dur));
+		}
+		if (!Event.bEnabled)
+		{
+			Tip = FText::Format(LOCTEXT("DisabledTip", "{0}\nDisabled."), Tip);
+		}
+		return Tip;
 	}
 
 	float PointBoxWidth(const FKzDialogueNotifyEvent& Event) const
@@ -640,7 +771,7 @@ private:
 		for (int32 e = Track.Events.Num() - 1; e >= 0; --e)
 		{
 			float StartSec, EndSec; bool bState;
-			GetEventBounds(Track.Events[e], Dur, StartSec, EndSec, bState);
+			GetDrawnBounds(Track.Events[e], Dur, StartSec, EndSec, bState);
 			const float L = View.TimeToX(StartSec);
 			const float R = View.TimeToX(EndSec);
 			if (bState)
@@ -692,15 +823,22 @@ private:
 	FOnZoom OnZoom;
 	FOnPan OnPan;
 	FOnMoveToTrack OnMoveToTrack;
+	FOnDragRow OnDragRow;
 	FOnActivateEvent OnActivateEvent;
+	TAttribute<bool> IsDropTarget;
 	bool bPanning = false;
 	float PanLastX = 0.f;
+
+	/** Last cursor position over the lane, for the tooltip. */
+	float HoverX = -1.f;
+	float HoverWidth = 1.f;
 
 	int32 DragIndex = INDEX_NONE;
 	EDragMode DragMode = EDragMode::None;
 	float DragGrabOffsetSec = 0.f;
 	float DragOrigLenSec = 0.f;
-	float DragStartLocalX = 0.f;
+	FVector2f DragStartLocal = FVector2f::ZeroVector;
+	float DragCursorX = 0.f;
 	bool bDragStarted = false;
 };
 
@@ -928,7 +1066,7 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 				[
 					SNew(SSearchBox)
-						.HintText(LOCTEXT("FilterTracksHint", "Filter"))
+						.HintText(LOCTEXT("FilterTracksHint", "Filter tracks"))
 						.OnTextChanged_Lambda([this](const FText& InText) { FilterText = InText; Rebuild(); })
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2, 0, 0, 0)
@@ -1381,15 +1519,43 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTransportControl()
 
 FReply SKzDialogueTimeline::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
 {
-	if (InKeyEvent.GetKey() == EKeys::SpaceBar)
+	const FKey Key = InKeyEvent.GetKey();
+	// A retime, or a drag aimed at another track (anchored markers only move).
+	if (Key == EKeys::Escape && (DragTransaction.IsValid() || DragHoverTrack != INDEX_NONE))
+	{
+		CancelRetime();
+		return FReply::Handled();
+	}
+	if (Key == EKeys::SpaceBar)
 	{
 		TogglePlayback();
 		return FReply::Handled();
 	}
-	if (InKeyEvent.GetKey() == EKeys::Delete && SelectedEvent())
+	if (Key == EKeys::Delete && SelectedEvent())
 	{
 		RemoveSelected();
 		return FReply::Handled();
+	}
+	if (InKeyEvent.IsControlDown())
+	{
+		if (Key == EKeys::C && SelectedEvent())
+		{
+			CopyEvent(SelTrack, SelEvent);
+			return FReply::Handled();
+		}
+		if (Key == EKeys::D && SelectedEvent())
+		{
+			DuplicateEvent(SelTrack, SelEvent);
+			return FReply::Handled();
+		}
+		if (Key == EKeys::V && GClipboardNotify)
+		{
+			// Onto the selected event's track, else the first one shown.
+			const UKzDialogueTimeline* T = Timeline.Get();
+			const int32 TargetTrack = (T && T->Tracks.IsValidIndex(SelTrack)) ? SelTrack : (VisibleTracks.Num() > 0 ? VisibleTracks[0] : INDEX_NONE);
+			PasteEvent(TargetTrack, PlayheadTime);
+			return FReply::Handled();
+		}
 	}
 	return FReply::Unhandled();
 }
@@ -1398,6 +1564,7 @@ void SKzDialogueTimeline::Rebuild()
 {
 	OutlinerTracks->ClearChildren();
 	TrackAreaTracks->ClearChildren();
+	VisibleTracks.Reset();
 
 	// One row per (filtered) track, when the group is expanded.
 	UKzDialogueTimeline* T = Timeline.Get();
@@ -1406,6 +1573,7 @@ void SKzDialogueTimeline::Rebuild()
 		for (int32 i = 0; i < T->Tracks.Num(); ++i)
 		{
 			if (!PassesFilter(T->Tracks[i].Name)) { continue; }
+			VisibleTracks.Add(i);
 			OutlinerTracks->AddSlot().AutoHeight()[ BuildOutlinerTrackRow(i) ];
 			TrackAreaTracks->AddSlot().AutoHeight()[ BuildTrackAreaRow(i) ];
 		}
@@ -1432,12 +1600,20 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeLane(int32 TrackIndex, bool bWithWa
 	if (bWithWaveform)
 	{
 		Args.Waveform_Lambda([this]() { return WaveformPreview; })
-			.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); });
+			.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); })
+			.LineAudio_Lambda([this]() { return ResolveLineAudio(); });
 	}
 
 	if (TrackIndex != INDEX_NONE)
 	{
 		Args.LineAudio_Lambda([this]() { return ResolveLineAudio(); })
+			.IsDropTarget_Lambda([this, TrackIndex]() { return DragHoverTrack == TrackIndex; })
+			.OnDragRow_Lambda([this, TrackIndex](int32 RowDelta)
+			{
+				const int32 Target = TrackAtRowOffset(TrackIndex, RowDelta);
+				const int32 NewHover = (Target != TrackIndex) ? Target : INDEX_NONE;
+				if (NewHover != DragHoverTrack) { DragHoverTrack = NewHover; Invalidate(EInvalidateWidgetReason::Paint); }
+			})
 			.SelectedEvent_Lambda([this, TrackIndex]() { return (TrackIndex == SelTrack) ? SelEvent : INDEX_NONE; })
 			.OnSelect_Lambda([this, TrackIndex](int32 EventIndex) { SetSelection(TrackIndex, EventIndex); })
 			.OnBeginRetime_Lambda([this]() { BeginRetime(); })
@@ -1446,7 +1622,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeLane(int32 TrackIndex, bool bWithWa
 			.OnInteractionEnd_Lambda([this]() { Rebuild(); })
 			.OnBuildAddMenu_Lambda([this, TrackIndex](float TimeSeconds) { return MakeAddMenuForTrack(TrackIndex, TimeSeconds); })
 			.OnBuildEventMenu_Lambda([this, TrackIndex](int32 EventIndex) { return MakeEventMenuForTrack(TrackIndex, EventIndex); })
-			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 ToTrack) { MoveEventToTrack(TrackIndex, EventIndex, ToTrack); })
+			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 RowDelta) { MoveEventToTrack(TrackIndex, EventIndex, TrackAtRowOffset(TrackIndex, RowDelta)); })
 			.OnActivateEvent_Lambda([this, TrackIndex](int32 EventIndex) { OpenEventNotifyAsset(TrackIndex, EventIndex); });
 	}
 
@@ -1912,11 +2088,8 @@ void SKzDialogueTimeline::SetSelection(int32 TrackIndex, int32 EventIndex)
 	SelTrack = TrackIndex;
 	SelEvent = EventIndex;
 
-	// Take keyboard focus so the Delete key can remove the selected event.
-	if (EventIndex != INDEX_NONE)
-	{
-		FSlateApplication::Get().SetKeyboardFocus(SharedThis(this), EFocusCause::Mouse);
-	}
+	// Any click on a track takes keyboard focus, so the shortcuts work after clicking empty space too.
+	FSlateApplication::Get().SetKeyboardFocus(SharedThis(this), EFocusCause::Mouse);
 }
 
 void SKzDialogueTimeline::RequestNotifySelection(const FGuid& OwningLineId, int32 TrackIndex, int32 EventIndex)
@@ -1941,6 +2114,13 @@ void SKzDialogueTimeline::RetimeEvent(int32 TrackIndex, int32 EventIndex, float 
 	FKzDialogueTimeSource_Relative* Rel = Event ? Event->TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>() : nullptr;
 	if (!Rel) { return; }
 
+	if (!DragSnapshot.IsValid())
+	{
+		DragSnapshot = Event->TimeSource;
+		DragSnapshotTrack = TrackIndex;
+		DragSnapshotEvent = EventIndex;
+	}
+
 	const float Dur = Duration();
 	StartSeconds = FMath::Clamp(StartSeconds, 0.f, Dur);
 	EndSeconds = FMath::Clamp(EndSeconds, StartSeconds, Dur);
@@ -1962,7 +2142,34 @@ void SKzDialogueTimeline::RetimeEvent(int32 TrackIndex, int32 EventIndex, float 
 void SKzDialogueTimeline::EndRetime()
 {
 	DragTransaction.Reset();
+	DragSnapshot.Reset();
+	DragHoverTrack = INDEX_NONE;
 	Rebuild();
+}
+
+void SKzDialogueTimeline::CancelRetime()
+{
+	// Cancelling the transaction only drops it; the dragged time is put back by hand.
+	if (FKzDialogueNotifyEvent* Event = FindEvent(DragSnapshotTrack, DragSnapshotEvent); Event && DragSnapshot.IsValid())
+	{
+		Event->TimeSource = DragSnapshot;
+		Modified();
+	}
+	if (DragTransaction.IsValid())
+	{
+		DragTransaction->Cancel();
+		DragTransaction.Reset();
+	}
+
+	// The dragging track loses its capture and finishes through EndRetime, with no move to another track.
+	FSlateApplication::Get().ReleaseAllPointerCapture();
+}
+
+int32 SKzDialogueTimeline::TrackAtRowOffset(int32 FromTrack, int32 RowDelta) const
+{
+	const int32 Row = VisibleTracks.IndexOfByKey(FromTrack);
+	if (Row == INDEX_NONE) { return FromTrack; }
+	return VisibleTracks[FMath::Clamp(Row + RowDelta, 0, VisibleTracks.Num() - 1)];
 }
 
 void SKzDialogueTimeline::MoveEventToTrack(int32 FromTrack, int32 EventIndex, int32 ToTrack)

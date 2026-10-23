@@ -482,9 +482,9 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 					}
 					else if (const USoundWave* Wave = Cast<USoundWave>(ResolveCtx.Audio))
 					{
-						const FString MarkerLabel = Marker->MarkerName.ToString();
-						const bool bFound = Wave->GetCuePoints().ContainsByPredicate([&MarkerLabel](const FSoundWaveCuePoint& Cue) { return Cue.Label == MarkerLabel; });
-						if (!bFound)
+						float MarkerStart = 0.f;
+						float MarkerEnd = 0.f;
+						if (!Marker->FindMarker(Wave, MarkerStart, MarkerEnd))
 						{
 							AddIssue(EKzValidationSeverity::Warning, FText::Format(LOCTEXT("MarkerNotFound", "Line {0}, track '{1}', {2}: marker '{3}' not found in the line's wave; it will use the fallback time."), LineLabel, TrackLabel, NotifyName, FText::FromName(Marker->MarkerName)));
 						}

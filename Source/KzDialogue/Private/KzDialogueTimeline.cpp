@@ -14,31 +14,41 @@ void FKzDialogueTimeSource_Relative::Resolve(const FKzDialogueTimeResolveContext
 
 void FKzDialogueTimeSource_AudioMarker::Resolve(const FKzDialogueTimeResolveContext& Context, float& OutStart, float& OutEnd) const
 {
-	OutStart = FallbackTime;
-	OutEnd = FallbackTime + Duration;
-
-	const USoundWave* Wave = Cast<USoundWave>(Context.Audio);
-	const float SampleRate = Wave ? Wave->GetSampleRateForCurrentPlatform() : 0.0f;
-	if (SampleRate > 0.0f && !MarkerName.IsNone())
+	if (FindMarker(Context.Audio, OutStart, OutEnd))
 	{
-		const FString MarkerLabel = MarkerName.ToString();
-		for (const FSoundWaveCuePoint& Cue : Wave->GetCuePoints())
-		{
-			if (Cue.Label == MarkerLabel)
-			{
-				OutStart = static_cast<float>(Cue.FramePosition) / SampleRate;
-				// A region marker carries its own length; an explicit Duration overrides it.
-				const float RegionLength = static_cast<float>(Cue.FrameLength) / SampleRate;
-				OutEnd = OutStart + (Duration > 0.0f ? Duration : RegionLength);
-				return;
-			}
-		}
+		return;
 	}
 
+	OutStart = FallbackTime;
+	OutEnd = FallbackTime + Duration;
 	if (Context.bWarnOnFallback)
 	{
 		UE_LOG(LogKzDialogue, Warning, TEXT("Audio marker '%s' not found in '%s'; using the fallback time (%.2f s)."), *MarkerName.ToString(), *GetNameSafe(Context.Audio), FallbackTime);
 	}
+}
+
+bool FKzDialogueTimeSource_AudioMarker::FindMarker(const USoundBase* Audio, float& OutStart, float& OutEnd) const
+{
+	const USoundWave* Wave = Cast<USoundWave>(Audio);
+	const float SampleRate = Wave ? Wave->GetSampleRateForCurrentPlatform() : 0.0f;
+	if (SampleRate <= 0.0f || MarkerName.IsNone())
+	{
+		return false;
+	}
+
+	const FString MarkerLabel = MarkerName.ToString();
+	for (const FSoundWaveCuePoint& Cue : Wave->GetCuePoints())
+	{
+		if (Cue.Label == MarkerLabel)
+		{
+			OutStart = static_cast<float>(Cue.FramePosition) / SampleRate;
+			// A region marker carries its own length; an explicit Duration overrides it.
+			const float RegionLength = static_cast<float>(Cue.FrameLength) / SampleRate;
+			OutEnd = OutStart + (Duration > 0.0f ? Duration : RegionLength);
+			return true;
+		}
+	}
+	return false;
 }
 
 FKzDialogueNotifyEvent::FKzDialogueNotifyEvent()

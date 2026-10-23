@@ -7,6 +7,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "Components/AudioComponent.h"
 #include "EditorUndoClient.h"
+#include "StructUtils/InstancedStruct.h"
 
 class UKzDialogueTimeline;
 class USoundWave;
@@ -94,7 +95,14 @@ private:
 	void BeginRetime();
 	void RetimeEvent(int32 TrackIndex, int32 EventIndex, float StartSeconds, float EndSeconds);
 	void EndRetime();
+
+	/** Esc during a drag: restores the dragged time and drops the drag's transaction. */
+	void CancelRetime();
+
 	void MoveEventToTrack(int32 FromTrack, int32 EventIndex, int32 ToTrack);
+
+	/** The visible track RowDelta rows below FromTrack (above when negative), clamped to the shown rows. */
+	int32 TrackAtRowOffset(int32 FromTrack, int32 RowDelta) const;
 	void OpenEventNotifyAsset(int32 TrackIndex, int32 EventIndex);
 
 	/** Every timeline edit goes through here: one undo transaction around Edit, then dirty and (unless the caller's widget must survive) rebuild. */
@@ -153,8 +161,19 @@ private:
 	TSharedPtr<SVerticalBox> OutlinerTracks;
 	TSharedPtr<SVerticalBox> TrackAreaTracks;
 
+	/** Track indices in display order, rebuilt with the rows: filtered, and empty while the group is collapsed. */
+	TArray<int32> VisibleTracks;
+
 	/** Open while a marker is being dragged so the whole retime is one undo transaction. */
 	TUniquePtr<FScopedTransaction> DragTransaction;
+
+	/** The dragged event's time source before the drag, for Esc. */
+	FInstancedStruct DragSnapshot;
+	int32 DragSnapshotTrack = INDEX_NONE;
+	int32 DragSnapshotEvent = INDEX_NONE;
+
+	/** Track a dragged marker would land on, lit while dragging; INDEX_NONE while it stays on its own. */
+	int32 DragHoverTrack = INDEX_NONE;
 
 	/** Details of the selected event: its time source plus the notify with its C++/BP params.
 	 * Edits a copy held in EventScope, written back to the event it was made from (ScopeTrack/ScopeEvent). */
@@ -172,7 +191,7 @@ private:
 	/** Editor-only audio preview: playhead position (seconds), transport state, and the live component. */
 	float PlayheadTime = 0.f;
 	bool bPlaying = false;
-	bool bLooping = true;
+	bool bLooping = false;
 	TStrongObjectPtr<UAudioComponent> PreviewAudio;
 
 	static constexpr float RowHeight = 28.f;
