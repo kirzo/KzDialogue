@@ -275,6 +275,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** Seconds the line presents before TimeScale: DurationMode applied to the trimmed audio length, plus AudioStartDelay. LineStartDelay is not included. FullAudioDuration is the whole wave's length, 0 when there is no audio. */
 	float ResolveTotalDuration(float FullAudioDuration) const;
 
+	/** Timeline second at which the audio's second 0 plays, the timeline starting with the audio's schedule: AudioStartDelay (compressed by TimeScale, as the player does) ahead, AudioStartTime cut away. */
+	float GetAudioTimelineOffset(float TimeScale = 1.0f) const { return FMath::Max(0.0f, AudioStartDelay) / FMath::Max(0.1f, TimeScale) - FMath::Max(0.0f, AudioStartTime); }
+
 	/**
 	 * Returns a "(Speaker) Text" formatted label for this line, suitable for editor
 	 * UI, list previews, Sequencer section titles, etc.

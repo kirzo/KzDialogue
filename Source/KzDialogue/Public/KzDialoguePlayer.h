@@ -343,8 +343,9 @@ private:
 	void HandleLineTimerElapsed();
 	void FinishWithReason(EKzDialogueFinishReason Reason);
 
-	// Notify timeline driven during LinePlaying.
+	// Notify timeline, running from the line's audio start until the line exits.
 	void BakeTimeline();
+	bool IsTimelineRunning() const;
 
 	/** Advances the timeline clock by DeltaTime and fires what it crossed; stops early when a notify moves the player on. */
 	void EvaluateTimeline(float DeltaTime);
@@ -412,7 +413,7 @@ private:
 	/** Pending trim cut for the current line's audio (AudioEndTime > 0). Never armed otherwise. */
 	FTimerHandle AudioStopTimerHandle;
 
-	// Timeline runtime state (valid only while a timelined line is in LinePlaying).
+	// Timeline runtime state, valid while IsTimelineRunning.
 
 	UPROPERTY(Transient)
 	TArray<FKzDialogueActiveNotify> ActiveNotifies;

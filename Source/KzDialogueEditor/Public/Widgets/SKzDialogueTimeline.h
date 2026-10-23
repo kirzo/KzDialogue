@@ -129,7 +129,7 @@ private:
 	/** The line's audio (USoundBase) for the editor preview; null if none. */
 	USoundBase* ResolveLineAudio() const;
 
-	/** The line's AudioStartTime: timeline second 0 maps to this wave second when the line cuts a range out of its audio. */
+	/** Timeline second at which the wave's second 0 plays: the line's AudioStartDelay ahead, its AudioStartTime cut away. */
 	float GetAudioTimeOffset() const;
 
 	/** Transport bar (To Front / Play-Pause / To End / Loop) driving the editor audio preview. */
@@ -138,6 +138,10 @@ private:
 	void SetPlayhead(float Seconds);
 	void ScrubTo(float Seconds);
 	void StartPlayback();
+
+	/** (Re)starts the preview audio where the playhead is in the wave; before the AudioStartDelay it waits for Tick. */
+	void PlayPreviewAudioFromPlayhead();
+
 	void StopPlayback();
 	void TogglePlayback();
 	float GetPlayheadTime() const { return PlayheadTime; }
@@ -193,6 +197,9 @@ private:
 	bool bPlaying = false;
 	bool bLooping = false;
 	TStrongObjectPtr<UAudioComponent> PreviewAudio;
+
+	/** Playing, but the playhead has not reached the audio's start yet. */
+	bool bPreviewAudioPending = false;
 
 	static constexpr float RowHeight = 28.f;
 	static constexpr float HeaderRowHeight = 24.f;

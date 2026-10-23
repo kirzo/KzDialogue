@@ -236,6 +236,7 @@ float SKzDialogueTimeline::GetSelectionStart() const
 	FKzDialogueTimeResolveContext Context;
 	Context.LineDuration = Duration();
 	Context.Audio = ResolveLineAudio();
+	Context.AudioOffset = GetAudioTimeOffset();
 	float Start = 0.f;
 	float End = 0.f;
 	Source->Resolve(Context, Start, End);
@@ -252,6 +253,7 @@ float SKzDialogueTimeline::GetSelectionEnd() const
 	FKzDialogueTimeResolveContext Context;
 	Context.LineDuration = Duration();
 	Context.Audio = ResolveLineAudio();
+	Context.AudioOffset = GetAudioTimeOffset();
 	float Start = 0.f;
 	float End = 0.f;
 	Source->Resolve(Context, Start, End);
@@ -380,7 +382,7 @@ float SKzDialogueTimeline::GetAudioTimeOffset() const
 			FKzDialogueLine Line;
 			if (Asset->TryGetLineById(T->OwningLineId, Line))
 			{
-				return FMath::Max(0.0f, Line.AudioStartTime);
+				return Line.GetAudioTimelineOffset();
 			}
 		}
 	}
@@ -463,6 +465,10 @@ void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double I
 				StopPlayback();
 			}
 		}
+		else if (bPreviewAudioPending && PlayheadTime >= GetAudioTimeOffset())
+		{
+			PlayPreviewAudioFromPlayhead();
+		}
 		Invalidate(EInvalidateWidgetReason::Paint);
 	}
 }
@@ -483,8 +489,7 @@ void SKzDialogueTimeline::ScrubTo(float Seconds)
 	// Scrubbing while playing re-seeks the audio and keeps going.
 	if (bPlaying)
 	{
-		if (PreviewAudio.IsValid()) { PreviewAudio->Play(GetAudioTimeOffset() + PlayheadTime); }
-		else { StartPlayback(); }
+		PlayPreviewAudioFromPlayhead();
 	}
 }
 
@@ -505,6 +510,24 @@ void SKzDialogueTimeline::TogglePlayback()
 void SKzDialogueTimeline::StartPlayback()
 {
 	StopPlayback();
+	bPlaying = true;
+	PlayPreviewAudioFromPlayhead();
+}
+
+void SKzDialogueTimeline::PlayPreviewAudioFromPlayhead()
+{
+	if (PreviewAudio.IsValid())
+	{
+		PreviewAudio->Stop();
+		PreviewAudio.Reset();
+	}
+
+	// Timeline time is line time, as the game plays it: silent through the AudioStartDelay (Tick starts the
+	// audio when the playhead gets there), then the wave from its AudioStartTime. The range end falls out of
+	// Duration(), where Tick stops or wraps.
+	const float WaveTime = PlayheadTime - GetAudioTimeOffset();
+	bPreviewAudioPending = WaveTime < 0.f;
+	if (bPreviewAudioPending) { return; }
 
 	USoundBase* Audio = ResolveLineAudio();
 	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
@@ -512,14 +535,10 @@ void SKzDialogueTimeline::StartPlayback()
 	{
 		if (UAudioComponent* Comp = UGameplayStatics::CreateSound2D(World, Audio, 1.f, 1.f, 0.f, nullptr, false, /*bAutoDestroy*/ false))
 		{
-			// Timeline time is line time: offset into the wave by the line's custom range
-			// start, so the preview matches what the game will play. The end of the range
-			// falls out of Duration() (the trimmed length), where Tick stops/wraps.
-			Comp->Play(GetAudioTimeOffset() + PlayheadTime);
+			Comp->Play(WaveTime);
 			PreviewAudio = TStrongObjectPtr<UAudioComponent>(Comp);
 		}
 	}
-	bPlaying = true;
 }
 
 void SKzDialogueTimeline::StopPlayback()
@@ -529,6 +548,7 @@ void SKzDialogueTimeline::StopPlayback()
 		PreviewAudio->Stop();
 		PreviewAudio.Reset();
 	}
+	bPreviewAudioPending = false;
 	bPlaying = false;
 }
 
@@ -671,6 +691,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeLane(int32 TrackIndex, bool bWithWa
 	if (TrackIndex != INDEX_NONE)
 	{
 		Args.LineAudio_Lambda([this]() { return ResolveLineAudio(); })
+			.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); })
 			.IsDropTarget_Lambda([this, TrackIndex]() { return DragHoverTrack == TrackIndex; })
 			.OnDragRow_Lambda([this, TrackIndex](int32 RowDelta)
 			{

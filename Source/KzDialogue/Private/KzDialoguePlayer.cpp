@@ -393,9 +393,11 @@ void UKzDialoguePlayer::PresentLine()
 	DispatchSpecificLineEvent(SpecificLineStartedBindings, CurrentLine);
 	if (Serial != StateSerial) { return; }
 
+	// The notify timeline starts with the audio, so its seconds are the take's.
 	if (bStartAudioOnLineEnter)
 	{
 		StartLineAudio();
+		BakeTimeline();
 	}
 
 	PendingViewAcks = 0;
@@ -413,9 +415,8 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 	if (!bStartAudioOnLineEnter)
 	{
 		StartLineAudio();
+		BakeTimeline();
 	}
-
-	BakeTimeline();
 
 	// Manual mode holds the line on screen until Next(); no auto-advance timer.
 	if (AdvanceMode == EKzDialogueAdvanceMode::Manual)
@@ -732,7 +733,13 @@ bool UKzDialoguePlayer::IsTickable() const
 		return true; // keep ticking to release the jaw toward 0
 	}
 	// Live audio drives the mouth in any phase (it starts while the line fades in); the timeline only runs in LinePlaying.
-	return !bPaused && (IsValid(ActiveAudio) || (State == EKzDialogueState::LinePlaying && ActiveNotifies.Num() > 0));
+	return !bPaused && (IsValid(ActiveAudio) || (IsTimelineRunning() && ActiveNotifies.Num() > 0));
+}
+
+bool UKzDialoguePlayer::IsTimelineRunning() const
+{
+	// From the line's audio start (its presentation, or LinePlaying without bStartAudioOnLineEnter) until it exits.
+	return !bPaused && bLinePresented && (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying);
 }
 
 TStatId UKzDialoguePlayer::GetStatId() const
@@ -744,7 +751,7 @@ void UKzDialoguePlayer::Tick(float DeltaTime)
 {
 	UpdateSpeakingLevel(DeltaTime);
 
-	if (!bPaused && State == EKzDialogueState::LinePlaying)
+	if (IsTimelineRunning())
 	{
 		EvaluateTimeline(DeltaTime);
 	}
@@ -833,6 +840,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	// Synchronous load, not Get(): with AudioStartDelay the wave may not be in memory yet at
 	// bake time, and anchor sources (audio markers) need it to resolve.
 	ResolveContext.Audio = CurrentLine.Audio.IsNull() ? nullptr : CurrentLine.Audio.LoadSynchronous();
+	ResolveContext.AudioOffset = CurrentLine.GetAudioTimelineOffset(TimeScale);
 	ResolveContext.bWarnOnFallback = true;
 
 	for (const FKzDialogueNotifyTrack& Track : Timeline->Tracks)

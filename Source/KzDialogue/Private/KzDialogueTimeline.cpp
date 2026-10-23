@@ -16,6 +16,8 @@ void FKzDialogueTimeSource_AudioMarker::Resolve(const FKzDialogueTimeResolveCont
 {
 	if (FindMarker(Context.Audio, OutStart, OutEnd))
 	{
+		OutStart += Context.AudioOffset;
+		OutEnd += Context.AudioOffset;
 		return;
 	}
 

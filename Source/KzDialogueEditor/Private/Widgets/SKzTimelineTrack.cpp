@@ -114,12 +114,12 @@ int32 SKzTimelineTrack::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(Seconds), 0.f))), Box, ESlateDrawEffect::None, GridColor);
 		});
 	}
-	// Audio waveform on the group band (when the line has a drawable USoundWave). Timeline
-	// second 0 = this wave second, when the line plays a cut of its audio.
+	// Audio waveform on the group band (when the line has a drawable USoundWave), placed where the line
+	// plays it: after its AudioStartDelay, with its AudioStartTime cut away.
 	if (const TSharedPtr<FKzWaveformPreview> Wave = Waveform.Get())
 	{
 		const FLinearColor WaveColor(0.40f, 0.62f, 0.88f, 0.55f);
-		KzPaintWaveform(*Wave, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), View.Start + AudioTimeOffset.Get(), View.SecondsPerPixel(),
+		KzPaintWaveform(*Wave, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), View.Start - AudioTimeOffset.Get(), View.SecondsPerPixel(),
 			[&WaveColor](float) { return WaveColor; });
 	}
 	else if (Waveform.IsBound())
@@ -511,6 +511,7 @@ void SKzTimelineTrack::GetEventBounds(const FKzDialogueNotifyEvent& Event, float
 		FKzDialogueTimeResolveContext Context;
 		Context.LineDuration = Dur;
 		Context.Audio = LineAudio.Get(nullptr);
+		Context.AudioOffset = AudioTimeOffset.Get(0.f);
 		Source->Resolve(Context, OutStartSec, OutEndSec);
 		if (!bOutState) { OutEndSec = OutStartSec; }
 	}

@@ -18,12 +18,17 @@ struct FKzDialogueTimeResolveContext
 	/** Audio currently loaded for the line (for anchor sources). May be null. */
 	const USoundBase* Audio = nullptr;
 
+	/** Timeline second at which Audio's second 0 plays (FKzDialogueLine::GetAudioTimelineOffset); audio markers add it to their cue position. */
+	float AudioOffset = 0.0f;
+
 	/** Log when an anchor source falls back; runtime bakes only, editor previews stay quiet. */
 	bool bWarnOnFallback = false;
 };
 
 /**
  * Base for an event's timing. Resolved to absolute seconds [Start, End] at line start.
+ * Second 0 is when the line's audio is scheduled: its presentation, as the subtitle shows,
+ * unless the player starts audio only once the line is fully visible (bStartAudioOnLineEnter).
  * Relative timing survives localization; anchor-based sources (e.g. audio cue points)
  * can be added later without touching the evaluator.
  */
@@ -65,7 +70,8 @@ struct KZDIALOGUE_API FKzDialogueTimeSource_Relative : public FKzDialogueTimeSou
 /**
  * Time anchored to a named cue point of the line's audio wave. The resolve context carries
  * the audio LOADED for the active culture, so a marker authored per localized wave (e.g. on
- * the word "fire" in each language's take) fires at the right moment in every dub.
+ * the word "fire" in each language's take) fires at the right moment in every dub. The cue lands
+ * where the line plays it: after its AudioStartDelay, with its AudioStartTime cut away.
  * Falls back to FallbackTime when the audio is missing, is not a USoundWave, or has no cue
  * point with that label.
  */

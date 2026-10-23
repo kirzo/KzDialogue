@@ -436,6 +436,7 @@ void UKzDialogueValidator_Timelines::Validate_Implementation(const UObject* Asse
 		FKzDialogueTimeResolveContext ResolveCtx;
 		ResolveCtx.LineDuration = LineDuration;
 		ResolveCtx.Audio = Audio;
+		ResolveCtx.AudioOffset = Line.GetAudioTimelineOffset();
 
 		const FText LineLabel = DescribeLine(i, Line);
 		const FGuid LineId = Line.LineId;
