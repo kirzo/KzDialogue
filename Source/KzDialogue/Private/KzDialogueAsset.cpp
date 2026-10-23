@@ -220,12 +220,20 @@ void UKzDialogueAsset::GetAssetRegistryTags(FAssetRegistryTagsContext Context) c
 void UKzDialogueAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	RefreshLineMetadata();
+
+	// The chain hook below routes here through its Super, and refreshes once itself after its clamp.
+	if (!bInChainPropertyEdit)
+	{
+		RefreshLineMetadata();
+	}
 }
 
 void UKzDialogueAsset::PostEditChangeChainProperty(FPropertyChangedChainEvent& PropertyChangedEvent)
 {
-	Super::PostEditChangeChainProperty(PropertyChangedEvent);
+	{
+		TGuardValue<bool> ChainEdit(bInChainPropertyEdit, true);
+		Super::PostEditChangeChainProperty(PropertyChangedEvent);
+	}
 
 	const FName ChangedProperty = PropertyChangedEvent.GetPropertyName();
 	const bool bAudioChanged = ChangedProperty == GET_MEMBER_NAME_CHECKED(FKzDialogueLine, Audio);

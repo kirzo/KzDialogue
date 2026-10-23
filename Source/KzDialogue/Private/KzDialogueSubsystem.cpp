@@ -329,6 +329,13 @@ static bool IsPlayingManualLine(const UKzDialoguePlayer& Player, const FGuid& Li
 	return true;
 }
 
+// Ad-hoc lines compare whole: one on an actor property shares its archetype's LineId with every instance.
+static bool IsPlayingManualLine(const UKzDialoguePlayer& Player, const FKzDialogueLine& Line)
+{
+	const UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
+	return ManualProv && FKzDialogueLine::StaticStruct()->CompareScriptStruct(&ManualProv->Line, &Line, PPF_None) && IsPlayingManualLine(Player, Line.LineId);
+}
+
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority)
 {
 	// The line plays as given: its notify Timeline must already be resolved by the caller. Asset
@@ -342,14 +349,14 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return nullptr; }
 
-	if (IsPlayingManualLine(*Player, Line.LineId)) { return Player; }
+	if (IsPlayingManualLine(*Player, Line)) { return Player; }
 	if (Admit(*Player, ResolvedPriority, ChannelDef) != EKzPlayAdmission::Admitted) { return nullptr; }
 	return CommitLine(*Player, Line, ResolvedPriority, /*bInterruptible=*/true);
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, const FKzDialogueLine& Line, int32 Priority, bool bInterruptible)
 {
-	if (IsPlayingManualLine(Player, Line.LineId)) { return &Player; }
+	if (IsPlayingManualLine(Player, Line)) { return &Player; }
 
 	// Hot-swap inside the manual provider: a line fade instead of a full exit and enter (Sequencer lines back to back).
 	UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;

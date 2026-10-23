@@ -65,6 +65,12 @@ FText UKzSpeakerAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Over
 
 	if (Part.IsNone())
 	{
+		// The default name is the display part, so a pinned one (a player-typed name) wins here too.
+		if (Overrides)
+		{
+			if (const FText* Pinned = Overrides->Parts.Find(TEXT("display"))) { return *Pinned; }
+		}
+
 		// Source-based emptiness: a keyed empty DisplayName can display a stale translation
 		// and would otherwise shadow the structured composition.
 		if (!KzIsTextSourceEmpty(DisplayName)) { return DisplayName; }

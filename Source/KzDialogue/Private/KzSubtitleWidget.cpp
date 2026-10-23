@@ -220,7 +220,10 @@ void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 		return;
 	}
 
+	// The first line only arrives after this fade: start blank, not on the last dialogue's texts.
 	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
+	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 	ReceiveShow(InPlayer->Channel);
 	if (View.StartFadeIn)
 	{
@@ -253,7 +256,7 @@ bool UKzSubtitleWidget::CanShowLine_Implementation(FGameplayTag Channel, const F
 
 void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
-	// Muted or filtered out (CanShowLine): render nothing and stay transparent — don't claim, don't notify,
+	// Muted or filtered out (CanShowLine): render nothing and stay transparent: don't claim, don't notify,
 	// so the view that DOES show the line drives the timing.
 	if (IsPlayerMuted(InPlayer))
 	{
@@ -275,7 +278,7 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 
 void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
-	// Mirror the enter gate: a line this view didn't show has nothing to fade out — stay transparent.
+	// Mirror the enter gate: a line this view didn't show has nothing to fade out, stay transparent.
 	if (IsPlayerMuted(InPlayer))
 	{
 		return;
@@ -498,7 +501,7 @@ void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 
 void UKzSubtitleWidget::ClearTextWidgets()
 {
-	// We don't know which channels exist statically — clear whatever's bound right now.
+	// We don't know which channels exist statically: clear whatever's bound right now.
 	// Subclasses with channels that aren't bound yet should clear their own widgets if needed.
 	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
 	{

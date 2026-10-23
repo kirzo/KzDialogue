@@ -152,5 +152,8 @@ private:
 
 	/** Re-anchor every FText in the asset to its stable, GUID-derived (Namespace, Key). True when a text changed. */
 	bool RebindFTextKeys();
+
+	/** Inside PostEditChangeChainProperty: its clamp must run before the one metadata refresh. */
+	bool bInChainPropertyEdit = false;
 #endif
 };
