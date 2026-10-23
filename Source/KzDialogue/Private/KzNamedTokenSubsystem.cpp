@@ -67,7 +67,12 @@ const FSoftObjectPath* UKzNamedTokenSubsystem::FindNamedAssetPath(FName Token) c
 	{
 		bNamedAssetTokensBuilt = true;
 
-		const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		// Built once per session: an uncooked -game run may still be scanning, and a half-scan would miss tokens for good.
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+		if (Registry.IsLoadingAssets())
+		{
+			Registry.WaitForCompletion();
+		}
 		TArray<FAssetData> Assets;
 		Registry.GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), Assets, /*bSearchSubClasses=*/true);
 
