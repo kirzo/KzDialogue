@@ -629,7 +629,9 @@ bool FKzArchiveWriter::Save(FText& OutError)
 bool FKzArchiveWriter::SaveManifest(FText& OutError)
 {
 	EnsureFileWritable(Target.TargetPath / Target.ManifestName);
-	return Helper->SaveManifest(&OutError);
+	if (!Helper->SaveManifest(&OutError)) { return false; }
+	OnArchivesChanged.Broadcast();
+	return true;
 }
 
 void FKzDialogueTranslationCsv::RegisterMenus()

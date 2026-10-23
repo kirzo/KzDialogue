@@ -88,7 +88,7 @@ public:
 
 	bool SaveManifest(FText& OutError);
 
-	/** Fired after translations reach the disk, so every open view of them refreshes. */
+	/** Fired after the manifest or translations reach the disk, so every open view of them refreshes. */
 	static FSimpleMulticastDelegate OnArchivesChanged;
 
 private:

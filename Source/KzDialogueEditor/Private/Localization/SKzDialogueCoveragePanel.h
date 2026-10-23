@@ -135,12 +135,23 @@ private:
 
 	void Refresh();
 
+	/**
+	 * Coalesces refreshes into one on the next tick: edits arrive mid-change (an asset's PostEditChange
+	 * notifies before its own metadata refresh), in bursts (one per imported row) and from inside the
+	 * panel's own widgets. FocusAfter: editor keys to focus once rebuilt (first one still present wins).
+	 */
+	void RequestRefresh(TArray<FString> FocusAfter = TArray<FString>());
+	bool bRefreshPending = false;
+	TArray<FString> PendingFocus;
+
+	/** Manifest and archives, loaded by the first refresh and dropped when translations reach the disk or on the Refresh button. */
+	TSharedPtr<class FKzLocQuery> CachedQuery;
+
 	/** Auto-refresh: the panel follows edits to any of its assets instead of relying on the Refresh button. */
 	void OnObjectPropertyChanged(UObject* Object, struct FPropertyChangedEvent& Event);
 
-	/** Archive writes from anywhere refresh the panel once, on the next tick. */
+	/** Archive writes from anywhere drop the cached query and refresh. */
 	void OnArchivesChanged();
-	bool bArchiveRefreshPending = false;
 
 	/** Opens the asset's editor (or focuses it) and selects the line, same navigation as validation issues. */
 	void NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId);
@@ -172,7 +183,8 @@ private:
 	/** Turns the row's text culture invariant: the dialogue line's Text on its asset, or every authored occurrence of a project text. */
 	void MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId, FString Source, TArray<TPair<FString, FString>> Identities);
 
-	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix, const FString& CardCulture);
+	/** One culture's card: header, progress bars and its areas, whose bodies are built on first expansion. */
+	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, TArray<FAssetLines> Groups, const FString& AudioKeyPrefix, const FString& CardCulture);
 
 	/** Runs Compile Text for one culture: only its .locres changes (the card header's package icon). */
 	void CompileCulture(const FString& Culture);

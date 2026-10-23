@@ -72,6 +72,28 @@ namespace
 		Value.ReplaceInline(TEXT("\r"), TEXT(" "));
 		return Value;
 	}
+
+	/** An area body built the first time it is shown, so a collapsed area costs nothing. */
+	struct FKzLazyBody
+	{
+		TSharedRef<SBox> Box = SNew(SBox);
+		TFunction<TSharedRef<SWidget>()> Build;
+
+		void Ensure()
+		{
+			if (!Build) { return; }
+			Box->SetContent(Build());
+			Build.Reset();
+		}
+	};
+
+	TSharedRef<FKzLazyBody> MakeLazyBody(TFunction<TSharedRef<SWidget>()> Build, bool bExpanded)
+	{
+		const TSharedRef<FKzLazyBody> Body = MakeShared<FKzLazyBody>();
+		Body->Build = MoveTemp(Build);
+		if (bExpanded) { Body->Ensure(); }
+		return Body;
+	}
 }
 
 void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<UKzDialogueAsset*>& InAssets)
@@ -110,7 +132,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 									.HintText(LOCTEXT("SearchHint", "Search text..."))
 									.ToolTipText(LOCTEXT("SearchTip", "Show only the rows whose source text or translation contains this text."))
 									.DelayChangeNotificationsWhileTyping(true)
-									.OnTextChanged_Lambda([this](const FText& NewText) { TextFilter = NewText.ToString(); Refresh(); })
+									.OnTextChanged_Lambda([this](const FText& NewText) { TextFilter = NewText.ToString(); RequestRefresh(); })
 							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
@@ -186,7 +208,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 						SNew(SButton)
 							.Text(LOCTEXT("Refresh", "Refresh"))
 							.ToolTipText(LOCTEXT("RefreshTip", "Re-read the assets and archives. Also forgets the optimistically hidden merged/non-localizable rows (e.g. after undoing one of those actions)."))
-							.OnClicked_Lambda([this]() { HandledIdentities.Reset(); Refresh(); return FReply::Handled(); })
+							.OnClicked_Lambda([this]() { HandledIdentities.Reset(); CachedQuery.Reset(); RequestRefresh(); return FReply::Handled(); })
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
 					[
@@ -216,22 +238,32 @@ void SKzDialogueCoveragePanel::OnObjectPropertyChanged(UObject* Object, FPropert
 {
 	if (Object && Assets.ContainsByPredicate([Object](const TWeakObjectPtr<UKzDialogueAsset>& Asset) { return Asset.Get() == Object; }))
 	{
-		Refresh();
+		RequestRefresh();
 	}
 }
 
 void SKzDialogueCoveragePanel::OnArchivesChanged()
 {
-	if (bArchiveRefreshPending) { return; }
-	bArchiveRefreshPending = true;
+	CachedQuery.Reset();
+	RequestRefresh();
+}
 
-	// Writes can come from inside one of this panel's widgets: never rebuild under its feet.
+void SKzDialogueCoveragePanel::RequestRefresh(TArray<FString> FocusAfter)
+{
+	if (!FocusAfter.IsEmpty()) { PendingFocus = MoveTemp(FocusAfter); }
+	if (bRefreshPending) { return; }
+	bRefreshPending = true;
+
 	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this))](float)
 	{
-		TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin();
-		if (Panel && Panel->bArchiveRefreshPending)
+		if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
 		{
-			Panel->Refresh();
+			if (Panel->bRefreshPending) { Panel->Refresh(); }
+			if (!Panel->PendingFocus.IsEmpty())
+			{
+				Panel->FocusTranslationEditor(Panel->PendingFocus);
+				Panel->PendingFocus.Reset();
+			}
 		}
 		return false;
 	}));
@@ -258,7 +290,7 @@ void SKzDialogueCoveragePanel::SavePersistedFilter(const TCHAR* Key, bool bValue
 
 void SKzDialogueCoveragePanel::Refresh()
 {
-	bArchiveRefreshPending = false;
+	bRefreshPending = false;
 	Rows->ClearChildren();
 	TranslationEditors.Reset();
 
@@ -284,13 +316,18 @@ void SKzDialogueCoveragePanel::Refresh()
 		return;
 	}
 
-	FKzLocQuery Query;
-	FText Error;
-	if (!Query.Load(Error))
+	if (!CachedQuery.IsValid())
 	{
-		AddMessage(Error);
-		return;
+		const TSharedRef<FKzLocQuery> Loaded = MakeShared<FKzLocQuery>();
+		FText Error;
+		if (!Loaded->Load(Error))
+		{
+			AddMessage(Error);
+			return;
+		}
+		CachedQuery = Loaded;
 	}
+	const FKzLocQuery& Query = *CachedQuery;
 
 	auto PassesSpeaker = [this](const FKzDialogueLine& Line)
 	{
@@ -406,7 +443,7 @@ void SKzDialogueCoveragePanel::Refresh()
 			[
 				MakeCultureCard(
 					FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture)),
-					MoveTemp(Bars), Groups, TEXT("native"), Query.GetTarget().NativeCulture)
+					MoveTemp(Bars), MoveTemp(Groups), TEXT("native"), Query.GetTarget().NativeCulture)
 			];
 		}
 	}
@@ -847,16 +884,19 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
 		[
-			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), Groups, Culture, Culture)
+			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), MoveTemp(Groups), Culture, Culture)
 		];
 	}
 }
 
-TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, const TArray<FAssetLines>& Groups, const FString& AudioKeyPrefix, const FString& CardCulture)
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, TArray<FAssetLines> InGroups, const FString& AudioKeyPrefix, const FString& CardCulture)
 {
+	// Shared so the lazily built area bodies can still reach the rows.
+	const TSharedRef<TArray<FAssetLines>> Groups = MakeShared<TArray<FAssetLines>>(MoveTemp(InGroups));
+
 	// Progress (badge + bars) always reflects every line; the ok-filters below only shape the list.
 	int32 PendingCount = 0;
-	for (const FAssetLines& Group : Groups)
+	for (const FAssetLines& Group : *Groups)
 	{
 		for (const FLineRow& Row : Group.Lines)
 		{
@@ -908,7 +948,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 	const FAssetLines* SpeakerGroup = nullptr;
 	const FAssetLines* WordGroup = nullptr;
 	TArray<const FAssetLines*> AssetGroups;
-	for (const FAssetLines& Group : Groups)
+	for (const FAssetLines& Group : *Groups)
 	{
 		if (Group.Asset.IsValid()) { AssetGroups.Add(&Group); }
 		else if (Group.bSpeakerGroup) { SpeakerGroup = &Group; }
@@ -928,94 +968,129 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		return Visible;
 	};
 
-	auto AddArea = [this, &Content, AudioKeyPrefix](const FText& Title, const FString& AreaName, TSharedRef<SVerticalBox> Box, TSharedPtr<TArray<TPair<TWeakPtr<SExpandableArea>, FString>>> ChildAreas)
+	using FChildAreas = TArray<TPair<TWeakPtr<SExpandableArea>, FString>>;
+
+	auto AddArea = [this, &Content, AudioKeyPrefix](const FText& Title, const FString& AreaName, TFunction<TSharedRef<SWidget>()> BuildBody, TSharedPtr<FChildAreas> ChildAreas)
 	{
 		const FString AreaKey = AudioKeyPrefix + TEXT("|") + AreaName;
+		const bool bExpanded = IsAreaExpanded(AreaKey, /*bDefault=*/false);
+		const TSharedRef<FKzLazyBody> Body = MakeLazyBody([BuildBody = MoveTemp(BuildBody)]() -> TSharedRef<SWidget>
+		{
+			// Recessed inset behind the row cells, so the list reads as its own region.
+			return SNew(SBorder)
+				.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.GroupBorder"))
+				.Padding(4.0f)
+				[
+					BuildBody()
+				];
+		}, bExpanded);
+
 		Content->AddSlot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 0.0f)
 		[
 			SNew(SExpandableArea)
-				.InitiallyCollapsed(!IsAreaExpanded(AreaKey, /*bDefault=*/false))
+				.InitiallyCollapsed(!bExpanded)
 				.AreaTitle(Title)
 				// Expansion survives the rebuild-happy Refresh; shift-click mirrors the engine
 				// and cascades the new state to every sub-section inside.
-				.OnAreaExpansionChanged_Lambda([this, AreaKey, ChildAreas](bool bExpanded)
+				.OnAreaExpansionChanged_Lambda([this, AreaKey, ChildAreas, Body](bool bNowExpanded)
 				{
-					AreaExpansion.Add(AreaKey, bExpanded);
+					if (bNowExpanded) { Body->Ensure(); }
+					AreaExpansion.Add(AreaKey, bNowExpanded);
 					if (ChildAreas.IsValid() && FSlateApplication::Get().GetModifierKeys().IsShiftDown())
 					{
 						for (const TPair<TWeakPtr<SExpandableArea>, FString>& Child : *ChildAreas)
 						{
-							if (TSharedPtr<SExpandableArea> Area = Child.Key.Pin()) { Area->SetExpanded(bExpanded); }
-							AreaExpansion.Add(Child.Value, bExpanded);
+							if (TSharedPtr<SExpandableArea> Area = Child.Key.Pin()) { Area->SetExpanded(bNowExpanded); }
+							AreaExpansion.Add(Child.Value, bNowExpanded);
 						}
 					}
 				})
 				.BodyContent()
 				[
-					// Recessed inset behind the row cells, so the list reads as its own region.
-					SNew(SBorder)
-						.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.GroupBorder"))
-						.Padding(4.0f)
-						[
-							Box
-						]
+					Body->Box
 				]
 		];
 	};
 
+	// A collapsible sub-section inside an area (one asset, one namespace), open by default.
+	auto MakeSubArea = [this](const FString& AreaKey, TSharedRef<SWidget> Header, TFunction<TSharedRef<SWidget>()> BuildBody, FChildAreas& OutAreas) -> TSharedRef<SWidget>
+	{
+		const bool bExpanded = IsAreaExpanded(AreaKey, /*bDefault=*/true);
+		const TSharedRef<FKzLazyBody> Body = MakeLazyBody(MoveTemp(BuildBody), bExpanded);
+		TSharedPtr<SExpandableArea> Area;
+		SAssignNew(Area, SExpandableArea)
+			.InitiallyCollapsed(!bExpanded)
+			.BorderImage(FAppStyle::GetBrush("NoBorder"))
+			.OnAreaExpansionChanged_Lambda([this, AreaKey, Body](bool bNowExpanded)
+			{
+				if (bNowExpanded) { Body->Ensure(); }
+				AreaExpansion.Add(AreaKey, bNowExpanded);
+			})
+			.HeaderContent()
+			[
+				Header
+			]
+			.BodyContent()
+			[
+				Body->Box
+			];
+		OutAreas.Emplace(Area, AreaKey);
+		return Area.ToSharedRef();
+	};
+
+	// The row lists are built inside the lazy bodies; Groups keeps the rows they point at alive.
+	auto MakeRowList = [this, Groups, AudioKeyPrefix](TArray<const FLineRow*> InRows, TWeakObjectPtr<UKzDialogueAsset> InAsset)
+	{
+		return [this, Groups, AudioKeyPrefix, InRows = MoveTemp(InRows), InAsset]() -> TSharedRef<SWidget>
+		{
+			TSharedRef<SVerticalBox> Box = SNew(SVerticalBox);
+			for (const FLineRow* RowPtr : InRows)
+			{
+				Box->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
+				[
+					MakeLineRowWidget(*RowPtr, InAsset, AudioKeyPrefix)
+				];
+			}
+			return Box;
+		};
+	};
+
 	// Asset header rows only when several assets share the list; each asset is then its own
-	// collapsible sub-section, open by default (the header still opens the asset on double-click).
-	const bool bAssetHeaders = AssetGroups.Num() > 1;
+	// collapsible sub-section (the header still opens the asset on double-click).
+	TArray<TPair<const FAssetLines*, TArray<const FLineRow*>>> VisibleAssetGroups;
 	int32 VisibleCount = 0;
-	TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
-	TSharedPtr<TArray<TPair<TWeakPtr<SExpandableArea>, FString>>> AssetAreas = MakeShared<TArray<TPair<TWeakPtr<SExpandableArea>, FString>>>();
 	for (const FAssetLines* Group : AssetGroups)
 	{
 		TArray<const FLineRow*> Visible = FilterVisible(*Group);
 		if (Visible.IsEmpty()) { continue; }
-
-		TSharedRef<SVerticalBox> GroupBox = SNew(SVerticalBox);
-		for (const FLineRow* RowPtr : Visible)
-		{
-			GroupBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-			[
-				MakeLineRowWidget(*RowPtr, Group->Asset, AudioKeyPrefix)
-			];
-		}
-
-		if (bAssetHeaders)
-		{
-			const FString AreaKey = AudioKeyPrefix + TEXT("|Asset|") + (Group->Asset.IsValid() ? Group->Asset->GetPathName() : FString());
-			TSharedPtr<SExpandableArea> AssetArea;
-			ListBox->AddSlot().AutoHeight().Padding(0.0f, VisibleCount > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
-			[
-				SAssignNew(AssetArea, SExpandableArea)
-					.InitiallyCollapsed(!IsAreaExpanded(AreaKey, /*bDefault=*/true))
-					.BorderImage(FAppStyle::GetBrush("NoBorder"))
-					.OnAreaExpansionChanged_Lambda([this, AreaKey](bool bExpanded) { AreaExpansion.Add(AreaKey, bExpanded); })
-					.HeaderContent()
-					[
-						MakeAssetHeaderRow(Group->Asset)
-					]
-					.BodyContent()
-					[
-						GroupBox
-					]
-			];
-			AssetAreas->Add(TPair<TWeakPtr<SExpandableArea>, FString>(AssetArea, AreaKey));
-		}
-		else
-		{
-			ListBox->AddSlot().AutoHeight()
-			[
-				GroupBox
-			];
-		}
 		VisibleCount += Visible.Num();
+		VisibleAssetGroups.Emplace(Group, MoveTemp(Visible));
 	}
 	if (VisibleCount > 0)
 	{
-		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), TEXT("Lines"), ListBox, AssetAreas);
+		const TSharedPtr<FChildAreas> AssetAreas = MakeShared<FChildAreas>();
+		const bool bAssetHeaders = AssetGroups.Num() > 1;
+		AddArea(FText::Format(LOCTEXT("LinesArea", "Lines ({0})"), VisibleCount), TEXT("Lines"),
+			[this, VisibleAssetGroups = MoveTemp(VisibleAssetGroups), AssetAreas, bAssetHeaders, AudioKeyPrefix, MakeRowList, MakeSubArea]() -> TSharedRef<SWidget>
+			{
+				TSharedRef<SVerticalBox> ListBox = SNew(SVerticalBox);
+				for (int32 i = 0; i < VisibleAssetGroups.Num(); ++i)
+				{
+					const TWeakObjectPtr<UKzDialogueAsset> Asset = VisibleAssetGroups[i].Key->Asset;
+					auto BuildRows = MakeRowList(VisibleAssetGroups[i].Value, Asset);
+					if (!bAssetHeaders)
+					{
+						ListBox->AddSlot().AutoHeight()[ BuildRows() ];
+						continue;
+					}
+					const FString AreaKey = AudioKeyPrefix + TEXT("|Asset|") + (Asset.IsValid() ? Asset->GetPathName() : FString());
+					ListBox->AddSlot().AutoHeight().Padding(0.0f, i > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
+					[
+						MakeSubArea(AreaKey, MakeAssetHeaderRow(Asset), MoveTemp(BuildRows), *AssetAreas)
+					];
+				}
+				return ListBox;
+			}, AssetAreas);
 	}
 
 	if (SpeakerGroup)
@@ -1023,15 +1098,8 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		TArray<const FLineRow*> Visible = FilterVisible(*SpeakerGroup);
 		if (!Visible.IsEmpty())
 		{
-			TSharedRef<SVerticalBox> SpeakerBox = SNew(SVerticalBox);
-			for (const FLineRow* RowPtr : Visible)
-			{
-				SpeakerBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-				[
-					MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
-				];
-			}
-			AddArea(FText::Format(LOCTEXT("SpeakersArea", "Speakers ({0})"), Visible.Num()), TEXT("Speakers"), SpeakerBox, nullptr);
+			const int32 Count = Visible.Num();
+			AddArea(FText::Format(LOCTEXT("SpeakersArea", "Speakers ({0})"), Count), TEXT("Speakers"), MakeRowList(MoveTemp(Visible), nullptr), nullptr);
 		}
 	}
 
@@ -1040,15 +1108,8 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		TArray<const FLineRow*> Visible = FilterVisible(*WordGroup);
 		if (!Visible.IsEmpty())
 		{
-			TSharedRef<SVerticalBox> WordBox = SNew(SVerticalBox);
-			for (const FLineRow* RowPtr : Visible)
-			{
-				WordBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-				[
-					MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
-				];
-			}
-			AddArea(FText::Format(LOCTEXT("WordsArea", "Words ({0})"), Visible.Num()), TEXT("Words"), WordBox, nullptr);
+			const int32 Count = Visible.Num();
+			AddArea(FText::Format(LOCTEXT("WordsArea", "Words ({0})"), Count), TEXT("Words"), MakeRowList(MoveTemp(Visible), nullptr), nullptr);
 		}
 	}
 
@@ -1057,75 +1118,52 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		TArray<const FLineRow*> Visible = FilterVisible(*OtherGroup);
 		if (!Visible.IsEmpty())
 		{
-			// Grouped under namespace headers, like the lines group under asset headers. A
-			// collapsed row spanning several namespaces (cross-namespace merge candidate)
-			// sits under its first identity's namespace; the tooltip lists them all.
-			TMap<FString, TArray<const FLineRow*>> RowsByNamespace;
-			TArray<FString> NamespaceOrder;
-			for (const FLineRow* RowPtr : Visible)
-			{
-				const FString Namespace = RowPtr->GroupIdentities.Num() > 0 ? RowPtr->GroupIdentities[0].Key : FString();
-				TArray<const FLineRow*>& Bucket = RowsByNamespace.FindOrAdd(Namespace);
-				if (Bucket.IsEmpty()) { NamespaceOrder.Add(Namespace); }
-				Bucket.Add(RowPtr);
-			}
-			NamespaceOrder.Sort();
-			const bool bNamespaceHeaders = NamespaceOrder.Num() > 1;
-
 			// Namespace buckets are collapsible sub-sections like the per-asset ones; the
 			// area's shift-click cascades into them the same way.
-			TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
-			TSharedPtr<TArray<TPair<TWeakPtr<SExpandableArea>, FString>>> NamespaceAreas = MakeShared<TArray<TPair<TWeakPtr<SExpandableArea>, FString>>>();
-			int32 RowsAdded = 0;
-			for (const FString& Namespace : NamespaceOrder)
-			{
-				TSharedRef<SVerticalBox> NamespaceBox = SNew(SVerticalBox);
-				for (const FLineRow* RowPtr : RowsByNamespace[Namespace])
+			const int32 Count = Visible.Num();
+			const TSharedPtr<FChildAreas> NamespaceAreas = MakeShared<FChildAreas>();
+			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Count), TEXT("Other"),
+				[Visible = MoveTemp(Visible), NamespaceAreas, AudioKeyPrefix, MakeRowList, MakeSubArea]() -> TSharedRef<SWidget>
 				{
-					NamespaceBox->AddSlot().AutoHeight().Padding(0.0f, 1.0f)
-					[
-						MakeLineRowWidget(*RowPtr, nullptr, AudioKeyPrefix)
-					];
-				}
+					// Grouped under namespace headers, like the lines group under asset headers. A
+					// collapsed row spanning several namespaces (cross-namespace merge candidate)
+					// sits under its first identity's namespace; the tooltip lists them all.
+					TMap<FString, TArray<const FLineRow*>> RowsByNamespace;
+					TArray<FString> NamespaceOrder;
+					for (const FLineRow* RowPtr : Visible)
+					{
+						const FString Namespace = RowPtr->GroupIdentities.Num() > 0 ? RowPtr->GroupIdentities[0].Key : FString();
+						TArray<const FLineRow*>& Bucket = RowsByNamespace.FindOrAdd(Namespace);
+						if (Bucket.IsEmpty()) { NamespaceOrder.Add(Namespace); }
+						Bucket.Add(RowPtr);
+					}
+					NamespaceOrder.Sort();
 
-				if (bNamespaceHeaders)
-				{
-					const FString AreaKey = AudioKeyPrefix + TEXT("|Ns|") + Namespace;
-					TSharedPtr<SExpandableArea> NamespaceArea;
-					OtherBox->AddSlot().AutoHeight().Padding(0.0f, RowsAdded > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
-					[
-						SAssignNew(NamespaceArea, SExpandableArea)
-							.InitiallyCollapsed(!IsAreaExpanded(AreaKey, /*bDefault=*/true))
-							.BorderImage(FAppStyle::GetBrush("NoBorder"))
-							.OnAreaExpansionChanged_Lambda([this, AreaKey](bool bExpanded) { AreaExpansion.Add(AreaKey, bExpanded); })
-							.HeaderContent()
+					TSharedRef<SVerticalBox> OtherBox = SNew(SVerticalBox);
+					for (int32 i = 0; i < NamespaceOrder.Num(); ++i)
+					{
+						const FString& Namespace = NamespaceOrder[i];
+						auto BuildRows = MakeRowList(RowsByNamespace[Namespace], nullptr);
+						if (NamespaceOrder.Num() == 1)
+						{
+							OtherBox->AddSlot().AutoHeight()[ BuildRows() ];
+							continue;
+						}
+						const TSharedRef<SWidget> Header = SNew(SBorder)
+							.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
+							.Padding(FMargin(6.0f, 3.0f))
 							[
-								SNew(SBorder)
-									.BorderImage(FAppStyle::GetBrush("Brushes.Header"))
-									.Padding(FMargin(6.0f, 3.0f))
-									[
-										SNew(STextBlock)
-											.Text(Namespace.IsEmpty() ? LOCTEXT("NoNamespaceHeader", "(no namespace)") : FText::FromString(Namespace))
-											.Font(FAppStyle::GetFontStyle("BoldFont"))
-									]
-							]
-							.BodyContent()
-							[
-								NamespaceBox
-							]
-					];
-					NamespaceAreas->Add(TPair<TWeakPtr<SExpandableArea>, FString>(NamespaceArea, AreaKey));
-				}
-				else
-				{
-					OtherBox->AddSlot().AutoHeight()
-					[
-						NamespaceBox
-					];
-				}
-				RowsAdded += RowsByNamespace[Namespace].Num();
-			}
-			AddArea(FText::Format(LOCTEXT("OtherTextsArea", "Other texts ({0})"), Visible.Num()), TEXT("Other"), OtherBox, NamespaceAreas);
+								SNew(STextBlock)
+									.Text(Namespace.IsEmpty() ? LOCTEXT("NoNamespaceHeader", "(no namespace)") : FText::FromString(Namespace))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+							];
+						OtherBox->AddSlot().AutoHeight().Padding(0.0f, i > 0 ? 6.0f : 1.0f, 0.0f, 1.0f)
+						[
+							MakeSubArea(AudioKeyPrefix + TEXT("|Ns|") + Namespace, Header, MoveTemp(BuildRows), *NamespaceAreas)
+						];
+					}
+					return OtherBox;
+				}, NamespaceAreas);
 		}
 	}
 
@@ -1607,7 +1645,7 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 		Asset->PostEditChange();
 		Asset->MarkPackageDirty();
 
-		Refresh();
+		RequestRefresh();
 		return;
 	}
 
@@ -1634,7 +1672,7 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 		Item->SetCompletionState(bRan && (Rewritten > 0 || Handled.Num() > 0) ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
-	Refresh();
+	RequestRefresh();
 }
 
 void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities)
@@ -1661,7 +1699,7 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 		Item->SetCompletionState(bRan && (Rewritten > 0 || Handled.Num() > 0) ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
-	Refresh();
+	RequestRefresh();
 }
 
 void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>& Group)
@@ -1687,7 +1725,7 @@ void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectP
 		Item->SetCompletionState(bRan ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
-	Refresh();
+	RequestRefresh();
 }
 
 void SKzDialogueCoveragePanel::UnmergeLineRowText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
@@ -1704,7 +1742,7 @@ void SKzDialogueCoveragePanel::UnmergeLineRowText(TWeakObjectPtr<UKzDialogueAsse
 		Item->SetCompletionState(bRan ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 	}
 
-	Refresh();
+	RequestRefresh();
 }
 
 void SKzDialogueCoveragePanel::CompileCulture(const FString& Culture)
@@ -1742,19 +1780,9 @@ void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<F
 		}
 		return;
 	}
-	bArchiveRefreshPending = false;
 
-	// The commit runs from inside the row's editable widget; rebuild next tick, not under its
-	// feet, then land the focus on the next editor of the fresh widget tree.
-	FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakThis = TWeakPtr<SKzDialogueCoveragePanel>(SharedThis(this)), FocusAfter = MoveTemp(FocusAfter)](float)
-	{
-		if (TSharedPtr<SKzDialogueCoveragePanel> Panel = WeakThis.Pin())
-		{
-			Panel->Refresh();
-			Panel->FocusTranslationEditor(FocusAfter);
-		}
-		return false;
-	}));
+	// The archive save already requested the refresh; the focus lands on the rebuilt editors.
+	RequestRefresh(MoveTemp(FocusAfter));
 }
 
 TArray<FString> SKzDialogueCoveragePanel::NextEditorKeysAfter(const FString& EditorKey) const
@@ -1799,7 +1827,7 @@ void SKzDialogueCoveragePanel::AcknowledgeRecordedText(TWeakObjectPtr<UKzDialogu
 	Asset->Lines[LineIndex].RecordedTextHash = Asset->Lines[LineIndex].SourceTextHash;
 	Asset->MarkPackageDirty();
 
-	Refresh();
+	RequestRefresh();
 }
 
 TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
@@ -1823,7 +1851,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		LOCTEXT("ImportSourceFixes", "Source fixes (CSV)..."),
 		LOCTEXT("ImportSourceFixesTip", "Apply SourceText edits made in an exported CSV back to the authored assets (dialogue lines, speaker fields, project texts). Rows whose asset changed after the export are skipped as conflicted; save the dirty assets and re-run Gather afterwards."),
 		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); Refresh(); })));
+		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); RequestRefresh(); })));
 
 	MenuBuilder.AddMenuSeparator();
 
@@ -1836,7 +1864,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 				FText::Format(LOCTEXT("ImportCultureEntryTip", "Import a translated file into the '{0}' archive."), FText::FromString(Culture)),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([this, Culture, Run]() { Run(Culture); Refresh(); })));
+				FUIAction(FExecuteAction::CreateLambda([this, Culture, Run]() { Run(Culture); RequestRefresh(); })));
 		}
 	};
 
@@ -1868,7 +1896,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 		LOCTEXT("MissingVoiceTip", "Show only lines with audio work: missing or stale takes, missing localized variants."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; SavePersistedFilter(TEXT("bOnlyMissingVoice"), bOnlyMissingVoice); Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bOnlyMissingVoice = !bOnlyMissingVoice; SavePersistedFilter(TEXT("bOnlyMissingVoice"), bOnlyMissingVoice); RequestRefresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bOnlyMissingVoice; })),
 		NAME_None,
@@ -1879,7 +1907,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildFiltersMenu()
 		LOCTEXT("OnlyIncompleteTip", "Hide the 'ok' lines; cultures with nothing pending lose their whole card."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; SavePersistedFilter(TEXT("bOnlyIncomplete"), bOnlyIncomplete); Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bOnlyIncomplete = !bOnlyIncomplete; SavePersistedFilter(TEXT("bOnlyIncomplete"), bOnlyIncomplete); RequestRefresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bOnlyIncomplete; })),
 		NAME_None,
@@ -1897,7 +1925,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 		LOCTEXT("ShowLocalizedAudioTip", "Show the foreign cultures' localized-audio state. Turn off in projects that do not localize audio; the native recording state (missing and stale takes) always shows."),
 		FSlateIcon(),
 		FUIAction(
-			FExecuteAction::CreateLambda([this]() { bShowLocalizedAudio = !bShowLocalizedAudio; SavePersistedFilter(TEXT("bShowLocalizedAudio"), bShowLocalizedAudio); Refresh(); }),
+			FExecuteAction::CreateLambda([this]() { bShowLocalizedAudio = !bShowLocalizedAudio; SavePersistedFilter(TEXT("bShowLocalizedAudio"), bShowLocalizedAudio); RequestRefresh(); }),
 			FCanExecuteAction(),
 			FIsActionChecked::CreateLambda([this]() { return bShowLocalizedAudio; })),
 		NAME_None,
@@ -1910,7 +1938,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("ShowDialogueLinesTip", "Show the dialogue line areas and their bars. Turn off to focus on the project texts."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bShowDialogueLines = !bShowDialogueLines; SavePersistedFilter(TEXT("bShowDialogueLines"), bShowDialogueLines); Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bShowDialogueLines = !bShowDialogueLines; SavePersistedFilter(TEXT("bShowDialogueLines"), bShowDialogueLines); RequestRefresh(); }),
 				FCanExecuteAction(),
 				FIsActionChecked::CreateLambda([this]() { return bShowDialogueLines; })),
 			NAME_None,
@@ -1921,7 +1949,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("ShowOtherTextsTip", "Show the target's non-dialogue gathered texts (UI, menus...) as their own area and progress bar on each culture card."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bShowOtherTexts = !bShowOtherTexts; SavePersistedFilter(TEXT("bShowOtherTexts"), bShowOtherTexts); Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bShowOtherTexts = !bShowOtherTexts; SavePersistedFilter(TEXT("bShowOtherTexts"), bShowOtherTexts); RequestRefresh(); }),
 				FCanExecuteAction(),
 				FIsActionChecked::CreateLambda([this]() { return bShowOtherTexts; })),
 			NAME_None,
@@ -1932,7 +1960,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildViewOptionsMenu()
 			LOCTEXT("OnlyMergeableTextsTip", "Other texts show only identical-source groups (x2 and up): the Merge candidates."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([this]() { bOnlyMergeableTexts = !bOnlyMergeableTexts; SavePersistedFilter(TEXT("bOnlyMergeableTexts"), bOnlyMergeableTexts); Refresh(); }),
+				FExecuteAction::CreateLambda([this]() { bOnlyMergeableTexts = !bOnlyMergeableTexts; SavePersistedFilter(TEXT("bOnlyMergeableTexts"), bOnlyMergeableTexts); RequestRefresh(); }),
 				FCanExecuteAction::CreateLambda([this]() { return bShowOtherTexts; }),
 				FIsActionChecked::CreateLambda([this]() { return bOnlyMergeableTexts; })),
 			NAME_None,
@@ -2162,7 +2190,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 		LOCTEXT("AllCultures", "All Cultures"),
 		FText::GetEmpty(),
 		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([this]() { CultureFilter.Reset(); Refresh(); })));
+		FUIAction(FExecuteAction::CreateLambda([this]() { CultureFilter.Reset(); RequestRefresh(); })));
 
 	FKzLocTargetInfo Target;
 	FText Error;
@@ -2172,7 +2200,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 			FText::Format(LOCTEXT("NativeFilterEntry", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Target.NativeCulture)),
 			FText::GetEmpty(),
 			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([this, Culture = Target.NativeCulture]() { CultureFilter = Culture; Refresh(); })));
+			FUIAction(FExecuteAction::CreateLambda([this, Culture = Target.NativeCulture]() { CultureFilter = Culture; RequestRefresh(); })));
 
 		for (const FString& Culture : Target.ForeignCultures)
 		{
@@ -2180,7 +2208,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
 				FText::GetEmpty(),
 				FSlateIcon(),
-				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { CultureFilter = Culture; Refresh(); })));
+				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { CultureFilter = Culture; RequestRefresh(); })));
 		}
 	}
 
@@ -2195,7 +2223,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildSpeakerFilterMenu()
 		LOCTEXT("AllSpeakers", "All Speakers"),
 		FText::GetEmpty(),
 		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([this]() { bSpeakerFilterActive = false; SpeakerFilter.Reset(); Refresh(); })));
+		FUIAction(FExecuteAction::CreateLambda([this]() { bSpeakerFilterActive = false; SpeakerFilter.Reset(); RequestRefresh(); })));
 
 	// Only the speakers these assets actually use; narration listed when present.
 	bool bAnyNarration = false;
@@ -2218,7 +2246,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildSpeakerFilterMenu()
 			LOCTEXT("NarrationFilter", "(Narration)"),
 			LOCTEXT("NarrationFilterTip", "Lines with no speaker."),
 			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([this]() { bSpeakerFilterActive = true; SpeakerFilter.Reset(); Refresh(); })));
+			FUIAction(FExecuteAction::CreateLambda([this]() { bSpeakerFilterActive = true; SpeakerFilter.Reset(); RequestRefresh(); })));
 	}
 
 	for (const FString& Name : Names)
@@ -2227,7 +2255,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildSpeakerFilterMenu()
 			FText::FromString(Name),
 			FText::GetEmpty(),
 			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateLambda([this, Name]() { bSpeakerFilterActive = true; SpeakerFilter = Name; Refresh(); })));
+			FUIAction(FExecuteAction::CreateLambda([this, Name]() { bSpeakerFilterActive = true; SpeakerFilter = Name; RequestRefresh(); })));
 	}
 
 	return MenuBuilder.MakeWidget();
