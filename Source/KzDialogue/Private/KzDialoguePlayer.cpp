@@ -879,7 +879,7 @@ void UKzDialoguePlayer::FlushTimeline()
 	}
 
 	// Moved out first: an End may finish the dialogue or bake a new line, which must find an empty timeline.
-	const TArray<FKzDialogueActiveNotify> Flushed = MoveTemp(ActiveNotifies);
+	TArray<FKzDialogueActiveNotify> Flushed = MoveTemp(ActiveNotifies);
 	const float Clock = TimelineClock;
 	const float LineDuration = CachedLineDuration;
 	// A Manual line held past its duration also ran its course.
@@ -887,7 +887,7 @@ void UKzDialoguePlayer::FlushTimeline()
 
 	for (int32 Index = Flushed.Num() - 1; Index >= 0; --Index)
 	{
-		const FKzDialogueActiveNotify& Entry = Flushed[Index];
+		FKzDialogueActiveNotify& Entry = Flushed[Index];
 		if (Entry.bIsState && Entry.bActive && IsValid(Entry.Notify))
 		{
 			if (UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify))
@@ -900,7 +900,7 @@ void UKzDialoguePlayer::FlushTimeline()
 	}
 
 	// Skipped points that opted in.
-	for (const FKzDialogueActiveNotify& Entry : Flushed)
+	for (FKzDialogueActiveNotify& Entry : Flushed)
 	{
 		if (!Entry.bIsState && !Entry.bDone && Entry.bFireIfSkipped && IsValid(Entry.Notify))
 		{
@@ -914,7 +914,7 @@ void UKzDialoguePlayer::FlushTimeline()
 	}
 }
 
-FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration)
+FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(FKzDialogueActiveNotify& Entry, float Clock, float LineDuration)
 {
 	// One notify instance serves every playback of the line, in every world: claim it for the call about to happen.
 	if (IsValid(Entry.Notify))
@@ -938,5 +938,6 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogue
 	Context.CurrentTime = Clock;
 	Context.EventStart = Entry.Start;
 	Context.EventEnd = Entry.End;
+	Context.InstanceData = &Entry.InstanceData;
 	return Context;
 }

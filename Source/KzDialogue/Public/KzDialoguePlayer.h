@@ -48,6 +48,10 @@ struct FKzDialogueActiveNotify
 
 	/** Point already fired, or state already ended. */
 	bool bDone = false;
+
+	/** The state notify's per-playback data (FKzDialogueNotifyContext::InstanceData). */
+	UPROPERTY(Transient)
+	FInstancedStruct InstanceData;
 };
 
 /**
@@ -351,7 +355,7 @@ private:
 	void EvaluateTimeline(float DeltaTime);
 
 	void FlushTimeline();
-	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration);
+	FKzDialogueNotifyContext BuildNotifyContext(FKzDialogueActiveNotify& Entry, float Clock, float LineDuration);
 
 	UPROPERTY(Transient)
 	TObjectPtr<UKzDialogueProvider> Provider = nullptr;

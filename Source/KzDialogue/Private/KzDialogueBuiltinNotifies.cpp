@@ -17,6 +17,7 @@
 #include "Camera/PlayerCameraManager.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
+#include "StructUtils/InstancedStruct.h"
 
 namespace KzDialogueNotifyInternal
 {
@@ -36,6 +37,33 @@ namespace KzDialogueNotifyInternal
 	{
 		const USkeletalMeshComponent* Mesh = ResolveTargetMesh(Actor);
 		return Mesh ? Mesh->GetAnimInstance() : nullptr;
+	}
+
+	static void RememberMontage(const FKzDialogueNotifyContext& Context, UAnimInstance* Anim, const UAnimMontage* Montage)
+	{
+		const FAnimMontageInstance* Instance = (Anim && Montage) ? Anim->GetActiveInstanceForMontage(Montage) : nullptr;
+		if (Instance && Context.InstanceData)
+		{
+			FKzDialogueMontagePlayback& Playback = Context.InstanceData->InitializeAs<FKzDialogueMontagePlayback>();
+			Playback.AnimInstance = Anim;
+			Playback.InstanceId = Instance->GetInstanceID();
+		}
+	}
+
+	// Montage_Stop stops every playback of the asset; this stops only the remembered one, with the same blend.
+	static void StopRememberedMontage(const FKzDialogueNotifyContext& Context, float BlendOutTime)
+	{
+		const FKzDialogueMontagePlayback* Playback = Context.InstanceData ? Context.InstanceData->GetPtr<FKzDialogueMontagePlayback>() : nullptr;
+		UAnimInstance* Anim = Playback ? Playback->AnimInstance.Get() : nullptr;
+		FAnimMontageInstance* Instance = Anim ? Anim->GetMontageInstanceForID(Playback->InstanceId) : nullptr;
+		if (!Instance || !Instance->Montage || Instance->IsStopped()) { return; }
+
+		FMontageBlendSettings BlendOut;
+		BlendOut.Blend = Instance->Montage->BlendOut;
+		BlendOut.Blend.BlendTime = BlendOutTime;
+		BlendOut.BlendMode = Instance->Montage->BlendModeOut;
+		BlendOut.BlendProfile = Instance->Montage->BlendProfileOut;
+		Instance->Stop(BlendOut);
 	}
 }
 
@@ -59,16 +87,13 @@ void UKzDialogueNotifyState_PlayMontage::NotifyBegin_Implementation(const FKzDia
 	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
 	{
 		Anim->Montage_Play(Montage, PlayRate);
+		KzDialogueNotifyInternal::RememberMontage(Context, Anim, Montage);
 	}
 }
 
 void UKzDialogueNotifyState_PlayMontage::NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context)
 {
-	if (!Montage) { return; }
-	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
-	{
-		Anim->Montage_Stop(BlendOutTime, Montage);
-	}
+	KzDialogueNotifyInternal::StopRememberedMontage(Context, BlendOutTime);
 }
 
 void UKzDialogueNotify_PlaySlotAnimation::Notify_Implementation(const FKzDialogueNotifyContext& Context)
@@ -86,20 +111,17 @@ void UKzDialogueNotifyState_PlaySlotAnimation::NotifyBegin_Implementation(const 
 	UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor);
 	if (!Anim) { return; }
 
-	// Loop just enough to cover the event window; NotifyEnd stops the slot precisely at the end.
+	// Loop just enough to cover the event window; NotifyEnd stops it precisely at the end.
 	const float WindowLength = FMath::Max(0.f, Context.EventEnd - Context.EventStart);
 	const float Rate = FMath::Max(PlayRate, UE_KINDA_SMALL_NUMBER);
 	const float EffectiveLength = Animation->GetPlayLength() / Rate;
 	const int32 LoopCount = (EffectiveLength > UE_KINDA_SMALL_NUMBER && WindowLength > EffectiveLength) ? FMath::CeilToInt(WindowLength / EffectiveLength) : 1;
-	Anim->PlaySlotAnimationAsDynamicMontage(Animation, SlotName, BlendIn, BlendOut, PlayRate, LoopCount);
+	KzDialogueNotifyInternal::RememberMontage(Context, Anim, Anim->PlaySlotAnimationAsDynamicMontage(Animation, SlotName, BlendIn, BlendOut, PlayRate, LoopCount));
 }
 
 void UKzDialogueNotifyState_PlaySlotAnimation::NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context)
 {
-	if (UAnimInstance* Anim = KzDialogueNotifyInternal::ResolveTargetAnimInstance(Context.TargetActor))
-	{
-		Anim->StopSlotAnimation(BlendOut, SlotName);
-	}
+	KzDialogueNotifyInternal::StopRememberedMontage(Context, BlendOut);
 }
 
 namespace KzDialogueNotifyInternal

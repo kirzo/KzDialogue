@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "KzDialogueNotify.generated.h"
 
+struct FInstancedStruct;
 class AActor;
 class UKzDialoguePlayer;
 class UKzDialogueSpeakerComponent;
@@ -56,6 +57,9 @@ struct KZDIALOGUE_API FKzDialogueNotifyContext
 	/** NotifyEnd, or a skipped point firing late: the line was cut short (skipped, stopped, interrupted) instead of running its course. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Notify")
 	bool bCutShort = false;
+
+	/** A state notify's per-playback data, kept from NotifyBegin to NotifyEnd: what Begin started, so End undoes exactly that. C++ only, valid during the call. */
+	FInstancedStruct* InstanceData = nullptr;
 };
 
 /**
@@ -122,8 +126,9 @@ public:
 
 /**
  * State notify: bounded to a [start, end] window. Begin and End are guaranteed to pair
- * even if the line is cut short, so End must undo whatever Begin did. Use for effects
- * the line owns: a held montage, a mood, a look-at.
+ * even if the line is cut short, so End must undo whatever Begin did; what Begin needs to remember for that
+ * goes in Context.InstanceData, since the instance is shared. Use for effects the line owns: a held montage,
+ * a mood, a look-at.
  */
 UCLASS(Abstract, EditInlineNew, Blueprintable)
 class KZDIALOGUE_API UKzDialogueNotifyState : public UKzDialogueNotifyBase

@@ -8,11 +8,22 @@
 #include "KzDialogueNotify.h"
 #include "KzDialogueBuiltinNotifies.generated.h"
 
+class UAnimInstance;
 class UAnimMontage;
 class UAnimSequenceBase;
 class USoundBase;
 class UCameraShakeBase;
 class UForceFeedbackEffect;
+
+/** The montage playback a montage or animation state started, kept as its per-playback data so the end stops that playback and nothing else on the mesh. */
+USTRUCT()
+struct FKzDialogueMontagePlayback
+{
+	GENERATED_BODY()
+
+	TWeakObjectPtr<UAnimInstance> AnimInstance;
+	int32 InstanceId = INDEX_NONE;
+};
 
 /**
  * Point: plays a montage once on the target speaker's mesh. Fire-and-forget -- the montage is
@@ -45,7 +56,7 @@ public:
 };
 
 /**
- * State: plays a montage on NotifyBegin and stops it (blended) on NotifyEnd, so it is bounded to
+ * State: plays a montage on NotifyBegin and stops that playback (blended) on NotifyEnd, so it is bounded to
  * the line -- if the line is skipped or interrupted, the flush ends it. Use for held poses or
  * looping idles that must not outlive the line.
  */
@@ -120,7 +131,7 @@ public:
 
 /**
  * State: plays an anim sequence on a slot for the window (looping just enough to cover it), and
- * stops the slot on end. Like the montage state but takes a plain anim sequence -- no montage asset.
+ * stops it on end; other animations on the slot keep playing. Like the montage state but takes a plain anim sequence -- no montage asset.
  */
 UCLASS(EditInlineNew, Blueprintable, meta = (DisplayName = "Play Animation (State)"))
 class KZDIALOGUE_API UKzDialogueNotifyState_PlaySlotAnimation : public UKzDialogueNotifyState
