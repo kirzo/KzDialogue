@@ -8,6 +8,7 @@
 #include "KzNamedAsset.h"
 #include "KzNamedTokenSubsystem.h"
 #include "KzSpeakerAsset.h"
+#include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 
 static UKzDialogueSubsystem* GetDialogueSubsystem(const UObject* WorldContextObject)
@@ -101,6 +102,16 @@ EKzDialoguePlayResult UKzDialogueFunctionLibrary::GetLastDialoguePlayResult(cons
 {
 	const UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	return IsValid(Sub) ? Sub->GetLastPlayResult() : EKzDialoguePlayResult::RejectedNothingToPlay;
+}
+
+void UKzDialogueFunctionLibrary::SetDialogueReadingSpeedScale(float Scale)
+{
+	UKzDialogueSettings::SetReadingSpeedScale(Scale);
+}
+
+float UKzDialogueFunctionLibrary::GetDialogueReadingSpeedScale()
+{
+	return UKzDialogueSettings::GetReadingSpeedScale();
 }
 
 bool UKzDialogueFunctionLibrary::HasSeenDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref)

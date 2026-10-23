@@ -114,7 +114,7 @@ enum class EKzLineVoicePolicy : uint8
 UENUM(BlueprintType)
 enum class EKzLineDurationMode : uint8
 {
-	/** Duration if > 0, else the audio's length, else the project default. The default mode. */
+	/** Duration if > 0, else the audio's length, else the time reading the text takes (project reading speed). The default mode. */
 	Auto,
 	/** Use Duration as the line's length, ignoring the audio. */
 	Override,
@@ -275,6 +275,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	/** Seconds the line presents before TimeScale: DurationMode applied to the trimmed audio length, plus AudioStartDelay. LineStartDelay is not included. FullAudioDuration is the whole wave's length, 0 when there is no audio. */
 	float ResolveTotalDuration(float FullAudioDuration) const;
+
+	/** Time reading the formatted text takes at the active culture's speed and the player's scale, at least MinReadingDuration; DefaultDuration when reading speed is off. */
+	float ResolveReadingDuration() const;
 
 	/** Timeline second at which the audio's second 0 plays, the timeline starting with the audio's schedule: AudioStartDelay (compressed by TimeScale, as the player does) ahead, AudioStartTime cut away. */
 	float GetAudioTimelineOffset(float TimeScale = 1.0f) const { return FMath::Max(0.0f, AudioStartDelay) / FMath::Max(0.1f, TimeScale) - FMath::Max(0.0f, AudioStartTime); }

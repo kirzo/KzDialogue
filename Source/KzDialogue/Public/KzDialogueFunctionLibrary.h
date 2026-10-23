@@ -153,6 +153,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
 	static EKzDialoguePlayResult GetLastDialoguePlayResult(const UObject* WorldContextObject);
 
+	/** The player's reading speed option: 0.5 reads at half speed, so lines without audio stay twice as long. Process-wide and not saved; apply it from the game's options at startup. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	static void SetDialogueReadingSpeedScale(float Scale);
+
+	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	static float GetDialogueReadingSpeedScale();
+
 	/** True when the line, or any line of the alias, has been presented this game (UKzDialogueMemorySubsystem). */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
 	static bool HasSeenDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref);

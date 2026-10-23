@@ -35,9 +35,28 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
-	/** Fallback line duration when neither the line nor its audio defines one. */
+	/** Fallback line duration when neither the line nor its audio defines one and ReadingSpeed is 0. */
 	UPROPERTY(Config, EditAnywhere, BlueprintReadWrite, Category = "General", meta = (ClampMin = 0.1))
 	float DefaultDuration = 2.5f;
+
+	/** Characters per second a reader takes in. A line without audio or Duration stays up max(MinReadingDuration, characters / speed). 0 uses DefaultDuration instead. */
+	UPROPERTY(Config, EditAnywhere, Category = "Reading", meta = (ClampMin = 0.0))
+	float ReadingSpeed = 15.0f;
+
+	/** Per-culture reading speeds ("ja" -> 7), resolved via the culture priority chain: scripts pack different amounts per character. */
+	UPROPERTY(Config, EditAnywhere, Category = "Reading", meta = (ClampMin = 0.0))
+	TMap<FString, float> ReadingSpeedPerCulture;
+
+	/** Shortest time a line sized by reading speed stays up. */
+	UPROPERTY(Config, EditAnywhere, Category = "Reading", meta = (ClampMin = 0.1, Units = "Seconds"))
+	float MinReadingDuration = 1.0f;
+
+	/** Active-culture reading speed: the per-culture entry matching the priority chain, ReadingSpeed otherwise. */
+	float GetActiveReadingSpeed() const;
+
+	/** The player's reading speed option, process-wide and not saved: the game applies it from its own options. 0.5 reads at half speed, so lines without audio stay twice as long. */
+	static void SetReadingSpeedScale(float Scale);
+	static float GetReadingSpeedScale();
 
 	/** Seconds a dialogue waits for views that claimed a phase before advancing anyway (a removed widget, a missed notify). 0 waits forever. */
 	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ClampMin = 0.0, Units = "Seconds"))

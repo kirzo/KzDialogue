@@ -11,6 +11,15 @@ FText FKzDialogueLine::GetFormattedText() const
 	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
 }
 
+float FKzDialogueLine::ResolveReadingDuration() const
+{
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	const float Speed = Settings ? Settings->GetActiveReadingSpeed() * UKzDialogueSettings::GetReadingSpeedScale() : 0.0f;
+	if (Speed <= 0.0f) { return Settings ? Settings->DefaultDuration : 2.5f; }
+
+	return FMath::Max(Settings->MinReadingDuration, GetFormattedText().ToString().TrimStartAndEnd().Len() / Speed);
+}
+
 float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
 {
 	// Trimmed range when the line cuts a section out of the wave; full length otherwise.
@@ -31,11 +40,8 @@ float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
 		Length = AudioLength + Duration;
 		break;
 	default:
-	{
-		const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
-		Length = Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : (Settings ? Settings->DefaultDuration : 2.5f));
+		Length = Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : ResolveReadingDuration());
 		break;
-	}
 	}
 
 	// The audio lead extends the line: the text lives its resolved time plus the delay.

@@ -43,6 +43,37 @@ UKzDialogueSettings::UKzDialogueSettings()
 	}
 }
 
+namespace
+{
+	float GReadingSpeedScale = 1.0f;
+}
+
+void UKzDialogueSettings::SetReadingSpeedScale(float Scale)
+{
+	GReadingSpeedScale = FMath::Max(0.1f, Scale);
+}
+
+float UKzDialogueSettings::GetReadingSpeedScale()
+{
+	return GReadingSpeedScale;
+}
+
+float UKzDialogueSettings::GetActiveReadingSpeed() const
+{
+	if (ReadingSpeedPerCulture.Num() > 0)
+	{
+		FInternationalization& I18N = FInternationalization::Get();
+		for (const FString& CultureName : I18N.GetPrioritizedCultureNames(I18N.GetCurrentCulture()->GetName()))
+		{
+			if (const float* Override = ReadingSpeedPerCulture.Find(CultureName))
+			{
+				return *Override;
+			}
+		}
+	}
+	return ReadingSpeed;
+}
+
 const FString& UKzDialogueSettings::GetActiveSpeakerNameFormat() const
 {
 	if (SpeakerNameFormatsPerCulture.Num() > 0)
