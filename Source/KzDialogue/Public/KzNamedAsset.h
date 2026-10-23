@@ -75,6 +75,12 @@ public:
 	/** Fired after Token changes on an asset (old value included); the editor module rewrites the lines referencing the old token. */
 	static FKzOnNamedTokenRenamed OnTokenRenamed;
 
+	/** Adds the tokens Text's source cites ("{Token}" / "{Token:part}") to OutTokens. */
+	static void GatherTextTokens(const FText& Text, TSet<FName>& OutTokens);
+
+	/** Rebuilds References as the named assets claiming Tokens, by registry tag like the runtime lookup; kept as-is while the startup scan runs (the registry is incomplete). True when it changed. */
+	static bool RefreshTokenReferences(const TSet<FName>& Tokens, TArray<TSoftObjectPtr<UObject>>& References);
+
 	/** Valid ":part" modifiers of this type, feeding the token picker and the validator. */
 	virtual TArray<FName> GetNameParts() const { return {}; }
 
