@@ -5,8 +5,10 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
+#include "KzSpeakerAsset.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
 
 UKzBarkComponent::UKzBarkComponent()
@@ -61,7 +63,7 @@ void UKzBarkComponent::StartBarking()
 
 	if (bFirstBarkImmediate)
 	{
-		PlayBark();
+		PlayBark(/*bRollProbability=*/true);
 	}
 	else
 	{
@@ -151,7 +153,7 @@ void UKzBarkComponent::BarkNow()
 		World->GetTimerManager().ClearTimer(BarkTimer); // cancel any pending wait
 	}
 	BindChannelPlayer(); // so a one-off bark (loop off) still routes its finish through us
-	PlayBark();
+	PlayBark(/*bRollProbability=*/false);
 }
 
 void UKzBarkComponent::ScheduleNextBark()
@@ -162,10 +164,52 @@ void UKzBarkComponent::ScheduleNextBark()
 		return;
 	}
 	const float Delay = FMath::Max(0.01f, FMath::FRandRange(FMath::Min(MinInterval, MaxInterval), FMath::Max(MinInterval, MaxInterval)));
-	World->GetTimerManager().SetTimer(BarkTimer, this, &UKzBarkComponent::PlayBark, Delay, false);
+	World->GetTimerManager().SetTimer(BarkTimer, FTimerDelegate::CreateUObject(this, &UKzBarkComponent::PlayBark, true), Delay, false);
 }
 
-void UKzBarkComponent::PlayBark()
+void UKzBarkComponent::RescheduleIfLooping()
+{
+	if (bBarking && !bPaused)
+	{
+		ScheduleNextBark();
+	}
+}
+
+bool UKzBarkComponent::IsNearLocalListener() const
+{
+	// Local coop has a listener per player: the nearest one counts.
+	const FVector Location = GetOwner()->GetActorLocation();
+	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+	{
+		const APlayerController* Controller = It->Get();
+		if (!Controller || !Controller->IsLocalController()) { continue; }
+
+		FVector ListenerLocation, Front, Right;
+		Controller->GetAudioListenerPosition(ListenerLocation, Front, Right);
+		if (FVector::DistSquared(ListenerLocation, Location) <= FMath::Square(MaxListenerDistance)) { return true; }
+	}
+	return false;
+}
+
+bool UKzBarkComponent::PassesRules(const UKzDialogueSubsystem& Subsystem, bool bRollProbability) const
+{
+	if (bRollProbability && FMath::FRand() >= Probability) { return false; }
+	if (bRequireRecentlyRendered && !GetOwner()->WasRecentlyRendered()) { return false; }
+	if (MaxListenerDistance > 0.0f && !IsNearLocalListener()) { return false; }
+
+	if (bSkipWhileSpeakerTalking)
+	{
+		// An alias constrains every line to its speaker, so the speaker is known before the pick.
+		const UKzDialogueAsset* Asset = Bark.Asset.LoadSynchronous();
+		const FKzDialogueAlias* Alias = Asset ? Asset->FindAlias(Bark.LineId) : nullptr;
+		const FKzDialogueLine* Line = Asset && !Alias ? Asset->FindLine(Bark.LineId) : nullptr;
+		const UKzSpeakerAsset* Speaker = Alias ? Alias->Speaker.Asset.Get() : (Line ? Line->Speaker.Asset.Get() : nullptr);
+		if (Subsystem.IsSpeakerTalking(Speaker, ResolveBarkChannel())) { return false; }
+	}
+	return true;
+}
+
+void UKzBarkComponent::PlayBark(bool bRollProbability)
 {
 	if (bBarkInFlight)
 	{
@@ -175,6 +219,12 @@ void UKzBarkComponent::PlayBark()
 	UKzDialogueSubsystem* Subsystem = GetSubsystem();
 	if (!Subsystem)
 	{
+		return;
+	}
+
+	if (!PassesRules(*Subsystem, bRollProbability))
+	{
+		RescheduleIfLooping();
 		return;
 	}
 
@@ -189,7 +239,7 @@ void UKzBarkComponent::PlayBark()
 	if (!Player)
 	{
 		// Rejected (priority / cooldown / unresolvable): try again after another interval.
-		ScheduleNextBark();
+		RescheduleIfLooping();
 		return;
 	}
 
@@ -209,11 +259,8 @@ void UKzBarkComponent::HandleBarkFinished(UKzDialoguePlayer* Player, EKzDialogue
 	bBarkInFlight = false;
 	OnBarkFinished.Broadcast(Reason);
 
-	if (!bBarking || bPaused)
-	{
-		return; // stopped, or paused (resume will reschedule)
-	}
-	ScheduleNextBark(); // reschedule on ANY end reason: the loop survives cancel / interrupt
+	// Any end reason reschedules, so the loop survives cancel / interrupt; a paused loop reschedules on resume.
+	RescheduleIfLooping();
 }
 
 void UKzBarkComponent::BindChannelPlayer()

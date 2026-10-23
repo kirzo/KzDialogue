@@ -9,6 +9,7 @@
 #include "KzDialogueAssetSession.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueMemorySubsystem.h"
+#include "KzSpeakerAsset.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Algo/RandomShuffle.h"
@@ -93,6 +94,21 @@ void UKzDialogueSubsystem::GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialo
 			OutPlayers.Add(Pair.Value);
 		}
 	}
+}
+
+bool UKzDialogueSubsystem::IsSpeakerTalking(const UKzSpeakerAsset* Speaker, FGameplayTag ExceptChannel) const
+{
+	if (!Speaker) { return false; }
+
+	for (const auto& Pair : Players)
+	{
+		const UKzDialoguePlayer* Player = Pair.Value;
+		if (Pair.Key != ExceptChannel && IsValid(Player) && Player->IsPlaying() && Player->GetCurrentLine().Speaker.Asset == Speaker)
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 // The audio's SoundClass without loading the wave when it is not loaded yet: the asset registry tags it.

@@ -83,6 +83,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const;
 
+	/** True while a dialogue with Speaker on its current line plays on any channel other than ExceptChannel. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
+	bool IsSpeakerTalking(const UKzSpeakerAsset* Speaker, FGameplayTag ExceptChannel) const;
+
 	/**
 	 * Channel resolution chain for an asset entry by GUID. Line entries: explicit > line >
 	 * audio SoundClass mapping (UKzDialogueSettings::SoundClassChannels) > asset > settings.

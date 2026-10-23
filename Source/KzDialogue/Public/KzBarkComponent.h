@@ -24,6 +24,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkFinished, EKzDialogueFinish
  * Line variety and per-line cooldown come from the dialogue alias itself (SelectionMode / CooldownSeconds),
  * so point Bark at an alias and the asset decides which variation plays. Use a dedicated channel per barker
  * (e.g. Dialogue.Channel.Bark) so stop / pause only affect this one's lines.
+ *
+ * The Rules skip a bark that would not make sense now, and the loop waits another interval. BarkNow
+ * honors them too, except Probability, which only thins the loop.
  */
 UCLASS(ClassGroup = (Dialogue), meta = (BlueprintSpawnableComponent))
 class KZDIALOGUE_API UKzBarkComponent : public UActorComponent
@@ -61,6 +64,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", AdvancedDisplay)
 	int32 Priority = -1;
 
+	/** Chance each scheduled bark plays. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Probability = 1.0f;
+
+	/** Skip barks farther than this from the nearest local player's audio listener. 0 = any distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules", meta = (ClampMin = "0.0", Units = "Centimeters"))
+	float MaxListenerDistance = 0.0f;
+
+	/** Skip barks while the owner has not been rendered lately (off screen or culled). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules")
+	bool bRequireRecentlyRendered = false;
+
+	/** Skip barks while the bark's speaker (the line's, or the alias's) talks on another channel. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules")
+	bool bSkipWhileSpeakerTalking = true;
+
 	/** Fired when a bark actually starts playing (carries the channel player). */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Bark")
 	FKzOnBarkPlayed OnBarkPlayed;
@@ -85,7 +104,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void ResumeBarking();
 
-	/** Force a bark right now (ignores the pending wait). No-op if one is already playing. */
+	/** Bark right now, ignoring the pending wait and Probability; the other rules still apply. No-op if one is already playing. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void BarkNow();
 
@@ -108,7 +127,13 @@ private:
 	FGameplayTag ResolveBarkChannel() const;
 
 	void ScheduleNextBark();
-	void PlayBark();
+
+	/** Waits another interval unless the loop is stopped or paused (a one-off BarkNow must not start it). */
+	void RescheduleIfLooping();
+
+	void PlayBark(bool bRollProbability);
+	bool PassesRules(const UKzDialogueSubsystem& Subsystem, bool bRollProbability) const;
+	bool IsNearLocalListener() const;
 
 	UFUNCTION()
 	void HandleBarkFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
