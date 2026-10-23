@@ -93,23 +93,11 @@ int32 SKzAudioRangeStrip::OnPaint(const FPaintArgs& /*Args*/, const FGeometry& A
 	const float StartX = TimeToX(GetStartTime(), Width);
 	const float EndX = TimeToX(GetEndTime(), Width);
 
-	// Waveform: one min/max column per pixel, brighter inside the active range.
-	if (Preview.IsValid() && Preview->Peaks.Num() > 0)
+	// Waveform, brighter inside the active range.
+	if (Preview.IsValid())
 	{
-		const float Center = Height * 0.5f;
-		const float HalfSpan = Height * 0.45f;
-		for (int32 X = 0; X < FMath::FloorToInt(Width); ++X)
-		{
-			const int32 Bucket = FMath::Clamp(static_cast<int32>(static_cast<float>(X) / Width * Preview->Peaks.Num()), 0, Preview->Peaks.Num() - 1);
-			const FVector2f MinMax = Preview->Peaks[Bucket] * Preview->Gain;
-			const float Top = Center - MinMax.Y * HalfSpan;
-			const float Bottom = Center - MinMax.X * HalfSpan;
-			const bool bInRange = X >= StartX && X <= EndX;
-
-			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
-				AllottedGeometry.ToPaintGeometry(FVector2f(1.f, FMath::Max(1.f, Bottom - Top)), FSlateLayoutTransform(FVector2f(static_cast<float>(X), Top))),
-				Brush, ESlateDrawEffect::None, bInRange ? KzWaveInRange : KzWaveDim);
-		}
+		KzPaintWaveform(*Preview, AllottedGeometry, OutDrawElements, LayerId + 1, Height * 0.45f, 0.f, GetDuration() / FMath::Max(1.f, Width),
+			[StartX, EndX](float X) { return X >= StartX && X <= EndX ? KzWaveInRange : KzWaveDim; });
 	}
 
 	// Range edges: full-height lines with a small grab block at the top.

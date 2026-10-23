@@ -118,9 +118,6 @@ namespace
 	int32 GPendingSelectionEvent = INDEX_NONE;
 }
 
-// The waveform envelope struct + builder live in Widgets/KzWaveformPreview.h, shared with
-// the audio range strip.
-
 // ---------------------------------------------------------------------------------------
 // SKzTimelineTrack: one lane's interactive notify track, mirroring the AnimMontage notify
 // track. Paints point/state markers along [0, duration], hit-tests them, and supports
@@ -226,10 +223,13 @@ public:
 				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(GridX, 0.f))), Box, ESlateDrawEffect::None, GridColor);
 			}
 		}
-		// Audio waveform on the group band (when the line has a drawable USoundWave).
-		if (Waveform.IsValid() && Waveform->Peaks.Num() > 0 && Waveform->Duration > UE_KINDA_SMALL_NUMBER)
+		// Audio waveform on the group band (when the line has a drawable USoundWave). Timeline
+		// second 0 = this wave second, when the line plays a cut of its audio.
+		if (Waveform.IsValid())
 		{
-			DrawWaveform(*Waveform, AllottedGeometry, OutDrawElements, LayerId, W, H);
+			const FLinearColor WaveColor(0.40f, 0.62f, 0.88f, 0.55f);
+			KzPaintWaveform(*Waveform, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), ViewStart.Get(0.f) + AudioTimeOffset.Get(), ViewSpan() / FMath::Max(W, 1.f),
+				[&WaveColor](float) { return WaveColor; });
 		}
 
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(W, 1.f), FSlateLayoutTransform(FVector2f(0.f, H - 1.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.08f));
@@ -614,40 +614,6 @@ private:
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 8);
 		const double TextWidth = FSlateApplication::Get().GetRenderer()->GetFontMeasureService()->Measure(Label.ToString(), Font).X;
 		return static_cast<float>(TextWidth) + 8.f;
-	}
-
-	void DrawWaveform(const FKzWaveformPreview& Wave, const FGeometry& Geo, FSlateWindowElementList& Out, int32 Layer, float W, float H) const
-	{
-		const FSlateBrush* Box = FAppStyle::GetBrush("WhiteBrush");
-		const FLinearColor Color(0.40f, 0.62f, 0.88f, 0.55f);
-		const float CenterY = H * 0.5f;
-		const float HalfH = FMath::Max(H * 0.5f - 2.f, 1.f);
-		const int32 N = Wave.Peaks.Num();
-		const float WaveDur = Wave.Duration;
-		const int32 Width = FMath::FloorToInt(W);
-		// Timeline second 0 = this wave second, when the line plays a cut of its audio.
-		const float Offset = AudioTimeOffset.Get();
-
-		for (int32 Px = 0; Px < Width; ++Px)
-		{
-			const float TLeft = XToTime(static_cast<float>(Px), W) + Offset;
-			const float TRight = XToTime(static_cast<float>(Px) + 1.f, W) + Offset;
-			if (TRight <= 0.f || TLeft >= WaveDur) { continue; }
-
-			const int32 B0 = FMath::Clamp(static_cast<int32>(FMath::Max(TLeft, 0.f) / WaveDur * N), 0, N - 1);
-			const int32 B1 = FMath::Clamp(FMath::CeilToInt(FMath::Min(TRight, WaveDur) / WaveDur * N), B0 + 1, N);
-			float Mn = 0.f;
-			float Mx = 0.f;
-			for (int32 B = B0; B < B1; ++B)
-			{
-				Mn = FMath::Min(Mn, Wave.Peaks[B].X);
-				Mx = FMath::Max(Mx, Wave.Peaks[B].Y);
-			}
-
-			const float YTop = CenterY - Mx * Wave.Gain * HalfH;
-			const float ColH = FMath::Max((Mx - Mn) * Wave.Gain * HalfH, 1.f);
-			FSlateDrawElement::MakeBox(Out, Layer, Geo.ToPaintGeometry(FVector2f(1.f, ColH), FSlateLayoutTransform(FVector2f(static_cast<float>(Px), YTop))), Box, ESlateDrawEffect::None, Color);
-		}
 	}
 
 	int32 HitTest(float LocalX, float W, float Dur, EDragMode& OutMode) const
