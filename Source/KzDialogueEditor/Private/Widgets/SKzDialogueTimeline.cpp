@@ -104,6 +104,36 @@ namespace
 		return Spacing;
 	}
 
+	// The visible time window mapped onto a widget's width, shared by the tracks and the ruler.
+	struct FKzTimelineView
+	{
+		float Start;
+		float Span;
+		float Width;
+
+		FKzTimelineView(float InStart, float InEnd, float InWidth) : Start(InStart), Span(FMath::Max(InEnd - InStart, 0.0001f)), Width(InWidth) {}
+
+		float End() const { return Start + Span; }
+		bool Contains(float Seconds) const { return Seconds >= Start && Seconds <= End(); }
+		float TimeToX(float Seconds) const { return (Seconds - Start) / Span * Width; }
+		float XToTime(float X) const { return Start + X / FMath::Max(Width, 1.f) * Span; }
+		float SecondsPerPixel() const { return Span / FMath::Max(Width, 1.f); }
+		float Snap(float Seconds) const { const float Spacing = DetermineTickSpacing(Width / Span); return Spacing > 0.f ? FMath::RoundToFloat(Seconds / Spacing) * Spacing : Seconds; }
+
+		/** Calls Func(Seconds, bMajor) for every grid tick in view; every tenth is major. */
+		template <typename FuncType>
+		void ForEachTick(FuncType&& Func) const
+		{
+			const float Spacing = DetermineTickSpacing(Width / Span);
+			for (int32 Tick = FMath::FloorToInt(Start / Spacing); Spacing > 0.f; ++Tick)
+			{
+				const float Seconds = static_cast<float>(Tick) * Spacing;
+				if (Seconds > End()) { break; }
+				if (Seconds >= Start) { Func(Seconds, Tick % 10 == 0); }
+			}
+		}
+	};
+
 	// Editor clipboard for notify events, shared across timeline widgets so copy/paste works between
 	// lines. The notify is kept alive via AddToRoot; the time source / flags are plain value data.
 	FInstancedStruct GClipboardTimeSource;
@@ -140,7 +170,7 @@ public:
 	SLATE_BEGIN_ARGS(SKzTimelineTrack) : _Duration(1.f), _AudioTimeOffset(0.f), _LineAudio(nullptr), _ViewStart(0.f), _ViewEnd(1.f), _SelectionStart(-1.f), _SelectionEnd(-1.f), _SelectedEvent(INDEX_NONE), _Playhead(-1.f) {}
 		SLATE_ARGUMENT(TWeakObjectPtr<UKzDialogueTimeline>, Timeline)
 		SLATE_ARGUMENT(int32, TrackIndex)
-		SLATE_ARGUMENT(TSharedPtr<FKzWaveformPreview>, Waveform)
+		SLATE_ATTRIBUTE(TSharedPtr<FKzWaveformPreview>, Waveform)
 		SLATE_ATTRIBUTE(float, Duration)
 		SLATE_ATTRIBUTE(float, AudioTimeOffset)
 		SLATE_ATTRIBUTE(USoundBase*, LineAudio)
@@ -197,6 +227,7 @@ public:
 	{
 		const float W = AllottedGeometry.GetLocalSize().X;
 		const float H = AllottedGeometry.GetLocalSize().Y;
+		const FKzTimelineView View = MakeView(W);
 		const FSlateBrush* Box = FAppStyle::GetBrush("WhiteBrush");
 
 		// Lane background so an empty track still reads as a drop area.
@@ -210,63 +241,48 @@ public:
 		// horizontal separator at the bottom of the row.
 		if (W > 1.f)
 		{
-			const float ViewMin = ViewStart.Get(0.f);
-			const float ViewMax = ViewMin + ViewSpan();
-			const float Spacing = DetermineTickSpacing(W / ViewSpan());
-			for (int32 Tick = FMath::FloorToInt(ViewMin / Spacing); Spacing > 0.f; ++Tick)
+			View.ForEachTick([&](float Seconds, bool bMajor)
 			{
-				const float Seconds = static_cast<float>(Tick) * Spacing;
-				if (Seconds > ViewMax) { break; }
-				if (Seconds < ViewMin) { continue; }
-				const float GridX = TimeToX(Seconds, W);
-				const FLinearColor GridColor(1.f, 1.f, 1.f, (Tick % 10 == 0) ? 0.10f : 0.04f);
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(GridX, 0.f))), Box, ESlateDrawEffect::None, GridColor);
-			}
+				const FLinearColor GridColor(1.f, 1.f, 1.f, bMajor ? 0.10f : 0.04f);
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(Seconds), 0.f))), Box, ESlateDrawEffect::None, GridColor);
+			});
 		}
 		// Audio waveform on the group band (when the line has a drawable USoundWave). Timeline
 		// second 0 = this wave second, when the line plays a cut of its audio.
-		if (Waveform.IsValid())
+		if (const TSharedPtr<FKzWaveformPreview> Wave = Waveform.Get())
 		{
 			const FLinearColor WaveColor(0.40f, 0.62f, 0.88f, 0.55f);
-			KzPaintWaveform(*Waveform, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), ViewStart.Get(0.f) + AudioTimeOffset.Get(), ViewSpan() / FMath::Max(W, 1.f),
+			KzPaintWaveform(*Wave, AllottedGeometry, OutDrawElements, LayerId, FMath::Max(H * 0.5f - 2.f, 1.f), View.Start + AudioTimeOffset.Get(), View.SecondsPerPixel(),
 				[&WaveColor](float) { return WaveColor; });
 		}
 
 		FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(W, 1.f), FSlateLayoutTransform(FVector2f(0.f, H - 1.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.08f));
 
 		// Line bounds: a green line at the start (0) and a red one at the end, when in view.
+		if (View.Contains(0.f))
 		{
-			const float ViewMin = ViewStart.Get(0.f);
-			const float ViewMaxLocal = ViewMin + ViewSpan();
-			if (0.f >= ViewMin && 0.f <= ViewMaxLocal)
-			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(0.f, W), 0.f))), Box, ESlateDrawEffect::None, FLinearColor(0.20f, 0.85f, 0.25f, 0.9f));
-			}
-			if (Dur >= ViewMin && Dur <= ViewMaxLocal)
-			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(Dur, W) - 2.f, 0.f))), Box, ESlateDrawEffect::None, FLinearColor(0.85f, 0.20f, 0.20f, 0.9f));
-			}
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(0.f), 0.f))), Box, ESlateDrawEffect::None, FLinearColor(0.20f, 0.85f, 0.25f, 0.9f));
+		}
+		if (View.Contains(Dur))
+		{
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(Dur) - 2.f, 0.f))), Box, ESlateDrawEffect::None, FLinearColor(0.85f, 0.20f, 0.20f, 0.9f));
+		}
 
-			// Subtle line(s) at the selected event's time (start, plus end for a state).
-			const float SelStart = SelectionStart.Get(-1.f);
-			const float SelEnd = SelectionEnd.Get(-1.f);
-			const FLinearColor SelLineColor(1.f, 1.f, 1.f, 0.4f);
-			if (SelStart >= ViewMin && SelStart <= ViewMaxLocal)
+		// Subtle line(s) at the selected event's time (start, plus end for a state).
+		const FLinearColor SelLineColor(1.f, 1.f, 1.f, 0.4f);
+		for (const float SelTime : { SelectionStart.Get(-1.f), SelectionEnd.Get(-1.f) })
+		{
+			if (View.Contains(SelTime))
 			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelStart, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
-			}
-			if (SelEnd >= ViewMin && SelEnd <= ViewMaxLocal)
-			{
-				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(TimeToX(SelEnd, W), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(SelTime), 0.f))), Box, ESlateDrawEffect::None, SelLineColor);
 			}
 		}
 
 		// Playhead: a bright vertical line across the row, on top of everything else.
 		const float PlayheadSec = Playhead.Get(-1.f);
-		const float PlayheadViewLo = ViewStart.Get(0.f);
-		if (PlayheadSec >= PlayheadViewLo && PlayheadSec <= PlayheadViewLo + ViewSpan())
+		if (View.Contains(PlayheadSec))
 		{
-			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(TimeToX(PlayheadSec, W), 0.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.9f));
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 5, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(View.TimeToX(PlayheadSec), 0.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.9f));
 		}
 
 		// Events only on a real track; the group row stops here (decoration only).
@@ -282,8 +298,8 @@ public:
 			float StartSec, EndSec; bool bState;
 			GetEventBounds(Track.Events[e], Dur, StartSec, EndSec, bState);
 
-			const float L = TimeToX(StartSec, W);
-			const float R = TimeToX(EndSec, W);
+			const float L = View.TimeToX(StartSec);
+			const float R = View.TimeToX(EndSec);
 			const bool bSelected = (e == Sel);
 			FLinearColor Color = bSelected ? FLinearColor(0.98f, 0.86f, 0.36f) : (Track.Events[e].Notify ? Track.Events[e].Notify->GetEditorColor() : FLinearColor(0.46f, 0.62f, 0.85f));
 			FLinearColor TextColor = Color.GetLuminance() > 0.5f ? FLinearColor::Black : FLinearColor::White;
@@ -345,7 +361,7 @@ public:
 			{
 				float StartSec, EndSec; bool bState;
 				GetEventBounds(T->Tracks[TrackIndex].Events[Hit], Dur, StartSec, EndSec, bState);
-				const float CursorSec = XToTime(LocalX, W);
+				const float CursorSec = MakeView(W).XToTime(LocalX);
 
 				// Anchor-based events cannot be retimed or resized; the drag stays alive only
 				// for the vertical move-to-track gesture.
@@ -377,7 +393,7 @@ public:
 		{
 			const float DeltaX = LocalX - PanLastX;
 			PanLastX = LocalX;
-			if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * ViewSpan()); }
+			if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * MakeView(W).Span); }
 			return FReply::Handled();
 		}
 
@@ -399,7 +415,8 @@ public:
 
 		if (!bRetimable) { return FReply::Handled(); }
 
-		const float CursorSec = XToTime(LocalX, W);
+		const FKzTimelineView View = MakeView(W);
+		const float CursorSec = View.XToTime(LocalX);
 
 		float CurStart, CurEnd; bool bState;
 		GetEventBounds(T->Tracks[TrackIndex].Events[DragIndex], Dur, CurStart, CurEnd, bState);
@@ -424,11 +441,11 @@ public:
 		// Hold Shift to snap the dragged edge (or the whole marker) to the grid.
 		if (MouseEvent.IsShiftDown())
 		{
-			if (DragMode == EDragMode::ResizeStart) { NewStart = SnapToGrid(NewStart, W); }
-			else if (DragMode == EDragMode::ResizeEnd) { NewEnd = SnapToGrid(NewEnd, W); }
+			if (DragMode == EDragMode::ResizeStart) { NewStart = View.Snap(NewStart); }
+			else if (DragMode == EDragMode::ResizeEnd) { NewEnd = View.Snap(NewEnd); }
 			else
 			{
-				const float Snapped = SnapToGrid(NewStart, W);
+				const float Snapped = View.Snap(NewStart);
 				NewEnd += Snapped - NewStart;
 				NewStart = Snapped;
 			}
@@ -496,7 +513,7 @@ public:
 			}
 			else if (OnBuildAddMenu.IsBound())
 			{
-				MenuContent = OnBuildAddMenu.Execute(XToTime(LocalX, W));
+				MenuContent = OnBuildAddMenu.Execute(MakeView(W).XToTime(LocalX));
 			}
 
 			// Nothing to add/edit here (e.g. the decorative group row): no menu.
@@ -541,7 +558,7 @@ public:
 		if (!OnZoom.IsBound()) { return FReply::Unhandled(); }
 		const float W = MyGeometry.GetLocalSize().X;
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
-		OnZoom.Execute(XToTime(LocalX, W), MouseEvent.GetWheelDelta(), MouseEvent.IsShiftDown());
+		OnZoom.Execute(MakeView(W).XToTime(LocalX), MouseEvent.GetWheelDelta(), MouseEvent.IsShiftDown());
 		return FReply::Handled();
 	}
 
@@ -570,10 +587,7 @@ public:
 private:
 	enum class EDragMode { None, Move, ResizeStart, ResizeEnd };
 
-	float ViewSpan() const { return FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f); }
-	float TimeToX(float TimeSeconds, float W) const { return (TimeSeconds - ViewStart.Get(0.f)) / ViewSpan() * W; }
-	float XToTime(float LocalX, float W) const { return ViewStart.Get(0.f) + (LocalX / FMath::Max(W, 1.f)) * ViewSpan(); }
-	float SnapToGrid(float TimeSeconds, float W) const { const float Spacing = DetermineTickSpacing(W / ViewSpan()); return Spacing > 0.f ? FMath::RoundToFloat(TimeSeconds / Spacing) * Spacing : TimeSeconds; }
+	FKzTimelineView MakeView(float W) const { return FKzTimelineView(ViewStart.Get(0.f), ViewEnd.Get(1.f), W); }
 
 	void GetEventBounds(const FKzDialogueNotifyEvent& Event, float Dur, float& OutStartSec, float& OutEndSec, bool& bOutState) const
 	{
@@ -622,12 +636,13 @@ private:
 		UKzDialogueTimeline* T = Timeline.Get();
 		if (!T || !T->Tracks.IsValidIndex(TrackIndex)) { return INDEX_NONE; }
 		const FKzDialogueNotifyTrack& Track = T->Tracks[TrackIndex];
+		const FKzTimelineView View = MakeView(W);
 		for (int32 e = Track.Events.Num() - 1; e >= 0; --e)
 		{
 			float StartSec, EndSec; bool bState;
 			GetEventBounds(Track.Events[e], Dur, StartSec, EndSec, bState);
-			const float L = TimeToX(StartSec, W);
-			const float R = TimeToX(EndSec, W);
+			const float L = View.TimeToX(StartSec);
+			const float R = View.TimeToX(EndSec);
 			if (bState)
 			{
 				if (LocalX >= L - 2.f && LocalX <= R + 2.f)
@@ -657,7 +672,7 @@ private:
 
 	TWeakObjectPtr<UKzDialogueTimeline> Timeline;
 	int32 TrackIndex = INDEX_NONE;
-	TSharedPtr<FKzWaveformPreview> Waveform;
+	TAttribute<TSharedPtr<FKzWaveformPreview>> Waveform;
 	TAttribute<float> Duration;
 	TAttribute<float> AudioTimeOffset;
 	TAttribute<USoundBase*> LineAudio;
@@ -691,7 +706,7 @@ private:
 
 // ---------------------------------------------------------------------------------------
 // SKzTimelineRuler: the time ruler. Draws ticks and second labels on the same spacing as the
-// track grid, with no scrub handle (a dialogue line has no transport).
+// track grid; left-drag scrubs the playhead, middle-drag pans.
 // ---------------------------------------------------------------------------------------
 
 class SKzTimelineRuler : public SLeafWidget
@@ -735,23 +750,16 @@ public:
 		const float H = AllottedGeometry.GetLocalSize().Y;
 		if (W <= 1.f) { return LayerId; }
 
-		const float ViewMin = ViewStart.Get(0.f);
-		const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewMin, 0.0001f);
-		const float ViewMax = ViewMin + Span;
+		const FKzTimelineView View = MakeView(W);
 		const FSlateBrush* Box = FAppStyle::GetBrush("WhiteBrush");
 		const FSlateFontInfo Font = FCoreStyle::GetDefaultFontStyle("Regular", 8);
 		const TSharedRef<FSlateFontMeasure> FontMeasure = FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
 		const FLinearColor TickColor(1.f, 1.f, 1.f, 0.35f);
 		const FLinearColor LabelColor(1.f, 1.f, 1.f, 0.6f);
 
-		const float Spacing = DetermineTickSpacing(W / Span);
-		for (int32 Tick = FMath::FloorToInt(ViewMin / Spacing); Spacing > 0.f; ++Tick)
+		View.ForEachTick([&](float Seconds, bool bMajor)
 		{
-			const float Seconds = static_cast<float>(Tick) * Spacing;
-			if (Seconds > ViewMax) { break; }
-			if (Seconds < ViewMin) { continue; }
-			const float X = (Seconds - ViewMin) / Span * W;
-			const bool bMajor = (Tick % 10 == 0);
+			const float X = View.TimeToX(Seconds);
 			const float TickH = bMajor ? 7.f : 4.f;
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, TickH), FSlateLayoutTransform(FVector2f(X, H - TickH))), Box, ESlateDrawEffect::None, TickColor);
 			if (bMajor)
@@ -760,14 +768,14 @@ public:
 				const FVector2D TextSize = FontMeasure->Measure(TickLabel, Font);
 				FSlateDrawElement::MakeText(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(TextSize.X), static_cast<float>(TextSize.Y)), FSlateLayoutTransform(FVector2f(X + 2.f, 1.f))), FText::FromString(TickLabel), Font, ESlateDrawEffect::None, LabelColor);
 			}
-		}
+		});
 
 		// Start (green) / end (red) bounds and the selected event's line(s), so they reach the
 		// numbers and connect with the track lines below.
 		auto DrawMarkLine = [&](float TimeSeconds, float LineWidth, const FLinearColor& Color, bool bAnchorRight)
 		{
-			if (TimeSeconds < ViewMin || TimeSeconds > ViewMax) { return; }
-			const float X = (TimeSeconds - ViewMin) / Span * W - (bAnchorRight ? LineWidth : 0.f);
+			if (!View.Contains(TimeSeconds)) { return; }
+			const float X = View.TimeToX(TimeSeconds) - (bAnchorRight ? LineWidth : 0.f);
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(LineWidth, H), FSlateLayoutTransform(FVector2f(X, 0.f))), Box, ESlateDrawEffect::None, Color);
 		};
 		DrawMarkLine(0.f, 2.f, FLinearColor(0.20f, 0.85f, 0.25f, 0.9f), false);
@@ -777,9 +785,9 @@ public:
 
 		// Playhead: a white line plus a small handle at the top, so the ruler reads as a scrubber.
 		const float PlayheadSec = Playhead.Get(-1.f);
-		if (PlayheadSec >= ViewMin && PlayheadSec <= ViewMax)
+		if (View.Contains(PlayheadSec))
 		{
-			const float PX = (PlayheadSec - ViewMin) / Span * W;
+			const float PX = View.TimeToX(PlayheadSec);
 			// Native scrub handle (mirrors the anim timeline): a 13px box brush draws the head + line.
 			const FSlateBrush* ScrubHandle = FAppStyle::GetBrush("Sequencer.Timeline.VanillaScrubHandleDown");
 			// Center the 13px handle on the playhead line (its 1px center column sits at +6.5).
@@ -792,19 +800,9 @@ public:
 	virtual FReply OnMouseWheel(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 	{
 		if (!OnZoom.IsBound()) { return FReply::Unhandled(); }
-		const float W = MyGeometry.GetLocalSize().X;
-		const float ViewMin = ViewStart.Get(0.f);
-		const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewMin, 0.0001f);
 		const float LocalX = MyGeometry.AbsoluteToLocal(MouseEvent.GetScreenSpacePosition()).X;
-		const float CursorTime = ViewMin + (LocalX / FMath::Max(W, 1.f)) * Span;
-		OnZoom.Execute(CursorTime, MouseEvent.GetWheelDelta(), MouseEvent.IsShiftDown());
+		OnZoom.Execute(MakeView(MyGeometry.GetLocalSize().X).XToTime(LocalX), MouseEvent.GetWheelDelta(), MouseEvent.IsShiftDown());
 		return FReply::Handled();
-	}
-
-	float LocalToTime(float LocalX, float W) const
-	{
-		const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f);
-		return ViewStart.Get(0.f) + (LocalX / FMath::Max(W, 1.f)) * Span;
 	}
 
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
@@ -816,7 +814,7 @@ public:
 		if (MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 		{
 			bScrubbing = true;
-			OnScrub.ExecuteIfBound(LocalToTime(LocalX, W));
+			OnScrub.ExecuteIfBound(MakeView(W).XToTime(LocalX));
 			return FReply::Handled().CaptureMouse(SharedThis(this));
 		}
 		if (MouseEvent.GetEffectingButton() == EKeys::MiddleMouseButton)
@@ -835,15 +833,14 @@ public:
 
 		if (bScrubbing && MouseEvent.IsMouseButtonDown(EKeys::LeftMouseButton))
 		{
-			OnScrub.ExecuteIfBound(LocalToTime(LocalX, W));
+			OnScrub.ExecuteIfBound(MakeView(W).XToTime(LocalX));
 			return FReply::Handled();
 		}
 		if (bPanning && MouseEvent.IsMouseButtonDown(EKeys::MiddleMouseButton))
 		{
 			const float DeltaX = LocalX - PanLastX;
 			PanLastX = LocalX;
-			const float Span = FMath::Max(ViewEnd.Get(1.f) - ViewStart.Get(0.f), 0.0001f);
-			if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * Span); }
+			if (W > 0.f) { OnPan.ExecuteIfBound(-(DeltaX / W) * MakeView(W).Span); }
 			return FReply::Handled();
 		}
 		return FReply::Unhandled();
@@ -871,6 +868,8 @@ public:
 	}
 
 private:
+	FKzTimelineView MakeView(float W) const { return FKzTimelineView(ViewStart.Get(0.f), ViewEnd.Get(1.f), W); }
+
 	TAttribute<float> ViewStart;
 	TAttribute<float> ViewEnd;
 	TAttribute<float> Duration;
@@ -911,6 +910,93 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 	{
 		GEditor->RegisterForUndo(this);
 	}
+
+	RefreshWaveformPreview();
+
+	// Two synchronized columns, like the AnimMontage notify panel: the left outliner (filter,
+	// transport, the "Notifies" group, one row per track) and the right track area (ruler,
+	// waveform band, group band, one painted track per row). Matching row heights keep the
+	// columns aligned. Built once: Rebuild only refills the track rows.
+	auto WaveRowHeight = [this]() -> FOptionalSize { return WaveformPreview.IsValid() && WaveformPreview->Peaks.Num() > 0 ? WaveformBandHeight : HeaderRowHeight; };
+
+	TSharedRef<SVerticalBox> OutlinerColumn = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).HeightOverride(HeaderRowHeight).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+				[
+					SNew(SSearchBox)
+						.HintText(LOCTEXT("FilterTracksHint", "Filter"))
+						.OnTextChanged_Lambda([this](const FText& InText) { FilterText = InText; Rebuild(); })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2, 0, 0, 0)
+				[
+					SNew(SButton)
+						.ToolTipText(LOCTEXT("ResetZoomTip", "Reset zoom (show the whole line)"))
+						.ContentPadding(FMargin(4.f, 1.f))
+						.OnClicked_Lambda([this]() { ViewStart = 0.f; ViewEnd = 0.f; Invalidate(EInvalidateWidgetReason::Paint); return FReply::Handled(); })
+						[
+							SNew(STextBlock).Text(LOCTEXT("ResetZoom", "Fit")).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+						]
+				]
+			]
+		]
+		// Playback row, above the "Notifies" row so that row keeps its compact label height. The
+		// time readout is clipped so it never spills into the track area when the column is narrow.
+		+ SVerticalBox::Slot().AutoHeight()
+		[
+			SNew(SBox).HeightOverride_Lambda(WaveRowHeight).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f)).Clipping(EWidgetClipping::ClipToBounds)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
+				[
+					SNew(STextBlock)
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+						.Text_Lambda([this]() { return FText::FromString(FString::Printf(TEXT("%.2f / %.2f s"), PlayheadTime, Duration())); })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					BuildTransportControl()
+				]
+			]
+		]
+		+ SVerticalBox::Slot().AutoHeight()[ BuildNotifiesHeaderRow(HeaderRowHeight) ]
+		+ SVerticalBox::Slot().AutoHeight()[ SAssignNew(OutlinerTracks, SVerticalBox) ];
+
+	TSharedRef<SVerticalBox> TrackAreaColumn = SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()[ SNew(SBox).HeightOverride(HeaderRowHeight)[ BuildRuler() ] ]
+		+ SVerticalBox::Slot().AutoHeight()[ SNew(SBox).HeightOverride_Lambda(WaveRowHeight)[ MakeLane(INDEX_NONE, /*bWithWaveform=*/true) ] ]
+		+ SVerticalBox::Slot().AutoHeight()[ SNew(SBox).HeightOverride(HeaderRowHeight)[ MakeLane(INDEX_NONE) ] ]
+		+ SVerticalBox::Slot().AutoHeight()[ SAssignNew(TrackAreaTracks, SVerticalBox) ];
+
+	ChildSlot
+	[
+		SNew(SBorder)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.Padding(4)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				SNew(SSplitter)
+					.Orientation(Orient_Horizontal)
+				+ SSplitter::Slot().Value(0.2f)
+					[
+						SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(0)[ OutlinerColumn ]
+					]
+				+ SSplitter::Slot().Value(0.8f)
+					[
+						SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(0)[ TrackAreaColumn ]
+					]
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
+			[
+				EventDetailsView.IsValid() ? EventDetailsView->GetWidget().ToSharedRef() : SNullWidget::NullWidget
+			]
+		]
+	];
 
 	Rebuild();
 }
@@ -1099,23 +1185,24 @@ float SKzDialogueTimeline::GetAudioTimeOffset() const
 	return 0.0f;
 }
 
-TSharedPtr<FKzWaveformPreview> SKzDialogueTimeline::GetWaveformPreview()
+bool SKzDialogueTimeline::RefreshWaveformPreview()
 {
 	// Only a direct USoundWave is drawable (a SoundCue / MetaSound wrapper has no single waveform).
 	USoundWave* Wave = Cast<USoundWave>(ResolveLineAudio());
 	if (!Wave)
 	{
+		const bool bHadPreview = WaveformPreview.IsValid();
 		WaveformPreview.Reset();
-		return nullptr;
+		return bHadPreview;
 	}
 
-	// Recompute the envelope only when the wave changes; cached across rebuilds (filter typing,
-	// expand toggle, etc.) so a keystroke doesn't re-decode the audio.
+	// Decoding is not free: rebuild the envelope only when the wave changes.
 	if (!WaveformPreview.IsValid() || WaveformPreview->Wave.Get() != Wave)
 	{
 		WaveformPreview = KzBuildWaveformPreview(Wave);
+		return true;
 	}
-	return WaveformPreview;
+	return false;
 }
 
 void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
@@ -1149,13 +1236,11 @@ void SKzDialogueTimeline::Tick(const FGeometry& AllottedGeometry, const double I
 		}
 	}
 
-	// Refresh when the line's drawable wave changes (set / swapped / cleared); the audio is edited
-	// elsewhere in the asset editor, so the timeline isn't otherwise told to rebuild.
-	USoundWave* CurWave = Cast<USoundWave>(ResolveLineAudio());
-	USoundWave* CachedWave = WaveformPreview.IsValid() ? WaveformPreview->Wave.Get() : nullptr;
-	if (CurWave != CachedWave)
+	// The line's audio is edited elsewhere in the asset editor (set / swapped / cleared), so the
+	// timeline polls it; the waveform band reads the cached envelope and its row height follows.
+	if (RefreshWaveformPreview())
 	{
-		Rebuild();
+		Invalidate(EInvalidateWidgetReason::Layout);
 	}
 
 	// Advance the preview playhead while playing.
@@ -1311,156 +1396,61 @@ FReply SKzDialogueTimeline::OnKeyDown(const FGeometry& MyGeometry, const FKeyEve
 
 void SKzDialogueTimeline::Rebuild()
 {
-	UKzDialogueTimeline* T = Timeline.Get();
-
-	// Two synchronized columns, like the AnimMontage notify panel: the left outliner (filter,
-	// the "Notifies" group, one row per track) and the right track area (ruler, a group band,
-	// one painted track per row). Matching row heights keep the columns aligned.
-	TSharedRef<SVerticalBox> OutlinerColumn = SNew(SVerticalBox);
-	TSharedRef<SVerticalBox> TrackAreaColumn = SNew(SVerticalBox);
-
-	// Row 0: outliner filter | ruler.
-	OutlinerColumn->AddSlot().AutoHeight()
-	[
-		SNew(SBox).HeightOverride(HeaderRowHeight).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f))
-		[
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-			[
-				SNew(SSearchBox)
-					.HintText(LOCTEXT("FilterTracksHint", "Filter"))
-					// Seed from FilterText so the active filter survives the Rebuild that each
-					// keystroke triggers; otherwise the box comes up empty while the filter stays
-					// applied, and there is no text left to clear to revert it.
-					.InitialText(FilterText)
-					.OnTextChanged_Lambda([this](const FText& InText) { FilterText = InText; Rebuild(); })
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2, 0, 0, 0)
-			[
-				SNew(SButton)
-					.ToolTipText(LOCTEXT("ResetZoomTip", "Reset zoom (show the whole line)"))
-					.ContentPadding(FMargin(4.f, 1.f))
-					.OnClicked_Lambda([this]() { ViewStart = 0.f; ViewEnd = 0.f; Invalidate(EInvalidateWidgetReason::Paint); return FReply::Handled(); })
-					[
-						SNew(STextBlock).Text(LOCTEXT("ResetZoom", "Fit")).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					]
-			]
-		]
-	];
-	TrackAreaColumn->AddSlot().AutoHeight()
-	[
-		SNew(SBox).HeightOverride(HeaderRowHeight)[ BuildRuler() ]
-	];
-
-	// Playback row, above the "Notifies" row so that row keeps its compact label height: the
-	// transport (right-justified) in the outliner column, the line's audio waveform on the right.
-	TSharedPtr<FKzWaveformPreview> Preview = GetWaveformPreview();
-	const bool bHasWaveform = Preview.IsValid() && Preview->Peaks.Num() > 0;
-	const float WaveRowHeight = bHasWaveform ? WaveformBandHeight : HeaderRowHeight;
-
-	OutlinerColumn->AddSlot().AutoHeight()
-	[
-		SNew(SBox).HeightOverride(WaveRowHeight).HAlign(HAlign_Center).VAlign(VAlign_Center).Padding(FMargin(2.f, 0.f)).Clipping(EWidgetClipping::ClipToBounds)
-		[
-			// Time readout next to the transport, centered in the cell. Clipped so it never spills
-			// past the outliner column into the track area when the column is narrow.
-			SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 6, 0)
-			[
-				SNew(STextBlock)
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-					.Text_Lambda([this]() { return FText::FromString(FString::Printf(TEXT("%.2f / %.2f s"), PlayheadTime, Duration())); })
-			]
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-			[
-				BuildTransportControl()
-			]
-		]
-	];
-	TrackAreaColumn->AddSlot().AutoHeight()
-	[
-		SNew(SBox).HeightOverride(WaveRowHeight)
-		[
-			// Waveform band: grid / bounds / selection / playhead plus the line's audio waveform.
-			SNew(SKzTimelineTrack)
-				.Timeline(Timeline)
-				.TrackIndex(INDEX_NONE)
-				.Waveform(Preview)
-				.Duration_Lambda([this]() { return Duration(); })
-				.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); })
-				.ViewStart_Lambda([this]() { return GetViewStart(); })
-				.ViewEnd_Lambda([this]() { return GetViewEnd(); })
-				.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
-				.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
-				.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
-				.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
-				.Playhead_Lambda([this]() { return GetPlayheadTime(); })
-		]
-	];
-
-	// "Notifies" group header | decorative band, compact (the waveform now lives in the row above).
-	OutlinerColumn->AddSlot().AutoHeight()[ BuildNotifiesHeaderRow(HeaderRowHeight) ];
-	TrackAreaColumn->AddSlot().AutoHeight()
-	[
-		SNew(SBox).HeightOverride(HeaderRowHeight)
-		[
-			SNew(SKzTimelineTrack)
-				.Timeline(Timeline)
-				.TrackIndex(INDEX_NONE)
-				.Duration_Lambda([this]() { return Duration(); })
-				.ViewStart_Lambda([this]() { return GetViewStart(); })
-				.ViewEnd_Lambda([this]() { return GetViewEnd(); })
-				.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
-				.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
-				.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
-				.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
-				.Playhead_Lambda([this]() { return GetPlayheadTime(); })
-		]
-	];
+	OutlinerTracks->ClearChildren();
+	TrackAreaTracks->ClearChildren();
 
 	// One row per (filtered) track, when the group is expanded.
+	UKzDialogueTimeline* T = Timeline.Get();
 	if (T && bNotifiesExpanded)
 	{
 		for (int32 i = 0; i < T->Tracks.Num(); ++i)
 		{
 			if (!PassesFilter(T->Tracks[i].Name)) { continue; }
-			OutlinerColumn->AddSlot().AutoHeight()[ BuildOutlinerTrackRow(i) ];
-			TrackAreaColumn->AddSlot().AutoHeight()[ BuildTrackAreaRow(i) ];
+			OutlinerTracks->AddSlot().AutoHeight()[ BuildOutlinerTrackRow(i) ];
+			TrackAreaTracks->AddSlot().AutoHeight()[ BuildTrackAreaRow(i) ];
 		}
 	}
 
 	SyncEventDetails();
+}
 
-	ChildSlot
-	[
-		SNew(SBorder)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.Padding(4)
-		[
-			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight()
-			[
-				SNew(SSplitter)
-					.Orientation(Orient_Horizontal)
-				+ SSplitter::Slot()
-					.Value(MakeAttributeLambda([this]() { return ColumnFillCoefficients[0]; }))
-					.OnSlotResized(SSplitter::FOnSlotResized::CreateLambda([this](float V) { ColumnFillCoefficients[0] = V; ColumnFillCoefficients[1] = 1.f - V; }))
-					[
-						SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(0)[ OutlinerColumn ]
-					]
-				+ SSplitter::Slot()
-					.Value(MakeAttributeLambda([this]() { return ColumnFillCoefficients[1]; }))
-					.OnSlotResized(SSplitter::FOnSlotResized::CreateLambda([this](float V) { ColumnFillCoefficients[1] = V; ColumnFillCoefficients[0] = 1.f - V; }))
-					[
-						SNew(SBorder).BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder")).Padding(0)[ TrackAreaColumn ]
-					]
-			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)
-			[
-				EventDetailsView.IsValid() ? EventDetailsView->GetWidget().ToSharedRef() : SNullWidget::NullWidget
-			]
-		]
-	];
+TSharedRef<SWidget> SKzDialogueTimeline::MakeLane(int32 TrackIndex, bool bWithWaveform)
+{
+	// Every lane shows the view, bounds, selection lines and playhead; only a real track takes edits.
+	SKzTimelineTrack::FArguments Args;
+	Args.Timeline(Timeline)
+		.TrackIndex(TrackIndex)
+		.Duration_Lambda([this]() { return Duration(); })
+		.ViewStart_Lambda([this]() { return GetViewStart(); })
+		.ViewEnd_Lambda([this]() { return GetViewEnd(); })
+		.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
+		.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
+		.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
+		.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
+		.Playhead_Lambda([this]() { return GetPlayheadTime(); });
+
+	if (bWithWaveform)
+	{
+		Args.Waveform_Lambda([this]() { return WaveformPreview; })
+			.AudioTimeOffset_Lambda([this]() { return GetAudioTimeOffset(); });
+	}
+
+	if (TrackIndex != INDEX_NONE)
+	{
+		Args.LineAudio_Lambda([this]() { return ResolveLineAudio(); })
+			.SelectedEvent_Lambda([this, TrackIndex]() { return (TrackIndex == SelTrack) ? SelEvent : INDEX_NONE; })
+			.OnSelect_Lambda([this, TrackIndex](int32 EventIndex) { SetSelection(TrackIndex, EventIndex); })
+			.OnBeginRetime_Lambda([this]() { BeginRetime(); })
+			.OnRetime_Lambda([this, TrackIndex](int32 EventIndex, float StartSeconds, float EndSeconds) { RetimeEvent(TrackIndex, EventIndex, StartSeconds, EndSeconds); })
+			.OnEndRetime_Lambda([this]() { EndRetime(); })
+			.OnInteractionEnd_Lambda([this]() { Rebuild(); })
+			.OnBuildAddMenu_Lambda([this, TrackIndex](float TimeSeconds) { return MakeAddMenuForTrack(TrackIndex, TimeSeconds); })
+			.OnBuildEventMenu_Lambda([this, TrackIndex](int32 EventIndex) { return MakeEventMenuForTrack(TrackIndex, EventIndex); })
+			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 ToTrack) { MoveEventToTrack(TrackIndex, EventIndex, ToTrack); })
+			.OnActivateEvent_Lambda([this, TrackIndex](int32 EventIndex) { OpenEventNotifyAsset(TrackIndex, EventIndex); });
+	}
+
+	return SArgumentNew(Args, SKzTimelineTrack);
 }
 
 TSharedRef<SWidget> SKzDialogueTimeline::BuildRuler()
@@ -1551,31 +1541,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::BuildTrackAreaRow(int32 TrackIndex)
 {
 	// No wrapping border here: the track paints its own background and must share the ruler's
 	// exact left edge and width so markers line up with the ticks.
-	return SNew(SBox).HeightOverride(RowHeight)
-	[
-		SNew(SKzTimelineTrack)
-			.Timeline(Timeline)
-			.TrackIndex(TrackIndex)
-			.Duration_Lambda([this]() { return Duration(); })
-			.LineAudio_Lambda([this]() { return ResolveLineAudio(); })
-			.ViewStart_Lambda([this]() { return GetViewStart(); })
-			.ViewEnd_Lambda([this]() { return GetViewEnd(); })
-			.SelectionStart_Lambda([this]() { return GetSelectionStart(); })
-			.SelectionEnd_Lambda([this]() { return GetSelectionEnd(); })
-			.SelectedEvent_Lambda([this, TrackIndex]() { return (TrackIndex == SelTrack) ? SelEvent : INDEX_NONE; })
-			.OnSelect_Lambda([this, TrackIndex](int32 EventIndex) { SetSelection(TrackIndex, EventIndex); })
-			.OnBeginRetime_Lambda([this]() { BeginRetime(); })
-			.OnRetime_Lambda([this, TrackIndex](int32 EventIndex, float StartSeconds, float EndSeconds) { RetimeEvent(TrackIndex, EventIndex, StartSeconds, EndSeconds); })
-			.OnEndRetime_Lambda([this]() { EndRetime(); })
-			.OnInteractionEnd_Lambda([this]() { Rebuild(); })
-			.OnBuildAddMenu_Lambda([this, TrackIndex](float TimeSeconds) { return MakeAddMenuForTrack(TrackIndex, TimeSeconds); })
-			.OnBuildEventMenu_Lambda([this, TrackIndex](int32 EventIndex) { return MakeEventMenuForTrack(TrackIndex, EventIndex); })
-			.OnZoom_Lambda([this](float CursorSeconds, float WheelDelta, bool bPan) { ZoomView(CursorSeconds, WheelDelta, bPan); })
-			.OnPan_Lambda([this](float DeltaSeconds) { PanView(DeltaSeconds); })
-			.OnMoveToTrack_Lambda([this, TrackIndex](int32 EventIndex, int32 ToTrack) { MoveEventToTrack(TrackIndex, EventIndex, ToTrack); })
-			.OnActivateEvent_Lambda([this, TrackIndex](int32 EventIndex) { OpenEventNotifyAsset(TrackIndex, EventIndex); })
-			.Playhead_Lambda([this]() { return GetPlayheadTime(); })
-	];
+	return SNew(SBox).HeightOverride(RowHeight)[ MakeLane(TrackIndex) ];
 }
 
 void SKzDialogueTimeline::OpenEventNotifyAsset(int32 TrackIndex, int32 EventIndex)

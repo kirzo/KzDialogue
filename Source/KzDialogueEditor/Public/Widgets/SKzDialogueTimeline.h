@@ -15,6 +15,7 @@ class UAudioComponent;
 class FScopedTransaction;
 class IStructureDetailsView;
 class FStructOnScope;
+class SVerticalBox;
 struct FKzDialogueNotifyEvent;
 struct FPropertyChangedEvent;
 struct FKzWaveformPreview;
@@ -58,7 +59,11 @@ public:
 	static void RequestNotifySelection(const FGuid& OwningLineId, int32 TrackIndex, int32 EventIndex);
 
 private:
+	/** Refills the track rows; the rest of the layout is built once in Construct. */
 	void Rebuild();
+
+	/** One painted lane: INDEX_NONE gives the decorative bands (the waveform one with bWithWaveform), a track index an editable track. */
+	TSharedRef<SWidget> MakeLane(int32 TrackIndex, bool bWithWaveform = false);
 
 	TSharedRef<SWidget> BuildRuler();
 	TSharedRef<SWidget> BuildNotifiesHeaderRow(float RowHeightOverride);
@@ -110,8 +115,8 @@ private:
 
 	void Modified();
 
-	/** Resolve + cache the line's audio waveform envelope for the group band; null if no drawable wave. */
-	TSharedPtr<FKzWaveformPreview> GetWaveformPreview();
+	/** Re-reads the line's drawable wave into WaveformPreview (null without one). True when it changed. */
+	bool RefreshWaveformPreview();
 
 	/** The line's audio (USoundBase) for the editor preview; null if none. */
 	USoundBase* ResolveLineAudio() const;
@@ -144,8 +149,9 @@ private:
 	float ViewStart = 0.f;
 	float ViewEnd = 0.f;
 
-	/** Splitter fill weights for the outliner / track-area columns, kept across rebuilds. */
-	float ColumnFillCoefficients[2] = { 0.2f, 0.8f };
+	/** The per-track rows of the outliner and track-area columns, the only part Rebuild refills. */
+	TSharedPtr<SVerticalBox> OutlinerTracks;
+	TSharedPtr<SVerticalBox> TrackAreaTracks;
 
 	/** Open while a marker is being dragged so the whole retime is one undo transaction. */
 	TUniquePtr<FScopedTransaction> DragTransaction;
