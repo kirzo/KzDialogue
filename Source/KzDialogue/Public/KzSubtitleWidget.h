@@ -235,7 +235,7 @@ protected:
 
 	/**
 	 * Snap this channel's subtitle to its hidden baseline (e.g. SetRenderOpacity(0) on the subtitle root).
-	 * Fired on a hard cancel (preemption / Abort / Interrupt) or mute mid-fade, before On Hide — UMG's
+	 * Fired on a hard cancel (preemption / Abort / Interrupt) or mute mid-fade, before On Hide: UMG's
 	 * StopAnimation only rewinds deferred (and a fade-out rewinds to Opacity 1), so zero it here directly.
 	 */
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Reset Channel Visual"))
@@ -287,6 +287,12 @@ private:
 
 	/** Apply line text to the given view's widgets (handling affix rules etc.). */
 	void ApplyLineToView(const FKzSubtitleChannelView& View, const FKzDialogueLine& Line, FGameplayTag Channel);
+
+	/** The speaker's subtitle name with the active culture's affix rules. */
+	FText MakeSpeakerLabel(const FKzDialogueLine& Line) const;
+
+	/** The line text is a live FText and retranslates itself; the composed speaker label is rebuilt here. */
+	void HandleCultureChanged();
 
 	/** Speaker formatting rules for the active culture: the per-culture override when one matches the culture priority chain, SpeakerFormattingRules otherwise. */
 	const TArray<FKzSpeakerAffixRule>& GetActiveSpeakerFormattingRules() const;

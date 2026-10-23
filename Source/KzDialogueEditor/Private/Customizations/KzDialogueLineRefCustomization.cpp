@@ -40,6 +40,10 @@ void FKzDialogueLineRefCustomization::CustomizeHeader(TSharedRef<IPropertyHandle
 	// in FKzDialogueLineRef.
 	AssetHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLineRef, Asset));
 	LineIdHandle = StructPropertyHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLineRef, LineId));
+	if (AssetHandle.IsValid())
+	{
+		AssetHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateSP(this, &FKzDialogueLineRefCustomization::ClearStaleLineId));
+	}
 
 	HeaderRow
 		.NameContent()
@@ -64,14 +68,14 @@ void FKzDialogueLineRefCustomization::CustomizeChildren(TSharedRef<IPropertyHand
 	IDetailChildrenBuilder& StructBuilder,
 	IPropertyTypeCustomizationUtils& /*StructCustomizationUtils*/)
 {
-	// Row 1 — Asset (use the property's default editor: handles soft references,
+	// Row 1: Asset (use the property's default editor: handles soft references,
 	// browse-to / clear / use-selected buttons, etc.).
 	if (AssetHandle.IsValid())
 	{
 		StructBuilder.AddProperty(AssetHandle.ToSharedRef());
 	}
 
-	// Row 2 — Line / Alias (custom dropdown).
+	// Row 2: Line / Alias (custom dropdown).
 	StructBuilder.AddCustomRow(LOCTEXT("LineRowFilter", "Line Alias"))
 		.NameContent()
 		[
@@ -134,6 +138,19 @@ void FKzDialogueLineRefCustomization::OnEntryPicked(FKzDialogueAssetReference In
 // =======================================================================================
 // Helpers
 // =======================================================================================
+
+void FKzDialogueLineRefCustomization::ClearStaleLineId()
+{
+	FString IdString;
+	FGuid Id;
+	if (!LineIdHandle.IsValid() || LineIdHandle->GetValueAsFormattedString(IdString) != FPropertyAccess::Success || !FGuid::Parse(IdString, Id) || !Id.IsValid()) { return; }
+
+	const UKzDialogueAsset* Asset = GetCurrentAsset();
+	if (!Asset || (!Asset->FindLine(Id) && !Asset->FindAlias(Id)))
+	{
+		LineIdHandle->SetValueFromFormattedString(FGuid().ToString(EGuidFormats::Digits));
+	}
+}
 
 bool FKzDialogueLineRefCustomization::IsDropdownEnabled() const
 {

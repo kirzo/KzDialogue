@@ -154,3 +154,13 @@ public:
 private:
 	void ValidateSpeakerAsset(const class UKzSpeakerAsset* Speaker, TArray<FKzValidationIssue>& OutIssues) const;
 };
+
+/** Dialogue, speaker and word assets sharing an AssetId (a file copied outside the editor): both write their texts into the same localization namespace. */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_DuplicateAssetId : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};

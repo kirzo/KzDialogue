@@ -18,6 +18,7 @@ void UKzSubtitleWidget::NativeConstruct()
 	// RTL cultures (ar, he, fa, ur) mirror the whole subtitle layout automatically: alignments,
 	// box flow, speaker label side. Opted in here, on the root, so subclasses cannot forget it.
 	SetFlowDirectionPreference(EFlowDirectionPreference::Culture);
+	FInternationalization::Get().OnCultureChanged().AddUObject(this, &UKzSubtitleWidget::HandleCultureChanged);
 
 	BindFromListenedChannels();
 }
@@ -32,6 +33,7 @@ void UKzSubtitleWidget::NativeDestruct()
 		}
 	}
 
+	FInternationalization::Get().OnCultureChanged().RemoveAll(this);
 	UnbindAllPlayers();
 	Super::NativeDestruct();
 }
@@ -521,22 +523,7 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	}
 	else if (View.SpeakerText)
 	{
-		FString FinalSpeakerName = Line.Speaker.GetSubtitleName(this).ToString();
-
-		for (const FKzSpeakerAffixRule& Rule : GetActiveSpeakerFormattingRules())
-		{
-			const FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
-			if (Rule.Position == EKzSpeakerAffixPosition::Prefix)
-			{
-				FinalSpeakerName = Rule.AffixText + SpaceStr + FinalSpeakerName;
-			}
-			else if (Rule.Position == EKzSpeakerAffixPosition::Suffix)
-			{
-				FinalSpeakerName = FinalSpeakerName + SpaceStr + Rule.AffixText;
-			}
-		}
-
-		View.SpeakerText->SetText(FText::FromString(FinalSpeakerName));
+		View.SpeakerText->SetText(MakeSpeakerLabel(Line));
 	}
 
 	if (View.SubtitlesText)
@@ -546,6 +533,44 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	}
 
 	ReceiveSetupLine(Channel, Line);
+}
+
+FText UKzSubtitleWidget::MakeSpeakerLabel(const FKzDialogueLine& Line) const
+{
+	FString Label = Line.Speaker.GetSubtitleName(this).ToString();
+	for (const FKzSpeakerAffixRule& Rule : GetActiveSpeakerFormattingRules())
+	{
+		const FString SpaceStr = Rule.bAddSpace ? TEXT(" ") : TEXT("");
+		if (Rule.Position == EKzSpeakerAffixPosition::Prefix)
+		{
+			Label = Rule.AffixText + SpaceStr + Label;
+		}
+		else if (Rule.Position == EKzSpeakerAffixPosition::Suffix)
+		{
+			Label = Label + SpaceStr + Rule.AffixText;
+		}
+	}
+	return FText::FromString(Label);
+}
+
+void UKzSubtitleWidget::HandleCultureChanged()
+{
+	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
+	{
+		const UKzDialoguePlayer* Player = Weak.Get();
+		if (!Player || IsPlayerMuted(Player)) { continue; }
+
+		// The states where the view shows a line, as in SyncViewToPlayer.
+		const EKzDialogueState State = Player->GetState();
+		if (State != EKzDialogueState::LineEntering && State != EKzDialogueState::LinePlaying && State != EKzDialogueState::LineExiting && State != EKzDialogueState::Paused) { continue; }
+
+		const FKzDialogueLine Line = Player->GetCurrentLine();
+		const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
+		if (View.SpeakerText && Line.Speaker.IsValid())
+		{
+			View.SpeakerText->SetText(MakeSpeakerLabel(Line));
+		}
+	}
 }
 
 const TArray<FKzSpeakerAffixRule>& UKzSubtitleWidget::GetActiveSpeakerFormattingRules() const

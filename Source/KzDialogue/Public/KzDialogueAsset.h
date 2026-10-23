@@ -24,7 +24,7 @@ public:
 	UKzDialogueAsset();
 
 	/** Stable identifier used as the localization namespace suffix for this asset's FTexts. Generated once on creation and preserved across renames. */
-	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue")
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue", AssetRegistrySearchable)
 	FGuid AssetId;
 
 	/** Production-facing label shown by tooling (dialogue dashboard) instead of the asset name. Plain string on purpose: an internal label that must not enter the localization gather. */
@@ -111,7 +111,7 @@ public:
 	bool TryGetAliasById(const FGuid& AliasId, FKzDialogueAlias& OutAlias) const;
 
 	/**
-	 * Resolve an alias to one of its lines (random pick).
+	 * Resolve an alias to one of its lines, picked at random: SelectionMode and the cooldown live in the subsystem.
 	 * Returns false if the alias is unknown, empty, or all referenced LineIds are stale.
 	 */
 	bool TryResolveAlias(const FGuid& AliasId, FKzDialogueLine& OutLine) const;

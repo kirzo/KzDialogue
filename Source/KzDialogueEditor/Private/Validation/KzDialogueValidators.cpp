@@ -6,6 +6,7 @@
 #include "KzDialogueNotify.h"
 #include "KzNamedAsset.h"
 #include "KzSpeakerAsset.h"
+#include "KzWordAsset.h"
 #include "Localization/KzL10N.h"
 #include "Widgets/SKzDialogueTimeline.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -770,4 +771,44 @@ void UKzDialogueValidator_NamedAsset::ValidateSpeakerAsset(const UKzSpeakerAsset
 	}
 }
 
+// =======================================================================================
+// Identity validator
+// =======================================================================================
+
+namespace
+{
+	FGuid GetLocalizationAssetId(const UObject* Asset)
+	{
+		if (const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Asset)) { return Dialogue->AssetId; }
+		if (const UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Asset)) { return Speaker->AssetId; }
+		if (const UKzWordAsset* Word = Cast<UKzWordAsset>(Asset)) { return Word->AssetId; }
+		return FGuid();
+	}
+}
+
+bool UKzDialogueValidator_DuplicateAssetId::CanValidate_Implementation(const UObject* Asset) const
+{
+	return GetLocalizationAssetId(Asset).IsValid();
+}
+
+void UKzDialogueValidator_DuplicateAssetId::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	const FGuid AssetId = GetLocalizationAssetId(Asset);
+
+	// Packages saved before AssetId became a registry tag carry none and are not compared.
+	TArray<FAssetData> Others;
+	IAssetRegistry::GetChecked().GetAssetsByClass(Asset->GetClass()->GetClassPathName(), Others);
+	for (const FAssetData& Other : Others)
+	{
+		FString OtherIdString;
+		FGuid OtherId;
+		if (Other.ToSoftObjectPath() != FSoftObjectPath(Asset) && Other.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzDialogueAsset, AssetId), OtherIdString)
+			&& FGuid::Parse(OtherIdString, OtherId) && OtherId == AssetId)
+		{
+			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error,
+				FText::Format(LOCTEXT("DuplicateAssetId", "AssetId is shared with {0}, a copy made outside the editor: both write their texts into the same localization namespace. Delete the copy and duplicate the original inside the editor, which gives it a fresh identity."), FText::FromString(Other.GetObjectPathString())),
+				GetValidatorId()));
+		}
+	}
+}
 #undef LOCTEXT_NAMESPACE

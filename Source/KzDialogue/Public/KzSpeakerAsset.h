@@ -27,7 +27,7 @@ class KZDIALOGUE_API UKzSpeakerAsset : public UKzNamedAsset
 
 public:
 	/** Stable identifier used as the localization namespace suffix ("KzSpeaker.<AssetId>"). Generated once on creation and preserved across renames. */
-	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Speaker")
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Speaker", AssetRegistrySearchable)
 	FGuid AssetId;
 
 	/** Simple display name. When set it is used as-is and the structured parts are ignored. Always direct text: a character's name is its own. */
@@ -62,6 +62,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText NickName;
 
+#if WITH_EDITORONLY_DATA
 	/** CRC32 of DisplayName's source string. Updated automatically; used to detect translation drift. */
 	UPROPERTY()
 	uint32 SourceDisplayNameHash = 0;
@@ -89,6 +90,7 @@ public:
 	/** CRC32 of NickName's source string. Same role as SourceDisplayNameHash. */
 	UPROPERTY()
 	uint32 SourceNickNameHash = 0;
+#endif
 
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
@@ -97,18 +99,18 @@ public:
 	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. bWithFamily covers both surname components. Overridden atoms flow into the composition. */
 	FText ComposeStructuredName(bool bWithHonorific, bool bWithQualifier, bool bWithFamily = true, const FKzNamedTokenOverride* Overrides = nullptr) const;
 
-	/** Calls Func(Key, Text, SourceHash, WordText) for every localizable name field; Key is its stable localization key, WordText is null for DisplayName. */
-	template <typename FuncType>
-	void ForEachLocalizedField(FuncType&& Func) { VisitLocalizedFields(*this, Func); }
-	template <typename FuncType>
-	void ForEachLocalizedField(FuncType&& Func) const { VisitLocalizedFields(*this, Func); }
-
 	//~ UKzNamedAsset: parts are given / family / family2 / nick / honorific / qualifier / gender / display / fullname (structured composition even when DisplayName is set) / no-honorific / no-qualifier / no-family (composition without either surname: "Teen Kirzo"); None or unknown = GetResolvedDisplayName.
 	virtual FText ResolveName(FName Part, const FKzNamedTokenOverride* Overrides) const override;
 
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 #if WITH_EDITOR
+	/** Calls Func(Key, Text, SourceHash, WordText) for every localizable name field; Key is its stable localization key, WordText is null for DisplayName. */
+	template <typename FuncType>
+	void ForEachLocalizedField(FuncType&& Func) { VisitLocalizedFields(*this, Func); }
+	template <typename FuncType>
+	void ForEachLocalizedField(FuncType&& Func) const { VisitLocalizedFields(*this, Func); }
+
 	virtual TArray<FName> GetNameParts() const override;
 	virtual TArray<FName> GetOverridablePartNames() const override;
 	virtual FText GetNamePartDescription(FName Part) const override;
@@ -123,9 +125,7 @@ private:
 
 	/** Re-anchor every localizable FText to its stable GUID-derived (Namespace, Key). True when a text changed. */
 	bool RebindFTextKeys();
-#endif
 
-private:
 	template <typename SelfType, typename FuncType>
 	static void VisitLocalizedFields(SelfType& Self, FuncType& Func)
 	{
@@ -137,4 +137,5 @@ private:
 		Func(TEXT("Qualifier"), Self.Qualifier.Text, Self.SourceQualifierHash, &Self.Qualifier);
 		Func(TEXT("NickName"), Self.NickName.Text, Self.SourceNickNameHash, &Self.NickName);
 	}
+#endif
 };

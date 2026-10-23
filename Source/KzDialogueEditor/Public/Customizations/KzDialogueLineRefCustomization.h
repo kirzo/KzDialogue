@@ -16,8 +16,8 @@ class IDetailChildrenBuilder;
  * Property customization for FKzDialogueLineRef.
  *
  * Renders the struct as two rows in the details panel:
- *   1. "Asset" — a standard soft-object picker.
- *   2. "Line / Alias" — a custom dropdown that opens SKzDialogueLinePicker scoped to
+ *   1. "Asset": a standard soft-object picker.
+ *   2. "Line / Alias": a custom dropdown that opens SKzDialogueLinePicker scoped to
  *      the currently selected asset. Shows the resolved label as button text.
  *
  * The header row shows a compact summary "(speaker) text..." so users can see at a
@@ -43,6 +43,9 @@ private:
 
 	/** Apply a picked entry to the LineId property handle. */
 	void OnEntryPicked(struct FKzDialogueAssetReference InRef, float DefaultDuration);
+
+	/** After an asset change: clears the id when the new asset has no such entry, as the K2 nodes do. */
+	void ClearStaleLineId();
 
 	/** Whether the dropdown should be enabled (asset has a valid value). */
 	bool IsDropdownEnabled() const;
