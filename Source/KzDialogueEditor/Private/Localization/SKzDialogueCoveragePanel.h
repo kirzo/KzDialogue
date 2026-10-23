@@ -7,6 +7,7 @@
 
 class UKzDialogueAsset;
 class SVerticalBox;
+enum class EKzTranslationState : uint8;
 
 /**
  * Per-culture localization status of a set of dialogue assets. Shared by the asset editor's
@@ -127,13 +128,43 @@ private:
 		TArray<FLineRow> Lines;
 	};
 
+	/** One progress bar of a culture card. */
+	struct FProgressBar
+	{
+		FText Label;
+		int32 Done = 0;
+		int32 Total = 0;
+		int32 Stale = 0;
+		int32 PendingWords = 0;
+	};
+
+	/** One culture card: BuildCards fills it from the assets and archives, Render turns it into widgets. */
+	struct FCultureCard
+	{
+		FText Title;
+		FString Culture;
+		/** Prefix of the card's expansion and audition keys: "native" or the culture. */
+		FString KeyPrefix;
+		TArray<FProgressBar> Bars;
+		TArray<FAssetLines> Groups;
+	};
+
 	/** Translation editors in build (visual) order, keyed "<culture>|<namespace>|<key>"; rebuilt every Refresh. */
 	TArray<TPair<FString, TWeakPtr<class SEditableText>>> TranslationEditors;
 
 	/** Set by the Tab handler right before it forces the commit, so that commit advances the focus like Enter. */
 	bool bAdvanceTranslationFocus = false;
 
+	/** BuildCards, then Render. */
 	void Refresh();
+
+	/** The cards the current filters show. OutMessage says what is missing instead (no assets, no target, no foreign culture). */
+	TArray<FCultureCard> BuildCards(FText& OutMessage);
+
+	void Render(TArray<FCultureCard> Cards, const FText& Message);
+
+	/** The chip of a text's translation state: ok, stale or text (missing); anything but ok marks the row pending. */
+	static void FillTextState(FLineRow& Row, EKzTranslationState State);
 
 	/**
 	 * Coalesces refreshes into one on the next tick: edits arrive mid-change (an asset's PostEditChange
@@ -184,7 +215,7 @@ private:
 	void MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId, FString Source, TArray<TPair<FString, FString>> Identities);
 
 	/** One culture's card: header, progress bars and its areas, whose bodies are built on first expansion. */
-	TSharedRef<SWidget> MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, TArray<FAssetLines> Groups, const FString& AudioKeyPrefix, const FString& CardCulture);
+	TSharedRef<SWidget> MakeCultureCard(FCultureCard Card);
 
 	/** Runs Compile Text for one culture: only its .locres changes (the card header's package icon). */
 	void CompileCulture(const FString& Culture);

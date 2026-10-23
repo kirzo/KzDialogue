@@ -73,6 +73,13 @@ namespace
 		return Value;
 	}
 
+	/** The archive keeps the source each translation was made against, so the diff shows exactly what changed since. */
+	FText MakeStaleDiffTip(const FString& TranslatedAgainst, const FString& Current, const FString& Translation)
+	{
+		return FText::Format(LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
+			FText::FromString(TranslatedAgainst), FText::FromString(Current), FText::FromString(Translation));
+	}
+
 	/** An area body built the first time it is shown, so a collapsed area costs nothing. */
 	struct FKzLazyBody
 	{
@@ -291,10 +298,25 @@ void SKzDialogueCoveragePanel::SavePersistedFilter(const TCHAR* Key, bool bValue
 void SKzDialogueCoveragePanel::Refresh()
 {
 	bRefreshPending = false;
+	FText Message;
+	TArray<FCultureCard> Cards = BuildCards(Message);
+	Render(MoveTemp(Cards), Message);
+}
+
+void SKzDialogueCoveragePanel::Render(TArray<FCultureCard> Cards, const FText& Message)
+{
 	Rows->ClearChildren();
 	TranslationEditors.Reset();
 
-	auto AddMessage = [this](const FText& Message)
+	for (FCultureCard& Card : Cards)
+	{
+		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
+		[
+			MakeCultureCard(MoveTemp(Card))
+		];
+	}
+
+	if (!Message.IsEmpty())
 	{
 		Rows->AddSlot().AutoHeight().Padding(0.0f, 8.0f)
 		[
@@ -303,7 +325,33 @@ void SKzDialogueCoveragePanel::Refresh()
 				.AutoWrapText(true)
 				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 		];
-	};
+	}
+}
+
+void SKzDialogueCoveragePanel::FillTextState(FLineRow& Row, EKzTranslationState State)
+{
+	switch (State)
+	{
+	case EKzTranslationState::Translated:
+		Row.State = LOCTEXT("RowOk", "ok");
+		Row.StateColor = KzDoneColor;
+		break;
+	case EKzTranslationState::Stale:
+		Row.bPending = true;
+		Row.State = LOCTEXT("PendingStale", "stale");
+		Row.StateColor = KzStaleColor;
+		break;
+	default:
+		Row.bPending = true;
+		Row.State = LOCTEXT("PendingMissing", "text");
+		Row.StateColor = KzMissingColor;
+		break;
+	}
+}
+
+TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCards(FText& OutMessage)
+{
+	TArray<FCultureCard> Cards;
 
 	TArray<UKzDialogueAsset*> LiveAssets;
 	for (const TWeakObjectPtr<UKzDialogueAsset>& Asset : Assets)
@@ -312,8 +360,8 @@ void SKzDialogueCoveragePanel::Refresh()
 	}
 	if (LiveAssets.IsEmpty())
 	{
-		AddMessage(LOCTEXT("NoAssets", "No dialogue assets."));
-		return;
+		OutMessage = LOCTEXT("NoAssets", "No dialogue assets.");
+		return Cards;
 	}
 
 	if (!CachedQuery.IsValid())
@@ -322,8 +370,8 @@ void SKzDialogueCoveragePanel::Refresh()
 		FText Error;
 		if (!Loaded->Load(Error))
 		{
-			AddMessage(Error);
-			return;
+			OutMessage = Error;
+			return Cards;
 		}
 		CachedQuery = Loaded;
 	}
@@ -437,21 +485,19 @@ void SKzDialogueCoveragePanel::Refresh()
 
 		if (!(bOnlyIncomplete && PendingCount == 0))
 		{
-			TArray<TSharedRef<SWidget>> Bars;
-			Bars.Add(MakeProgressRow(LOCTEXT("BarRecording", "Recording"), AudioDone, AudioTotal, 0));
-			Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
-			[
-				MakeCultureCard(
-					FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture)),
-					MoveTemp(Bars), MoveTemp(Groups), TEXT("native"), Query.GetTarget().NativeCulture)
-			];
+			FCultureCard& Card = Cards.AddDefaulted_GetRef();
+			Card.Title = FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture));
+			Card.Culture = Query.GetTarget().NativeCulture;
+			Card.KeyPrefix = TEXT("native");
+			Card.Bars.Add({ LOCTEXT("BarRecording", "Recording"), AudioDone, AudioTotal });
+			Card.Groups = MoveTemp(Groups);
 		}
 	}
 
 	if (Query.GetTarget().ForeignCultures.IsEmpty())
 	{
-		AddMessage(LOCTEXT("NoCultures", "The localization target has no foreign cultures."));
-		return;
+		OutMessage = LOCTEXT("NoCultures", "The localization target has no foreign cultures.");
+		return Cards;
 	}
 
 	// Speaker name fields and shared words, the same set the exports ship. Project scope adds
@@ -488,7 +534,7 @@ void SKzDialogueCoveragePanel::Refresh()
 	// With the lines eye off and nothing else to show, the foreign cards have no content.
 	if (!bShowDialogueLines && OtherTexts.IsEmpty())
 	{
-		return;
+		return Cards;
 	}
 
 	for (const FString& Culture : Query.GetTarget().ForeignCultures)
@@ -528,21 +574,18 @@ void SKzDialogueCoveragePanel::Refresh()
 
 				if (!TextFilter.IsEmpty() && !PassesText(Line) && !(bHasEntry && ArchiveTranslation.Contains(TextFilter, ESearchCase::IgnoreCase))) { continue; }
 
-				bool bTextMissing = false;
-				bool bTextStale = false;
+				// A non-localizable line has no text work: its chip only reflects the audio.
+				EKzTranslationState TextState = EKzTranslationState::Translated;
 				bool bTextTooLong = false;
 				bool bAudioMissing = false;
 				FText PendingTooltip;
-				FString RowTranslation;
 				FSoftObjectPath LocalizedAudioPath;
 
 				if (bLocalizable)
 				{
 					++TextTotal;
-
-					if (bHasEntry) { RowTranslation = ArchiveTranslation; }
-
-					switch (Query.GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture))
+					TextState = Query.GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture);
+					switch (TextState)
 					{
 					case EKzTranslationState::Translated:
 						++TextDone;
@@ -557,19 +600,10 @@ void SKzDialogueCoveragePanel::Refresh()
 						break;
 					case EKzTranslationState::Stale:
 						++TextStale;
-						bTextStale = true;
 						PendingWords += CountWords(*Source);
-						// The archive keeps the source each translation was made against, so the
-						// diff shows exactly what changed since then.
-						if (bHasEntry)
-						{
-							PendingTooltip = FText::Format(
-								LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
-								FText::FromString(ArchiveSource), FText::FromString(*Source), FText::FromString(ArchiveTranslation));
-						}
+						if (bHasEntry) { PendingTooltip = MakeStaleDiffTip(ArchiveSource, *Source, ArchiveTranslation); }
 						break;
 					default:
-						bTextMissing = true;
 						PendingWords += CountWords(*Source);
 						break;
 					}
@@ -594,12 +628,11 @@ void SKzDialogueCoveragePanel::Refresh()
 					}
 				}
 
-				// One row per line; the state chip says what exactly is pending, or "ok".
 				FLineRow Row;
 				Row.LineId = Line.LineId;
 				Row.Label = FText::FromString(FlattenLabel(Line.GetDisplayLabel(0).ToString()));
 				Row.Tooltip = PendingTooltip;
-				Row.Translation = FText::FromString(RowTranslation);
+				Row.Translation = FText::FromString(bHasEntry ? ArchiveTranslation : FString());
 				if (Namespace.IsSet() && Key.IsSet() && Source)
 				{
 					Row.TranslationCulture = Culture;
@@ -608,32 +641,23 @@ void SKzDialogueCoveragePanel::Refresh()
 				}
 				Row.AudioPath = LocalizedAudioPath;
 				Row.bCanMakeNonLocalizable = !Line.Text.IsEmpty() && Namespace.IsSet() && Key.IsSet();
-				if (bTextMissing || bTextStale || bTextTooLong || bAudioMissing)
+
+				// One chip per line saying what exactly is pending: the text part, then the audio.
+				FillTextState(Row, TextState);
+				if (bTextTooLong)
 				{
-					++PendingCount;
 					Row.bPending = true;
-					Row.bAudioWork = bAudioMissing;
-
-					const FText TextPart = bTextMissing ? LOCTEXT("PendingMissing", "text")
-						: bTextStale ? LOCTEXT("PendingStale", "stale")
-						: bTextTooLong ? LOCTEXT("PendingTooLong", "too long")
-						: FText::GetEmpty();
-
-					if (!TextPart.IsEmpty() && bAudioMissing)
-					{
-						Row.State = FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), TextPart);
-					}
-					else
-					{
-						Row.State = TextPart.IsEmpty() ? LOCTEXT("PendingAudio", "audio") : TextPart;
-					}
-					Row.StateColor = (bTextMissing || bAudioMissing) ? KzMissingColor : KzStaleColor;
+					Row.State = LOCTEXT("PendingTooLong", "too long");
+					Row.StateColor = KzStaleColor;
 				}
-				else
+				if (bAudioMissing)
 				{
-					Row.State = LOCTEXT("RowOk", "ok");
-					Row.StateColor = KzDoneColor;
+					Row.State = Row.bPending ? FText::Format(LOCTEXT("PendingCombo", "{0} + audio"), Row.State) : LOCTEXT("PendingAudio", "audio");
+					Row.bPending = true;
+					Row.bAudioWork = true;
+					Row.StateColor = KzMissingColor;
 				}
+				if (Row.bPending) { ++PendingCount; }
 				Group.Lines.Add(MoveTemp(Row));
 			}
 		}
@@ -660,34 +684,21 @@ void SKzDialogueCoveragePanel::Refresh()
 			Row.TranslationSource = Text.Source;
 			Row.SourceLocations.Add(Text.Owner->GetPathName());
 
-			switch (Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture))
+			const EKzTranslationState State = Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture);
+			FillTextState(Row, State);
+			if (State == EKzTranslationState::Translated)
 			{
-			case EKzTranslationState::Translated:
 				++TextDone;
-				Row.State = LOCTEXT("RowOk", "ok");
-				Row.StateColor = KzDoneColor;
-				break;
-			case EKzTranslationState::Stale:
+			}
+			else
+			{
+				++PendingCount;
+				PendingWords += CountWords(Text.Source);
+			}
+			if (State == EKzTranslationState::Stale)
+			{
 				++TextStale;
-				++PendingCount;
-				PendingWords += CountWords(Text.Source);
-				Row.bPending = true;
-				Row.State = LOCTEXT("PendingStale", "stale");
-				Row.StateColor = KzStaleColor;
-				if (bHasEntry)
-				{
-					Row.Tooltip = FText::Format(
-						LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
-						FText::FromString(ArchiveSource), FText::FromString(Text.Source), FText::FromString(ArchiveTranslation));
-				}
-				break;
-			default:
-				++PendingCount;
-				PendingWords += CountWords(Text.Source);
-				Row.bPending = true;
-				Row.State = LOCTEXT("PendingMissing", "text");
-				Row.StateColor = KzMissingColor;
-				break;
+				if (bHasEntry) { Row.Tooltip = MakeStaleDiffTip(ArchiveSource, Text.Source, ArchiveTranslation); }
 			}
 
 			if (Row.Tooltip.IsEmpty())
@@ -779,9 +790,7 @@ void SKzDialogueCoveragePanel::Refresh()
 						FString ArchiveTranslation;
 						if (Indices.Num() == 1 && Query.GetArchiveEntry(Text.Namespace, Text.Key, Culture, ArchiveSource, ArchiveTranslation))
 						{
-							SingleStaleTooltip = FText::Format(
-								LOCTEXT("StaleDiffTip", "Translated against:\n{0}\n\nCurrent text:\n{1}\n\nCurrent translation:\n{2}"),
-								FText::FromString(ArchiveSource), FText::FromString(Text.Source), FText::FromString(ArchiveTranslation));
+							SingleStaleTooltip = MakeStaleDiffTip(ArchiveSource, Text.Source, ArchiveTranslation);
 						}
 						break;
 					}
@@ -845,18 +854,12 @@ void SKzDialogueCoveragePanel::Refresh()
 					: FText::Format(LOCTEXT("OtherTextIdentityTip", "{0}\n{1}"), FText::FromString(IdentityList.TrimEnd()), FText::FromString(Source));
 				Row.Tooltip = FText::Format(LOCTEXT("OtherTextAuthoredTip", "{0}\n\nAuthored in:\n{1}\n\nClick: opens where this text is authored."), BaseTip, FText::FromString(AuthoredIn));
 
-				if (GroupMissing > 0 || GroupStale > 0)
+				// The group is as far along as its least done member.
+				FillTextState(Row, GroupMissing > 0 ? EKzTranslationState::Missing : GroupStale > 0 ? EKzTranslationState::Stale : EKzTranslationState::Translated);
+				if (Row.bPending)
 				{
 					++PendingCount;
-					Row.bPending = true;
 					OtherWords += CountWords(Source);
-					Row.State = GroupMissing > 0 ? LOCTEXT("PendingMissing", "text") : LOCTEXT("PendingStale", "stale");
-					Row.StateColor = GroupMissing > 0 ? KzMissingColor : KzStaleColor;
-				}
-				else
-				{
-					Row.State = LOCTEXT("RowOk", "ok");
-					Row.StateColor = KzDoneColor;
 				}
 
 				OtherGroup.Lines.Add(MoveTemp(Row));
@@ -868,31 +871,35 @@ void SKzDialogueCoveragePanel::Refresh()
 			continue;
 		}
 
-		TArray<TSharedRef<SWidget>> Bars;
+		FCultureCard& Card = Cards.AddDefaulted_GetRef();
+		Card.Title = FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture);
+		Card.Culture = Culture;
+		Card.KeyPrefix = Culture;
 		if (bShowDialogueLines)
 		{
-			Bars.Add(MakeProgressRow(LOCTEXT("BarText", "Text"), TextDone, TextTotal, TextStale, PendingWords));
+			Card.Bars.Add({ LOCTEXT("BarText", "Text"), TextDone, TextTotal, TextStale, PendingWords });
 			if (AudioTotal > 0)
 			{
-				Bars.Add(MakeProgressRow(LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal, 0));
+				Card.Bars.Add({ LOCTEXT("BarAudio", "Audio"), AudioDone, AudioTotal });
 			}
 		}
 		if (OtherTotal > 0)
 		{
-			Bars.Add(MakeProgressRow(LOCTEXT("BarOtherTexts", "Other"), OtherDone, OtherTotal, OtherStale, OtherWords));
+			Card.Bars.Add({ LOCTEXT("BarOtherTexts", "Other"), OtherDone, OtherTotal, OtherStale, OtherWords });
 		}
-
-		Rows->AddSlot().AutoHeight().Padding(0.0f, 0.0f, 0.0f, 6.0f)
-		[
-			MakeCultureCard(FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture), MoveTemp(Bars), MoveTemp(Groups), Culture, Culture)
-		];
+		Card.Groups = MoveTemp(Groups);
 	}
+
+	return Cards;
 }
 
-TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title, TArray<TSharedRef<SWidget>> ProgressRows, TArray<FAssetLines> InGroups, const FString& AudioKeyPrefix, const FString& CardCulture)
+TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(FCultureCard Card)
 {
+	const FString AudioKeyPrefix = Card.KeyPrefix;
+	const FString CardCulture = Card.Culture;
+
 	// Shared so the lazily built area bodies can still reach the rows.
-	const TSharedRef<TArray<FAssetLines>> Groups = MakeShared<TArray<FAssetLines>>(MoveTemp(InGroups));
+	const TSharedRef<TArray<FAssetLines>> Groups = MakeShared<TArray<FAssetLines>>(MoveTemp(Card.Groups));
 
 	// Progress (badge + bars) always reflects every line; the ok-filters below only shape the list.
 	int32 PendingCount = 0;
@@ -912,7 +919,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 		[
 			SNew(STextBlock)
-				.Text(Title)
+				.Text(Card.Title)
 				.Font(FAppStyle::GetFontStyle("BoldFont"))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -937,9 +944,9 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeCultureCard(const FText& Title
 		]
 	];
 
-	for (const TSharedRef<SWidget>& Bar : ProgressRows)
+	for (const FProgressBar& Bar : Card.Bars)
 	{
-		Content->AddSlot().AutoHeight().Padding(0.0f, 2.0f)[ Bar ];
+		Content->AddSlot().AutoHeight().Padding(0.0f, 2.0f)[ MakeProgressRow(Bar.Label, Bar.Done, Bar.Total, Bar.Stale, Bar.PendingWords) ];
 	}
 
 	// The ok-filters shape which rows show; the counters above ignore them on purpose.
