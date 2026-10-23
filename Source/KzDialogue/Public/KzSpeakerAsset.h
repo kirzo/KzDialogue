@@ -91,7 +91,7 @@ public:
 	uint32 SourceNickNameHash = 0;
 
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
-	UFUNCTION(BlueprintPure, Category = "Speaker")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
 	FText GetResolvedDisplayName() const;
 
 	/** The structured parts composed with the per-culture format; excluded parts contribute nothing. bWithFamily covers both surname components. Overridden atoms flow into the composition. */

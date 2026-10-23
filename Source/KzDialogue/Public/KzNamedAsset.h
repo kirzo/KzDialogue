@@ -63,7 +63,7 @@ public:
 	FName Token;
 
 	/** The localized name rendered for a "{Token:Part}" reference. None = the default rendering; unknown parts fall back to it. */
-	UFUNCTION(BlueprintPure, Category = "Named Asset")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Named Tokens")
 	FText ResolveName(FName Part = NAME_None) const { return ResolveName(Part, nullptr); }
 
 	/** Same, honoring runtime token overrides (player-chosen names and genders): a pinned part replaces its rendering outright, pinned atoms flow into compositions, unset pieces fall through to the authored fields. Null = authored values only. */

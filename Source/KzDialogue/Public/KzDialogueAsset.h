@@ -67,7 +67,7 @@ public:
 	TArray<FKzDialogueLine> Lines;
 
 	/** Reusable named groups of lines selected randomly at playback time. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FKzDialogueAlias> Aliases;
 
 	/** Per-line notify timelines, owned by the asset and keyed by line id. Managed by the line editor. */
@@ -79,7 +79,7 @@ public:
 	TArray<TSoftObjectPtr<UObject>> TokenReferences;
 
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	int32 IndexOfLine(const FGuid& LineId) const;
 
 	/** Find the notify timeline owned by the given line id, or null. */
@@ -93,15 +93,15 @@ public:
 	void FinalizeResolvedLine(FKzDialogueLine& OutLine) const;
 
 	/** Get a line by its stable id. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	bool TryGetLineById(const FGuid& LineId, FKzDialogueLine& OutLine) const;
 
 	/** Look up an alias by name. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	bool TryGetAliasByName(FName AliasName, FKzDialogueAlias& OutAlias) const;
 
 	/** Look up an alias by GUID. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	bool TryGetAliasById(const FGuid& AliasId, FKzDialogueAlias& OutAlias) const;
 
 	/**

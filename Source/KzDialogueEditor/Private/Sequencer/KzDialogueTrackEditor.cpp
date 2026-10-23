@@ -45,8 +45,8 @@ bool FKzDialogueTrackEditor::SupportsType(TSubclassOf<UMovieSceneTrack> Type) co
 void FKzDialogueTrackEditor::BuildAddTrackMenu(FMenuBuilder& MenuBuilder)
 {
 	MenuBuilder.AddMenuEntry(
-		LOCTEXT("AddTrack", "KzDialogue Track"),
-		LOCTEXT("AddTrackTip", "Add a track that drives KzDialogue lines from a UKzDialogueAsset."),
+		LOCTEXT("AddTrack", "Dialogue Track"),
+		LOCTEXT("AddTrackTip", "Add a track that plays lines from a dialogue asset."),
 		FSlateIcon(FKzDialogueEditorStyle::Get().GetStyleSetName(), "Kz.Dialogue.Icon"),
 		FUIAction(FExecuteAction::CreateSP(this, &FKzDialogueTrackEditor::HandleAddTrackMenuEntry)));
 }
@@ -56,7 +56,7 @@ void FKzDialogueTrackEditor::HandleAddTrackMenuEntry()
 	UMovieScene* MovieScene = GetFocusedMovieScene();
 	if (!MovieScene) { return; }
 
-	const FScopedTransaction Transaction(LOCTEXT("AddTrackTrans", "Add KzDialogue Track"));
+	const FScopedTransaction Transaction(LOCTEXT("AddTrackTrans", "Add Dialogue Track"));
 	MovieScene->Modify();
 
 	UMovieSceneKzDialogueTrack* NewTrack = MovieScene->AddTrack<UMovieSceneKzDialogueTrack>();

@@ -107,11 +107,14 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLine : public UKzAsyncDialogueAction
 	GENERATED_BODY()
 
 public:
-	/** Plays a dialogue line and waits for that specific line to finish. */
+	/**
+	 * Plays a dialogue line and waits for that specific line to finish.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Ref (Async)", AutoCreateRefTerm = "Line", AdvancedDisplay = "Channel,Priority"))
 	static UKzAsyncPlayDialogueLine* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
-	/** Fired right after the line is requested. Carries the channel player; Line is not set yet. */
+	/** Fired right after the request, with the channel player to bind line events on. Line is empty (invalid LineId). */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Started;
 
@@ -119,7 +122,7 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Finished;
 
-	/** Fired when the dialogue ends before the requested line completed, or the line could not play. */
+	/** Fired when the dialogue ends before the requested line completed, or the line could not play. Line is empty. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Cancelled;
 
@@ -145,7 +148,10 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineInline : public UKzAsyncPlayDialogu
 	GENERATED_BODY()
 
 public:
-	/** Plays a line from a dialogue asset and waits for that specific line to finish. */
+	/**
+	 * Plays a line from a dialogue asset and waits for that specific line to finish.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line From Asset (Async)", AdvancedDisplay = "Channel,Priority"))
 	static UKzAsyncPlayDialogueLineInline* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 };
@@ -161,7 +167,7 @@ class KZDIALOGUE_API UKzAsyncDialogueSequenceAction : public UKzAsyncDialogueAct
 	GENERATED_BODY()
 
 public:
-	/** Fired right after the sequence is requested. Carries the channel player; Line is not set yet. */
+	/** Fired right after the request, with the channel player to bind line events on. Line is empty (invalid LineId). */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Started;
 
@@ -173,7 +179,7 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Finished;
 
-	/** Fired when the dialogue ends before the sequence completed, or nothing could play. */
+	/** Fired when the dialogue ends before the sequence completed, or nothing could play. Line is empty. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Cancelled;
 
@@ -209,7 +215,10 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineList : public UKzAsyncDialogueSeque
 	GENERATED_BODY()
 
 public:
-	/** Plays a list of dialogue lines sequentially and waits until the last one finishes. */
+	/**
+	 * Plays a list of dialogue lines sequentially and waits until the last one finishes.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
 	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
@@ -228,7 +237,10 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueLineRefs : public UKzAsyncDialogueSeque
 	GENERATED_BODY()
 
 public:
-	/** Plays an array of dialogue line refs sequentially and waits until the last one finishes. */
+	/**
+	 * Plays an array of dialogue line refs sequentially and waits until the last one finishes.
+	 * @param Priority -1 inherits the first entry's asset priority, then the channel default.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
 	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
 
@@ -255,15 +267,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,AdvanceMode"))
 	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
-	/** Fired right after the asset is requested. Carries the channel player; Line is not set yet. */
+	/** Fired right after the request, with the channel player to bind line events on. Line is empty (invalid LineId). */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Started;
 
-	/** Fired when the dialogue reaches its end (Completed). */
+	/** Fired when the dialogue reaches its end (Completed). Line is empty. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Finished;
 
-	/** Fired when the dialogue is stopped, aborted or interrupted before completing. */
+	/** Fired when the dialogue is stopped, aborted or interrupted before completing. Line is empty. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueLineEvent Cancelled;
 

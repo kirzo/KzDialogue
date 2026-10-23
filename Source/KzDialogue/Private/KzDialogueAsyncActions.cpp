@@ -9,6 +9,16 @@
 #include "KzDialogueSubsystem.h"
 #include "Engine/World.h"
 
+namespace
+{
+	/** Events with no line to report carry an empty one with an invalid LineId, so it never matches a real line. */
+	const FKzDialogueLine& NoLine()
+	{
+		static const FKzDialogueLine Line = [] { FKzDialogueLine Empty; Empty.LineId.Invalidate(); return Empty; }();
+		return Line;
+	}
+}
+
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncDialogueAction
 // ------------------------------------------------------------------------------------------------
@@ -178,7 +188,7 @@ void UKzAsyncPlayDialogueLine::Activate()
 	// After playing: an alias hot-swap ends the previous line of the same alias inside the call above.
 	BindSpecificLineFinished(LaunchRef);
 	SubscribeDialogueFinished();
-	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
+	Started.Broadcast(DialoguePlayer, NoLine());
 }
 
 void UKzAsyncPlayDialogueLine::HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
@@ -195,7 +205,7 @@ void UKzAsyncPlayDialogueLine::NotifyCancelled()
 {
 	if (!MarkResolved()) { return; }
 
-	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
+	Cancelled.Broadcast(DialoguePlayer, NoLine());
 	SetReadyToDestroy();
 }
 
@@ -260,7 +270,7 @@ void UKzAsyncDialogueSequenceAction::Activate()
 	// finishes is ours; entries skipped at launch (alias cooldowns) simply never show up.
 	DialoguePlayer->OnLineFinished.AddDynamic(this, &UKzAsyncDialogueSequenceAction::HandleLineFinished);
 	SubscribeDialogueFinished();
-	Started.Broadcast(DialoguePlayer, FKzDialogueLine());
+	Started.Broadcast(DialoguePlayer, NoLine());
 }
 
 void UKzAsyncDialogueSequenceAction::HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
@@ -286,7 +296,7 @@ void UKzAsyncDialogueSequenceAction::NotifyCancelled()
 {
 	if (!MarkResolved()) { return; }
 
-	Cancelled.Broadcast(DialoguePlayer, FKzDialogueLine());
+	Cancelled.Broadcast(DialoguePlayer, NoLine());
 	SetReadyToDestroy();
 }
 
@@ -417,7 +427,7 @@ void UKzAsyncPlayDialogueAsset::Activate()
 	// Bind completion AFTER playing: launching may interrupt previous channel content, which broadcasts
 	// the session's OnDialogueFinished during the play call above.
 	Session->OnDialogueFinished.AddDynamic(this, &UKzAsyncPlayDialogueAsset::HandleAssetFinished);
-	Started.Broadcast(Session->GetCurrentPlayer(), FKzDialogueLine());
+	Started.Broadcast(Session->GetCurrentPlayer(), NoLine());
 }
 
 void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
@@ -426,11 +436,11 @@ void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, E
 
 	if (Reason == EKzDialogueFinishReason::Completed)
 	{
-		Finished.Broadcast(Player, FKzDialogueLine());
+		Finished.Broadcast(Player, NoLine());
 	}
 	else
 	{
-		Cancelled.Broadcast(Player, FKzDialogueLine());
+		Cancelled.Broadcast(Player, NoLine());
 	}
 	SetReadyToDestroy();
 }
@@ -469,6 +479,6 @@ void UKzAsyncPlayDialogueAsset::NotifyCancelled()
 {
 	if (!MarkResolved()) { return; }
 
-	Cancelled.Broadcast(Session ? Session->GetCurrentPlayer() : nullptr, FKzDialogueLine());
+	Cancelled.Broadcast(Session ? Session->GetCurrentPlayer() : nullptr, NoLine());
 	SetReadyToDestroy();
 }

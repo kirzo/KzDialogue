@@ -416,6 +416,9 @@ private:
 	/** Resolved line duration in seconds, cached at bake. */
 	float CachedLineDuration = 0.0f;
 
+	/** The line timer ran out: the line reached its natural end instead of being cut. */
+	bool bLineTimeElapsed = false;
+
 	struct FSpecificLineBinding
 	{
 		FGuid Handle;

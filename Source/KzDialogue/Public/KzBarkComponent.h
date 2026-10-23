@@ -34,67 +34,67 @@ public:
 	UKzBarkComponent();
 
 	/** Line or alias to bark. Point it at an alias to get variety + cooldown from the asset. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark")
 	FKzDialogueLineRef Bark;
 
-	/** Channel to bark on. Use a dedicated per-barker channel so stop / pause only affect this one. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark", meta = (Categories = "Dialogue.Channel"))
+	/** Channel to bark on; empty resolves like any line (line, asset, settings). A dedicated per-barker channel keeps stop / pause to this one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag Channel;
 
 	/** Minimum gap between barks (seconds), measured from the end of one to the start of the next. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark", meta = (ClampMin = "0.0", Units = "Seconds"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", meta = (ClampMin = "0.0", Units = "Seconds"))
 	float MinInterval = 8.0f;
 
 	/** Maximum gap between barks (seconds). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark", meta = (ClampMin = "0.0", Units = "Seconds"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", meta = (ClampMin = "0.0", Units = "Seconds"))
 	float MaxInterval = 16.0f;
 
 	/** Start barking automatically on BeginPlay. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark")
 	bool bAutoStart = false;
 
 	/** Play the first bark immediately on start instead of waiting a first interval. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark")
 	bool bFirstBarkImmediate = false;
 
 	/** Dialogue priority for the barks (-1 = inherit asset / channel default). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Bark", AdvancedDisplay)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", AdvancedDisplay)
 	int32 Priority = -1;
 
 	/** Fired when a bark actually starts playing (carries the channel player). */
-	UPROPERTY(BlueprintAssignable, Category = "Bark")
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Bark")
 	FKzOnBarkPlayed OnBarkPlayed;
 
 	/** Fired when a bark ends, with the reason (Completed / Stopped / Aborted / Interrupted). */
-	UPROPERTY(BlueprintAssignable, Category = "Bark")
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Bark")
 	FKzOnBarkFinished OnBarkFinished;
 
 	/** Begin the bark loop (no-op if already barking). */
-	UFUNCTION(BlueprintCallable, Category = "Bark")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void StartBarking();
 
 	/** Stop the loop and stop any bark currently playing on the channel (graceful). */
-	UFUNCTION(BlueprintCallable, Category = "Bark")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void StopBarking();
 
 	/** Pause the loop, keeping the remaining wait; a bark already playing is left to finish. */
-	UFUNCTION(BlueprintCallable, Category = "Bark")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void PauseBarking();
 
 	/** Resume a paused loop. */
-	UFUNCTION(BlueprintCallable, Category = "Bark")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void ResumeBarking();
 
 	/** Force a bark right now (ignores the pending wait). No-op if one is already playing. */
-	UFUNCTION(BlueprintCallable, Category = "Bark")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Bark")
 	void BarkNow();
 
 	/** True between StartBarking and StopBarking. */
-	UFUNCTION(BlueprintPure, Category = "Bark")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Bark")
 	bool IsBarking() const { return bBarking; }
 
 	/** True while paused. */
-	UFUNCTION(BlueprintPure, Category = "Bark")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Bark")
 	bool IsPaused() const { return bPaused; }
 
 protected:
@@ -103,6 +103,9 @@ protected:
 
 private:
 	UKzDialogueSubsystem* GetSubsystem() const;
+
+	/** Channel the barks play on: Channel when set, else the one Bark resolves to. */
+	FGameplayTag ResolveBarkChannel() const;
 
 	void ScheduleNextBark();
 	void PlayBark();

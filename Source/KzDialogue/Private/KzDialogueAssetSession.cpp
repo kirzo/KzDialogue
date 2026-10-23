@@ -70,31 +70,62 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 	const FRun& Run = Runs[RunIndex];
 	CurrentChannel = Run.Channel;
 
-	// Pass the run's channel EXPLICITLY (bypasses the internal first-entry resolution, so playback channel
-	// == grouping channel) and the caller's priority (InheritPriority by default -> the asset's Priority
-	// hint).
-	UKzDialoguePlayer* Player = Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, ResolvedAdvanceMode);
-
+	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Run.Channel);
 	if (!Player)
+	{
+		FinishSession(EKzDialogueFinishReason::Aborted);
+		return;
+	}
+
+	// Bound before launching, so a first line presented inside the play call is forwarded. The finish of the
+	// content this run preempts also lands inside the call, before our OnDialogueStarted, and is ignored.
+	CurrentPlayer = Player;
+	bRunStarted = false;
+	Player->OnDialogueStarted.AddDynamic(this, &UKzDialogueAssetSession::HandleRunStarted);
+	Player->OnDialogueFinished.AddDynamic(this, &UKzDialogueAssetSession::HandleRunFinished);
+	Player->OnLineStarted.AddDynamic(this, &UKzDialogueAssetSession::HandleLineStarted);
+	Player->OnLineFinished.AddDynamic(this, &UKzDialogueAssetSession::HandleLineFinished);
+
+	// The run's channel goes EXPLICITLY (playback channel == grouping channel), with the caller's priority
+	// (InheritPriority by default -> the asset's Priority hint).
+	if (!Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, ResolvedAdvanceMode))
 	{
 		// Refused (a higher-priority dialogue holds this run's channel) or nothing resolved: terminal,
 		// so the session can't stall waiting for a finish that will never come.
 		FinishSession(EKzDialogueFinishReason::Interrupted);
-		return;
 	}
+}
 
-	CurrentPlayer = Player;
+void UKzDialogueAssetSession::UnbindPlayer(UKzDialoguePlayer* Player)
+{
+	if (!Player) { return; }
 
-	// Bind AFTER launching: preempting external content broadcasts OnDialogueFinished during the play call.
-	Player->OnDialogueFinished.AddDynamic(this, &UKzDialogueAssetSession::HandleRunFinished);
+	Player->OnDialogueStarted.RemoveDynamic(this, &UKzDialogueAssetSession::HandleRunStarted);
+	Player->OnDialogueFinished.RemoveDynamic(this, &UKzDialogueAssetSession::HandleRunFinished);
+	Player->OnLineStarted.RemoveDynamic(this, &UKzDialogueAssetSession::HandleLineStarted);
+	Player->OnLineFinished.RemoveDynamic(this, &UKzDialogueAssetSession::HandleLineFinished);
+}
+
+void UKzDialogueAssetSession::HandleRunStarted(UKzDialoguePlayer* Player)
+{
+	bRunStarted = true;
+}
+
+void UKzDialogueAssetSession::HandleLineStarted(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+{
+	OnLineStarted.Broadcast(Player, Line);
+}
+
+void UKzDialogueAssetSession::HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+{
+	OnLineFinished.Broadcast(Player, Line);
 }
 
 void UKzDialogueAssetSession::HandleRunFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
-	if (Player)
-	{
-		Player->OnDialogueFinished.RemoveDynamic(this, &UKzDialogueAssetSession::HandleRunFinished);
-	}
+	if (!bRunStarted) { return; }
+
+	UnbindPlayer(Player);
 
 	// Chain only when THIS run reached its natural end on OUR player and the world is not tearing down.
 	const bool bChain = (Reason == EKzDialogueFinishReason::Completed)
@@ -158,6 +189,7 @@ void UKzDialogueAssetSession::FinishSession(EKzDialogueFinishReason Reason)
 
 	UKzDialoguePlayer* LastPlayer = CurrentPlayer;
 	CurrentPlayer = nullptr;
+	UnbindPlayer(LastPlayer);
 	UKzDialogueSubsystem* Sub = Subsystem;
 
 	// Broadcast while still alive, then release LAST and touch nothing after (mirrors FinishWithReason).

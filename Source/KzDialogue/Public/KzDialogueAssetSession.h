@@ -36,6 +36,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Asset Session")
 	FKzOnDialogueFinished OnDialogueFinished;
 
+	/** A line of the asset has just begun, whatever channel its run plays on. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Asset Session")
+	FKzOnDialogueLineEvent OnLineStarted;
+
+	/** A line of the asset has fully ended. Not fired on Abort or Interrupt. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Asset Session")
+	FKzOnDialogueLineEvent OnLineFinished;
+
 	/** True while a run is active (between the first launch and the final finish). */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
 	bool IsPlaying() const { return bActive; }
@@ -52,7 +60,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
 	FGameplayTag GetChannel() const { return CurrentChannel; }
 
-	/** The finish reason; meaningful once IsPlaying() is false (Completed by default). */
+	/** The finish reason; meaningful once IsPlaying() is false (Completed by default). Covers a finish that happened before anyone could bind OnDialogueFinished. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
 	EKzDialogueFinishReason GetFinishReason() const { return FinishReason; }
 
 	/** Graceful stop of the whole asset (exit animation on the current run). */
@@ -72,8 +81,20 @@ public:
 private:
 	void LaunchRun(int32 RunIndex);
 
+	/** Removes every binding this session made on Player. */
+	void UnbindPlayer(UKzDialoguePlayer* Player);
+
+	UFUNCTION()
+	void HandleRunStarted(UKzDialoguePlayer* Player);
+
 	UFUNCTION()
 	void HandleRunFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
+
+	UFUNCTION()
+	void HandleLineStarted(UKzDialoguePlayer* Player, const FKzDialogueLine& Line);
+
+	UFUNCTION()
+	void HandleLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line);
 
 	/** Broadcasts OnDialogueFinished once and releases from the subsystem. Idempotent. */
 	void FinishSession(EKzDialogueFinishReason Reason);
@@ -104,4 +125,7 @@ private:
 	EKzDialogueFinishReason FinishReason = EKzDialogueFinishReason::Completed;
 	bool bActive = false;
 	bool bFinished = false;
+
+	/** The current run's dialogue started; finishes before that belong to the content it preempted. */
+	bool bRunStarted = false;
 };

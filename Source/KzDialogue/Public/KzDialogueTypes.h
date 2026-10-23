@@ -358,25 +358,25 @@ struct FKzDialogueAlias
 	GENERATED_BODY()
 
 	/** Stable identifier for the alias. Survives renames so external references hold. */
-	UPROPERTY(VisibleAnywhere, Category = "Dialogue")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	FGuid AliasId;
 
 	/**
 	 * Author-facing identifier, e.g. "Greeting", "Surprise", "Insult".
 	 * Must be unique within the asset. Used by gameplay code as a stable key.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	FName AliasName;
 
 	/**
 	 * Speaker constraint: every line referenced by this alias must use this speaker.
 	 * A null speaker means the alias is for narration-style lines (no speaker assigned).
 	 */
-	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (ShowOnlyInnerProperties))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (ShowOnlyInnerProperties))
 	FKzDialogueSpeaker Speaker;
 
 	/** How the subsystem picks a line each time the alias is resolved. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	EKzAliasSelectionMode SelectionMode = EKzAliasSelectionMode::ShuffleBag;
 
 	/**
@@ -384,7 +384,7 @@ struct FKzDialogueAlias
 	 * If empty, the alias falls back to its lines' channel when ALL of them agree on the
 	 * same one, then to the asset's, then to project settings.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag DefaultChannel;
 
 	/**
@@ -396,11 +396,11 @@ struct FKzDialogueAlias
 	 *
 	 * 0 = no cooldown (default).
 	 */
-	UPROPERTY(EditAnywhere, Category = "Dialogue", meta = (ClampMin = 0, Units = "Seconds"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue", meta = (ClampMin = 0, Units = "Seconds"))
 	float CooldownSeconds = 0.0f;
 
 	/** Lines this alias resolves to. Picking the alias picks one at random. */
-	UPROPERTY(EditAnywhere, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue")
 	TArray<FGuid> LineIds;
 
 	FKzDialogueAlias() = default;

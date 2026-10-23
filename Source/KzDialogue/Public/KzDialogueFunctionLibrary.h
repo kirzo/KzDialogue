@@ -39,7 +39,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel,AdvanceMode"))
 	static UKzDialogueAssetSession* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
 
-	/** Resolve a single line by GUID inside a dialogue asset and play it. Blueprints use the Play Dialogue Line node, which expands to this with a line picker. */
+	/**
+	 * Resolve a single line by GUID inside a dialogue asset and play it. Blueprints use the Play Dialogue Line node, which expands to this with a line picker.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", BlueprintInternalUseOnly = "true"))
 	static UKzDialoguePlayer* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority = -1);
 
@@ -47,6 +50,7 @@ public:
 	 * Play a dialogue line referenced by a FKzDialogueLineRef. The runtime resolves
 	 * the reference (loading the asset if needed) and dispatches to the dialogue
 	 * subsystem on the given channel.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", DisplayName = "Play Dialogue Line Ref", AdvancedDisplay = "Channel"))
 	static UKzDialoguePlayer* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority = -1);
@@ -56,6 +60,7 @@ public:
 	 * is only present if Line was resolved from an asset (through the Play Dialogue Line node, a
 	 * FKzDialogueLineRef, or TryResolveDialogueLineRef before this call); a line built by hand carries
 	 * no timeline, since timelines live on the asset keyed by LineId.
+	 * @param Priority -1 uses the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel"))
 	static UKzDialoguePlayer* PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority = -1);
@@ -73,6 +78,7 @@ public:
 	 * same-channel entries as runs, like PlayDialogueAsset. Aliases are resolved at launch; entries
 	 * that fail to resolve are skipped. Returns a session whose OnDialogueFinished fires once when
 	 * the whole list ends.
+	 * @param Priority -1 inherits the asset's priority, then the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel"))
 	static UKzDialogueAssetSession* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority = -1);
@@ -81,6 +87,7 @@ public:
 	 * Play an array of line refs (possibly spanning multiple assets) as ONE sequential
 	 * dialogue on the given channel. Aliases are resolved at launch; entries that fail to
 	 * resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
+	 * @param Priority -1 inherits the first entry's asset priority, then the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel", AdvancedDisplay = "Channel"))
 	static UKzDialoguePlayer* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority = -1);

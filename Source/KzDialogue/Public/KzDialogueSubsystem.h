@@ -71,7 +71,8 @@ public:
 	/**
 	 * Play a provider on a channel. An equal or higher priority takes the channel unless the channel or
 	 * the playing dialogue refuse interruption; a channel only playing its exit animations takes anything.
-	 * Returns the player, or nullptr when refused. InheritPriority falls back to the channel default.
+	 * Returns the player, or nullptr when refused.
+	 * @param Priority -1 (InheritPriority) uses the channel default.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode"))
 	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
@@ -152,11 +153,11 @@ public:
 	 * Reset the cached playback state of a single alias. Next time the alias is
 	 * resolved, it starts as if it had never been played.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void ResetAliasState(FGuid AliasId);
 
 	/** Reset cached state for every alias. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue")
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void ResetAllAliasStates();
 
 	/**

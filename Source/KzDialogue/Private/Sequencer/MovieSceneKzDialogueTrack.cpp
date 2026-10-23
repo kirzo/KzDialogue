@@ -230,7 +230,7 @@ FName UMovieSceneKzDialogueTrack::GetTrackName() const
 #if WITH_EDITORONLY_DATA
 FText UMovieSceneKzDialogueTrack::GetDisplayName() const
 {
-	static const FText DefaultDisplayName = LOCTEXT("TrackDisplayName", "KzDialogue");
+	static const FText DefaultDisplayName = LOCTEXT("TrackDisplayName", "Dialogue");
 
 	if (DialogueAsset)
 	{

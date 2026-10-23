@@ -52,11 +52,17 @@ struct KZDIALOGUE_API FKzDialogueNotifyContext
 	/** Event end, in seconds (baked). Equals EventStart for point notifies. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Notify")
 	float EventEnd = 0.0f;
+
+	/** NotifyEnd, or a skipped point firing late: the line was cut short (skipped, stopped, interrupted) instead of running its course. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Notify")
+	bool bCutShort = false;
 };
 
 /**
  * Shared base for dialogue notifies. Holds only what point and state notifies have in
  * common; the firing contract lives in the two subclasses, so Blueprints derive from those.
+ * One instance lives on the asset's timeline and serves every playback of the line, in
+ * every world: keep per-playback state out of member variables.
  */
 UCLASS(Abstract, EditInlineNew, NotBlueprintable)
 class KZDIALOGUE_API UKzDialogueNotifyBase : public UObject
@@ -68,8 +74,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Notify")
 	TObjectPtr<UKzSpeakerAsset> TargetSpeakerOverride;
 
-	/** Label shown on the timeline marker, the add menu and debug overlays. */
-	virtual FText GetNotifyName() const;
+	/** Label shown on the timeline marker, the add menu and debug overlays. Defaults to the class name. */
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")
+	FText GetNotifyName() const;
+	virtual FText GetNotifyName_Implementation() const;
 
 	/** Cached by the player driving this notify so GetWorld() resolves at runtime (for blueprint
 	 * world-context nodes, spawning, timers). The context still carries the player per call. */
@@ -108,7 +116,7 @@ class KZDIALOGUE_API UKzDialogueNotify : public UKzDialogueNotifyBase
 
 public:
 	/** Fired once at the event's time. */
-	UFUNCTION(BlueprintNativeEvent, Category = "Notify")
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")
 	void Notify(const FKzDialogueNotifyContext& Context);
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) {}
 };
@@ -125,17 +133,17 @@ class KZDIALOGUE_API UKzDialogueNotifyState : public UKzDialogueNotifyBase
 
 public:
 	/** Entered the window. */
-	UFUNCTION(BlueprintNativeEvent, Category = "Notify")
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")
 	void NotifyBegin(const FKzDialogueNotifyContext& Context);
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) {}
 
 	/** Called each frame while inside the window. */
-	UFUNCTION(BlueprintNativeEvent, Category = "Notify")
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")
 	void NotifyTick(const FKzDialogueNotifyContext& Context, float DeltaTime);
 	virtual void NotifyTick_Implementation(const FKzDialogueNotifyContext& Context, float DeltaTime) {}
 
 	/** Left the window, or the line ended. Must undo whatever Begin did. */
-	UFUNCTION(BlueprintNativeEvent, Category = "Notify")
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")
 	void NotifyEnd(const FKzDialogueNotifyContext& Context);
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) {}
 };

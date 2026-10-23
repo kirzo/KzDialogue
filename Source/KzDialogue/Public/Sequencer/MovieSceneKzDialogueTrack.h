@@ -63,7 +63,7 @@ struct FMovieSceneKzDialogueSectionTemplate : public FMovieSceneEvalTemplate
  * Sequencer track that drives KzDialogue lines from a UKzDialogueAsset.
  * Sections within this track each play one specific line.
  */
-UCLASS(MinimalAPI, DisplayName = "Kz Dialogue")
+UCLASS(MinimalAPI, DisplayName = "Dialogue")
 class UMovieSceneKzDialogueTrack : public UMovieSceneTrack, public IMovieSceneTrackTemplateProducer
 {
 	GENERATED_BODY()

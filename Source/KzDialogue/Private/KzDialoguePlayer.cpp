@@ -522,6 +522,7 @@ void UKzDialoguePlayer::HandleLineTimerElapsed()
 {
 	if (State == EKzDialogueState::LinePlaying)
 	{
+		bLineTimeElapsed = true;
 		Enter_LineExiting();
 	}
 }
@@ -1106,6 +1107,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	ActiveNotifies.Reset();
 	TimelineClock = 0.0f;
 	CachedLineDuration = 0.0f;
+	bLineTimeElapsed = false;
 
 	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
 	if (!Timeline || Timeline->IsEmpty())
@@ -1166,6 +1168,8 @@ void UKzDialoguePlayer::FlushTimeline()
 	const TArray<FKzDialogueActiveNotify> Flushed = MoveTemp(ActiveNotifies);
 	const float Clock = TimelineClock;
 	const float LineDuration = CachedLineDuration;
+	// A Manual line held past its duration also ran its course.
+	const bool bCutShort = !bLineTimeElapsed && Clock < LineDuration;
 
 	for (int32 Index = Flushed.Num() - 1; Index >= 0; --Index)
 	{
@@ -1174,7 +1178,9 @@ void UKzDialoguePlayer::FlushTimeline()
 		{
 			if (UKzDialogueNotifyState* StateNotify = Cast<UKzDialogueNotifyState>(Entry.Notify))
 			{
-				StateNotify->NotifyEnd(BuildNotifyContext(Entry, Clock, LineDuration));
+				FKzDialogueNotifyContext Context = BuildNotifyContext(Entry, Clock, LineDuration);
+				Context.bCutShort = bCutShort;
+				StateNotify->NotifyEnd(Context);
 			}
 		}
 	}
@@ -1186,7 +1192,9 @@ void UKzDialoguePlayer::FlushTimeline()
 		{
 			if (UKzDialogueNotify* PointNotify = Cast<UKzDialogueNotify>(Entry.Notify))
 			{
-				PointNotify->Notify(BuildNotifyContext(Entry, Clock, LineDuration));
+				FKzDialogueNotifyContext Context = BuildNotifyContext(Entry, Clock, LineDuration);
+				Context.bCutShort = bCutShort;
+				PointNotify->Notify(Context);
 			}
 		}
 	}

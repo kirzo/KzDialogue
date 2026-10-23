@@ -98,7 +98,7 @@ A native-feeling Sequencer track for cinematic dialogue:
 * `UMovieSceneKzDialogueTrack`: holds a reference to a `UKzDialogueAsset` and a target channel.
 * `UMovieSceneKzDialogueSection`: each section plays one specific line, identified by its stable `FGuid` (so asset edits don't silently break references).
 * **Searchable line picker** with filters by speaker, gameplay tags, and an option to hide lines already used in the track.
-* **Display name** automatically extends to `Kz Dialogue (AssetName)` when an asset is bound.
+* **Display name** automatically extends to `Dialogue (AssetName)` when an asset is bound.
 * `bSuppressAudio` flag for cinematics that play their own audio track.
 
 ---
@@ -131,7 +131,7 @@ Widget->BindPlayer(Player);
 
 ### Drive dialogue from a Sequencer cinematic
 
-1. Add a **Kz Dialogue** track to your Level Sequence.
+1. Add a **Dialogue Track** to your Level Sequence.
 2. Set its `DialogueAsset` and `Channel` in the details panel.
 3. Click **+ Section** on the track and pick a line from the searchable menu.
 4. Resize the section to control on-screen duration.

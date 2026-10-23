@@ -3,7 +3,7 @@
 #include "KzDialogueNotify.h"
 #include "KzDialoguePlayer.h"
 
-FText UKzDialogueNotifyBase::GetNotifyName() const
+FText UKzDialogueNotifyBase::GetNotifyName_Implementation() const
 {
 	FString RawName = GetClass()->GetName();
 	RawName.RemoveFromEnd(TEXT("_C"));

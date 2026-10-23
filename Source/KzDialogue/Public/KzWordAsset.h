@@ -41,7 +41,7 @@ public:
 	TMap<EKzGender, FText> GenderForms;
 
 	/** The word for the given gender: its authored form, or Text as fallback. */
-	UFUNCTION(BlueprintPure, Category = "Word")
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Word")
 	FText Resolve(EKzGender Gender = EKzGender::Unspecified) const;
 
 	//~ UKzNamedAsset: parts are gender form names ("{Gate:Feminine}"); None or unknown = Text. Overrides pin the default form under its field name "Text".

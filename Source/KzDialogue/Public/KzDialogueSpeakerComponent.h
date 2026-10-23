@@ -25,7 +25,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingSuppressedChanged, bool
  *   - Speak() helpers that spawn a provider rooted to this actor
  *   - A registry so other systems can find the world component for a speaker asset
  */
-UCLASS(ClassGroup = (KzGameplay), Blueprintable, meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (Dialogue), Blueprintable, meta = (BlueprintSpawnableComponent))
 class KZDIALOGUE_API UKzDialogueSpeakerComponent : public UActorComponent, public IGameplayTagAssetInterface
 {
 	GENERATED_BODY()
@@ -101,8 +101,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
 	UKzDialogueAssetSession* Speak(UKzDialogueAsset* Asset);
 
-	/** Speak a single ad-hoc line, as given. Notifies fire only if Line was resolved from an asset;
-	 *  a hand-built line has no Timeline (timelines live on the asset keyed by LineId). */
+	/** Speak a single ad-hoc line, as given. Returns the channel player, like PlayDialogueLineDirect: a single line has no session.
+	 *  Notifies fire only if Line was resolved from an asset; a hand-built line has no Timeline (timelines live on the asset keyed by LineId). */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
 	UKzDialoguePlayer* SpeakLine(const FKzDialogueLine& Line);
 

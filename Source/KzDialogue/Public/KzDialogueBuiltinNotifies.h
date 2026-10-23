@@ -36,7 +36,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
 	FName StartSection;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontage", "Play Montage"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontage", "Play Montage"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
 
 #if WITH_EDITOR
@@ -67,7 +67,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Montage")
 	float BlendOutTime = 0.25f;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontageState", "Play Montage (State)"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "PlayMontageState", "Play Montage (State)"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
 
@@ -110,7 +110,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	int32 NumLoops = 1;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnim", "Play Animation"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnim", "Play Animation"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
 
 #if WITH_EDITOR
@@ -148,7 +148,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
 	float BlendOut = 0.25f;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnimState", "Play Animation (State)"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySlotAnimState", "Play Animation (State)"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
 
@@ -184,7 +184,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
 	bool bPlay2D = false;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySound", "Play Sound"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "PlaySound", "Play Sound"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
 
 #if WITH_EDITOR
@@ -207,7 +207,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Shake")
 	float Scale = 1.0f;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "CameraShake", "Camera Shake"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "CameraShake", "Camera Shake"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
 
 #if WITH_EDITOR
@@ -226,7 +226,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Force Feedback")
 	TObjectPtr<UForceFeedbackEffect> Effect;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "ForceFeedback", "Force Feedback"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "ForceFeedback", "Force Feedback"); }
 	virtual void Notify_Implementation(const FKzDialogueNotifyContext& Context) override;
 
 #if WITH_EDITOR
@@ -250,7 +250,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tag")
 	FGameplayTagContainer Tags;
 
-	virtual FText GetNotifyName() const override { return NSLOCTEXT("KzDialogueNotifies", "SetTag", "Set Tag"); }
+	virtual FText GetNotifyName_Implementation() const override { return NSLOCTEXT("KzDialogueNotifies", "SetTag", "Set Tag"); }
 	virtual void NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context) override;
 	virtual void NotifyEnd_Implementation(const FKzDialogueNotifyContext& Context) override;
 

@@ -34,6 +34,12 @@ UKzDialogueSubsystem* UKzBarkComponent::GetSubsystem() const
 	return World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
 }
 
+FGameplayTag UKzBarkComponent::ResolveBarkChannel() const
+{
+	const UKzDialogueSubsystem* Subsystem = GetSubsystem();
+	return Subsystem ? Subsystem->ResolveChannelForEntry(Channel, Bark.Asset.LoadSynchronous(), Bark.LineId) : Channel;
+}
+
 void UKzBarkComponent::StartBarking()
 {
 	if (bBarking)
@@ -41,9 +47,9 @@ void UKzBarkComponent::StartBarking()
 		return;
 	}
 
-	if (!Channel.IsValid() || !Bark.IsValid() || !GetSubsystem())
+	if (!Bark.IsValid() || !GetSubsystem())
 	{
-		UE_LOG(LogKzDialogue, Warning, TEXT("UKzBarkComponent on %s: can't start, needs a valid Channel, Bark and dialogue subsystem."), *GetNameSafe(GetOwner()));
+		UE_LOG(LogKzDialogue, Warning, TEXT("UKzBarkComponent on %s: can't start, needs a valid Bark and a dialogue subsystem."), *GetNameSafe(GetOwner()));
 		return;
 	}
 
@@ -85,7 +91,7 @@ void UKzBarkComponent::StopBarking()
 	{
 		if (UKzDialogueSubsystem* Subsystem = GetSubsystem())
 		{
-			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(Channel))
+			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(ResolveBarkChannel()))
 			{
 				if (Player->IsPlaying() && Player->ResolveLineRefToMatchSet(Bark).Contains(Player->GetCurrentLine().LineId))
 				{
@@ -134,7 +140,7 @@ void UKzBarkComponent::ResumeBarking()
 
 void UKzBarkComponent::BarkNow()
 {
-	if (bBarkInFlight || !Channel.IsValid() || !Bark.IsValid() || !GetSubsystem())
+	if (bBarkInFlight || !Bark.IsValid() || !GetSubsystem())
 	{
 		return;
 	}
@@ -206,11 +212,11 @@ void UKzBarkComponent::HandleBarkFinished(UKzDialoguePlayer* Player, EKzDialogue
 void UKzBarkComponent::BindChannelPlayer()
 {
 	UKzDialogueSubsystem* Subsystem = GetSubsystem();
-	if (!Subsystem || !Channel.IsValid())
+	if (!Subsystem)
 	{
 		return;
 	}
-	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Channel);
+	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(ResolveBarkChannel());
 	if (!Player || Player == BoundPlayer.Get())
 	{
 		return;
