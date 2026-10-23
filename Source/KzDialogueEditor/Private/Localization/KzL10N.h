@@ -133,6 +133,9 @@ struct FKzTranslationImportStats
 
 	/** Rows with an empty Translation cell. */
 	int32 Untranslated = 0;
+
+	/** Rows whose Translation cell still holds what the export pre-filled: skipped, so archive edits made meanwhile survive. */
+	int32 Unchanged = 0;
 };
 
 /** One localizable text of the dialogue set: a line, a speaker name field or a shared word form. */
@@ -151,7 +154,7 @@ struct FKzLocText
 	/** Speaker field key or word form name ("Text" for a word's default form); empty for lines. */
 	FString Field;
 
-	/** Drift hash the CSV round-trips; 0 for words, which the manifest validates instead. */
+	/** Drift hash the CSV round-trips; 0 for words, which round-trip their manifest source hash instead (ExportHash). */
 	uint32 SourceHash = 0;
 };
 
@@ -219,13 +222,14 @@ namespace KzDialogueL10N
 	/**
 	 * Token-rename refactor, bound to UKzNamedAsset::OnTokenRenamed at module startup:
 	 * rewrites every dialogue line using "{OldToken}" / "{OldToken:part}" to the asset's new
-	 * token (case-insensitive, inside the ongoing edit transaction so Ctrl+Z reverts both),
-	 * and updates the archives' sources and translations so nothing turns stale. Up-to-date
-	 * recorded-take hashes are preserved: renaming a token does not change what was spoken.
+	 * token (case-insensitive, inside the ongoing edit transaction so Ctrl+Z reverts them),
+	 * and the dialogue archives' sources and translations so nothing turns stale. Undo and redo
+	 * broadcast the rename again, so the archives follow. Up-to-date recorded-take hashes are
+	 * preserved: renaming a token does not change what was spoken.
 	 */
 	void RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken);
 
-	/** Culture-less import of SourceText edits made in an exported CSV: rewrites the AUTHORED texts (dialogue lines, speaker fields, project-text occurrences) keeping their namespace/key. A row applies only when the asset did not change after the export (hash still matches); both-sides edits count as conflicted and the asset wins. Transacted; dirty assets must be saved and Gather re-run. */
+	/** Culture-less import of SourceText edits made in an exported CSV: rewrites the AUTHORED texts (dialogue lines, speaker fields, project-text occurrences) keeping their namespace/key. A row applies only when its text did not change after the export (hash still matches); both-sides edits count as conflicted and the asset wins. Transacted; dirty assets must be saved and Gather re-run. */
 	bool ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError);
 
 	/** Interactive flow for ImportSourceFixes: open-file dialog + stats notification. */
@@ -278,6 +282,12 @@ namespace KzDialogueL10N::Detail
 
 	/** Newline-flavor-insensitive source comparison: file round-trips (the PO \n escape, spreadsheet editors) lose the original CRLF/LF flavor, and that must not count as drift. */
 	bool SourceMatches(const FString& A, const FString& B);
+
+	/** CRC32 of Value's LF form: what an export wrote, so an import tells edited cells and changed sources from untouched ones. */
+	uint32 ExportHash(const FString& Value);
+
+	/** True for the error values a spreadsheet leaves when it reads a cell starting with '=', '+', '-' or '@' as a formula. */
+	bool IsSpreadsheetError(const FString& Value);
 
 	/** A CSV with its columns indexed by header name, so reordered or extended files keep importing. */
 	struct FKzCsvTable

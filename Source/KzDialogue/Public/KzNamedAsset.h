@@ -86,9 +86,11 @@ public:
 
 	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PreEditUndo() override;
+	virtual void PostEditUndo() override;
 
 private:
-	/** Token value captured before an edit, so the rename broadcast can carry the old name. */
+	/** Token value captured before an edit or an undo, so the rename broadcast can carry the old name. */
 	FName TokenBeforeEdit;
 #endif
 };

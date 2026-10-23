@@ -286,21 +286,11 @@ void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName Ol
 		return Out;
 	};
 
-	// One affected text: its identity plus the source strings before and after the rename,
-	// so the archives can follow without turning anything stale.
-	struct FKzRenamedText
-	{
-		FString Namespace;
-		FString Key;
-		FString OldSource;
-		FString NewSource;
-	};
-	TArray<FKzRenamedText> RenamedTexts;
-
 	const IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
 	TArray<FAssetData> DialogueAssets;
 	Registry.GetAssetsByClass(UKzDialogueAsset::StaticClass()->GetClassPathName(), DialogueAssets, /*bSearchSubClasses=*/true);
 
+	int32 RenamedLines = 0;
 	int32 ChangedAssets = 0;
 	for (const FAssetData& Data : DialogueAssets)
 	{
@@ -332,8 +322,7 @@ void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName Ol
 			{
 				Line.RecordedTextHash = KzComputeSourceTextHash(Line.Text);
 			}
-
-			RenamedTexts.Add({ TextNamespaceUtil::StripPackageNamespace(Namespace.GetValue()), Key.GetValue(), *Source, NewSource });
+			++RenamedLines;
 		}
 
 		if (bChanged)
@@ -344,21 +333,28 @@ void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName Ol
 		}
 	}
 
-	// Follow up in the archives: the token is rewritten inside each translation and its recorded source.
-	// A translation that matched the old source stays current; a stale one stays stale.
+	// The archives follow by content, not through the lines above: an undo or redo of the rename restores the lines
+	// itself and lands here with none left to rewrite. A translation matching its source stays current.
 	FKzArchiveWriter Writer;
 	FText ArchiveError;
-	if (RenamedTexts.Num() > 0 && Writer.Open(ArchiveError))
+	if (Writer.Open(ArchiveError))
 	{
 		for (const FString& Culture : Writer.GetTarget().ForeignCultures)
 		{
-			for (const FKzRenamedText& Text : RenamedTexts)
+			TArray<TSharedRef<FArchiveEntry>> Entries;
+			Writer.GetHelper().EnumerateTranslations(Culture, [&Entries, &ReplaceTokens](TSharedRef<FArchiveEntry> Entry)
 			{
-				const TSharedPtr<FArchiveEntry> Entry = Writer.GetHelper().FindTranslation(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr);
-				if (!Entry.IsValid() || Entry->Translation.Text.IsEmpty()) { continue; }
+				if (Entry->Namespace.GetString().StartsWith(TEXT("KzDialogue.")) && !Entry->Translation.Text.IsEmpty()
+					&& (ReplaceTokens(Entry->Source.Text) != Entry->Source.Text || ReplaceTokens(Entry->Translation.Text) != Entry->Translation.Text))
+				{
+					Entries.Add(Entry);
+				}
+				return true;
+			}, /*bCheckDependencies=*/false);
 
-				const FString NewSource = SourceMatches(Entry->Source.Text, Text.OldSource) ? Text.NewSource : ReplaceTokens(Entry->Source.Text);
-				Writer.Write(Culture, FLocKey(Text.Namespace), FLocKey(Text.Key), nullptr, FLocItem(NewSource), FLocItem(ReplaceTokens(Entry->Translation.Text)));
+			for (const TSharedRef<FArchiveEntry>& Entry : Entries)
+			{
+				Writer.Write(Culture, Entry->Namespace, Entry->Key, nullptr, FLocItem(ReplaceTokens(Entry->Source.Text)), FLocItem(ReplaceTokens(Entry->Translation.Text)));
 			}
 		}
 		if (!Writer.Save(ArchiveError))
@@ -366,10 +362,9 @@ void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName Ol
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Token rename: the archives could not be saved: %s"), *ArchiveError.ToString());
 		}
 	}
-
 	ShowNotification(FText::Format(
 		LOCTEXT("TokenRenameDone", "Token '{0}' renamed to '{1}': {2} line(s) in {3} asset(s) rewritten, archives updated. Save the dirty assets and re-run Gather."),
-		FText::FromName(OldToken), FText::FromName(NewToken), RenamedTexts.Num(), ChangedAssets), true);
+		FText::FromName(OldToken), FText::FromName(NewToken), RenamedLines, ChangedAssets), true);
 }
 
 bool KzDialogueL10N::MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled)
@@ -620,6 +615,12 @@ bool KzDialogueL10N::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats
 			LogRow(Log, AssetPath, FString::Printf(TEXT("Source-fix row %d: empty SourceText for '%s,%s'; emptying a text is an editor decision, not a CSV one."), RowIdx + 1, *Namespace, *Key));
 			continue;
 		}
+		if (IsSpreadsheetError(CsvSource))
+		{
+			++OutStats.Unresolved;
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Source-fix row %d: the spreadsheet turned the SourceText of '%s,%s' into '%s' (a cell starting with =, +, - or @ read as a formula); not a fix."), RowIdx + 1, *Namespace, *Key, *CsvSource));
+			continue;
+		}
 
 		// Asset-less rows are project texts: the manifest holds the exported source and the
 		// rewrite machinery updates the authored occurrences in place.
@@ -635,6 +636,14 @@ bool KzDialogueL10N::ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats
 			if (SourceMatches(ManifestSource, CsvSource))
 			{
 				++OutStats.Unchanged;
+				continue;
+			}
+
+			// The hash proves the gathered source kept the exported wording, as an asset row's does for its asset.
+			if (static_cast<uint32>(FCString::Strtoui64(*Cell(HashCol), nullptr, 10)) != ExportHash(ManifestSource))
+			{
+				++OutStats.Conflicted;
+				LogRow(Log, FString(), FString::Printf(TEXT("Conflicted source-fix row %d: project text '%s,%s' changed after this CSV was exported; fix it where it is authored instead."), RowIdx + 1, *Namespace, *Key));
 				continue;
 			}
 

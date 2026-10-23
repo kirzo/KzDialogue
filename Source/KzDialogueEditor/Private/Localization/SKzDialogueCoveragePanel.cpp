@@ -1384,9 +1384,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 	}
 
 	// Fluid keyboard editing: the editor registers under a stable key so Enter/Tab can hop
-	// to the next one even after the post-commit rebuild replaced every widget.
+	// to the next one even after the post-commit rebuild replaced every widget. The line id
+	// keeps the rows of a shared text apart.
 	const FString EditorKey = (!Entry.TranslationCulture.IsEmpty() && Entry.TranslationIdentities.Num() > 0)
-		? Entry.TranslationCulture + TEXT("|") + Entry.TranslationIdentities[0].Key + TEXT("|") + Entry.TranslationIdentities[0].Value
+		? Entry.TranslationCulture + TEXT("|") + Entry.TranslationIdentities[0].Key + TEXT("|") + Entry.TranslationIdentities[0].Value + TEXT("|") + Entry.LineId.ToString()
 		: FString();
 	TSharedPtr<SMultiLineEditableText> TranslationEditor;
 
@@ -2041,14 +2042,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		}
 	}
 
-	auto IsTextPending = [Query, PendingCultures](const FKzDialogueLine& Line)
+	auto IsTextPending = [Query](const FKzDialogueLine& Line, const TArray<FString>& InCultures)
 	{
 		const TOptional<FString> Namespace = FTextInspector::GetNamespace(Line.Text);
 		const TOptional<FString> Key = FTextInspector::GetKey(Line.Text);
 		const FString* Source = FTextInspector::GetSourceString(Line.Text);
 		if (Line.Text.IsEmpty() || !Namespace.IsSet() || !Key.IsSet() || !Source) { return false; }
 
-		for (const FString& Culture : PendingCultures)
+		for (const FString& Culture : InCultures)
 		{
 			if (Query->GetTextState(Namespace.GetValue(), Key.GetValue(), *Source, Culture) != EKzTranslationState::Translated)
 			{
@@ -2068,7 +2069,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		{
 			if (!PassesSpeaker(Line) || !PassesText(Line)) { continue; }
 			++FilteredCount;
-			if (!PendingCultures.IsEmpty() && IsTextPending(Line)) { ++PendingCount; }
+			if (!PendingCultures.IsEmpty() && IsTextPending(Line, PendingCultures)) { ++PendingCount; }
 		}
 	}
 
@@ -2090,9 +2091,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 	// Both formats share the same scopes; each scope opens the culture list, like the Import
 	// menu. The chosen culture pre-fills the file with its current translations and names it
 	// (CSV "_es" suffix, PO per-culture folder); PO can also write every culture at once.
-	auto AddScopeEntries = [AssetData, PassesSpeaker, PassesText, IsTextPending, AllCount, FilteredCount, PendingCount, ExportCultures, bFiltersActive = bSpeakerFilterActive || !TextFilter.IsEmpty()](FMenuBuilder& Sub, bool bAllCulturesEntry, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&, const FString&)> Run)
+	auto AddScopeEntries = [AssetData, PassesSpeaker, PassesText, IsTextPending, PendingCultures, AllCount, FilteredCount, PendingCount, ExportCultures, bFiltersActive = bSpeakerFilterActive || !TextFilter.IsEmpty()](FMenuBuilder& Sub, bool bAllCulturesEntry, TFunction<void(TArray<FAssetData>, const FKzExportLineFilter&, const FString&)> Run)
 	{
-		auto AddCultureLeaves = [AssetData, ExportCultures, Run](FMenuBuilder& CultureSub, bool bWithAllCultures, FKzExportLineFilter Filter, bool bEnabled)
+		// FilterFor builds each leaf's line filter from its culture (empty for the all-cultures entry).
+		auto AddCultureLeaves = [AssetData, ExportCultures, Run](FMenuBuilder& CultureSub, bool bWithAllCultures, TFunction<FKzExportLineFilter(const FString&)> FilterFor, bool bEnabled)
 		{
 			if (bWithAllCultures)
 			{
@@ -2101,7 +2103,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 					LOCTEXT("ExportEveryCultureTip", "One file per foreign culture, each pre-filled with its translations."),
 					FSlateIcon(),
 					FUIAction(
-						FExecuteAction::CreateLambda([AssetData, Run, Filter]() { Run(AssetData, Filter, FString()); }),
+						FExecuteAction::CreateLambda([AssetData, Run, Filter = FilterFor(FString())]() { Run(AssetData, Filter, FString()); }),
 						FCanExecuteAction::CreateLambda([bEnabled]() { return bEnabled; })));
 			}
 			else if (ExportCultures.IsEmpty())
@@ -2119,7 +2121,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 					FText::Format(LOCTEXT("ExportCultureEntryTip", "Pre-fill the file with the current '{0}' translations."), FText::FromString(Culture)),
 					FSlateIcon(),
 					FUIAction(
-						FExecuteAction::CreateLambda([AssetData, Run, Filter, Culture]() { Run(AssetData, Filter, Culture); }),
+						FExecuteAction::CreateLambda([AssetData, Run, Filter = FilterFor(Culture), Culture]() { Run(AssetData, Filter, Culture); }),
 						FCanExecuteAction::CreateLambda([bEnabled]() { return bEnabled; })));
 			}
 		};
@@ -2129,7 +2131,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 			LOCTEXT("ExportAllLinesTip", "Export every line of the assets."),
 			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry](FMenuBuilder& CultureSub)
 			{
-				AddCultureLeaves(CultureSub, bAllCulturesEntry, nullptr, true);
+				AddCultureLeaves(CultureSub, bAllCulturesEntry, [](const FString&) { return FKzExportLineFilter(); }, true);
 			}));
 
 		Sub.AddSubMenu(
@@ -2138,17 +2140,25 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry, PassesSpeaker, PassesText, bFiltersActive](FMenuBuilder& CultureSub)
 			{
 				AddCultureLeaves(CultureSub, bAllCulturesEntry,
-					[PassesSpeaker, PassesText](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line); },
+					[PassesSpeaker, PassesText](const FString&) -> FKzExportLineFilter
+					{
+						return [PassesSpeaker, PassesText](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line); };
+					},
 					bFiltersActive);
 			}));
 
 		Sub.AddSubMenu(
 			FText::Format(LOCTEXT("ExportPendingLines", "Pending text ({0})"), PendingCount),
 			LOCTEXT("ExportPendingLinesTip", "Export only the lines whose text is missing or stale in the cultures in scope (speaker and search filters apply)."),
-			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry, PassesSpeaker, PassesText, IsTextPending, PendingCount](FMenuBuilder& CultureSub)
+			FNewMenuDelegate::CreateLambda([AddCultureLeaves, bAllCulturesEntry, PassesSpeaker, PassesText, IsTextPending, PendingCultures, PendingCount](FMenuBuilder& CultureSub)
 			{
+				// A culture's file holds what is pending in that culture, not in any of the scope's.
 				AddCultureLeaves(CultureSub, bAllCulturesEntry,
-					[PassesSpeaker, PassesText, IsTextPending](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line) && IsTextPending(Line); },
+					[PassesSpeaker, PassesText, IsTextPending, PendingCultures](const FString& Culture) -> FKzExportLineFilter
+					{
+						const TArray<FString> Cultures = Culture.IsEmpty() ? PendingCultures : TArray<FString>{ Culture };
+						return [PassesSpeaker, PassesText, IsTextPending, Cultures](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line) && PassesText(Line) && IsTextPending(Line, Cultures); };
+					},
 					PendingCount > 0);
 			}));
 	};

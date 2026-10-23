@@ -173,6 +173,22 @@ namespace KzDialogueL10N::Detail
 		return NormalizeNewlines(A).Equals(NormalizeNewlines(B), ESearchCase::CaseSensitive);
 	}
 
+	uint32 ExportHash(const FString& Value)
+	{
+		return FCrc::StrCrc32(*NormalizeNewlines(Value));
+	}
+
+	bool IsSpreadsheetError(const FString& Value)
+	{
+		static const TCHAR* Errors[] = { TEXT("#NAME?"), TEXT("#VALUE!"), TEXT("#REF!"), TEXT("#DIV/0!"), TEXT("#N/A"), TEXT("#NUM!"), TEXT("#NULL!") };
+		const FString Trimmed = Value.TrimStartAndEnd();
+		for (const TCHAR* Error : Errors)
+		{
+			if (Trimmed.Equals(Error, ESearchCase::IgnoreCase)) { return true; }
+		}
+		return false;
+	}
+
 	void BeginLogPage(FMessageLog& Log, const FText& Title)
 	{
 		Log.NewPage(Title);

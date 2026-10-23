@@ -189,8 +189,8 @@ namespace KzDialogueL10N
 		}
 
 		const FText Summary = FText::Format(
-			LOCTEXT("ImportSummary", "{0}: {1} imported, {2} drifted (skipped), {3} untranslated, {4} unresolved. Run Compile Text in the Localization Dashboard to apply."),
-			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
+			LOCTEXT("ImportSummary", "{0}: {1} imported, {2} unchanged, {3} drifted (skipped), {4} untranslated, {5} unresolved. Run Compile Text in the Localization Dashboard to apply."),
+			FText::FromString(Culture), Stats.Imported, Stats.Unchanged, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
 		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 	}
 }
@@ -248,7 +248,7 @@ void KzDialogueL10N::RegisterMenus()
 
 bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities, const FString& TranslationCulture)
 {
-	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation");
+	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation,TranslationHash");
 	Csv += LINE_TERMINATOR;
 
 	// Archives feed the per-culture translation columns and the project-text rows.
@@ -304,12 +304,14 @@ bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const
 		Csv += CsvEscape(Audio) + TEXT(",");
 		Csv += FString(LocalizeAudio) + TEXT(",");
 		Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
-		Csv += CsvEscape(StaleTranslation);
+		Csv += CsvEscape(StaleTranslation) + TEXT(",");
+		// Fingerprints the pre-filled translation, so a re-import leaves untouched cells alone.
+		Csv += Translation.IsEmpty() ? FString() : FString::Printf(TEXT("%u"), ExportHash(Translation));
 		Csv += LINE_TERMINATOR;
 		++NumRows;
 	};
 
-	// Word and project-text rows leave Asset empty: the manifest validates them at import instead of an asset hash.
+	// Word and project-text rows leave Asset empty: the manifest validates them at import, against their source's hash.
 	TArray<FKzLocText> Texts;
 	CollectLocTexts(Assets, LineFilter, /*bAllSpeakers=*/false, /*bAllWords=*/true, Texts);
 	for (const FKzLocText& Text : Texts)
@@ -328,7 +330,7 @@ bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const
 		}
 		else
 		{
-			AddRow(FString(), Text.Namespace, Text.Key, FString(), Text.Source, FString(), 0, FString(), TEXT(""), 0);
+			AddRow(FString(), Text.Namespace, Text.Key, FString(), Text.Source, FString(), 0, FString(), TEXT(""), ExportHash(Text.Source));
 		}
 	}
 
@@ -339,7 +341,7 @@ bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const
 		{
 			if (OtherIdentities->Contains(Namespace + TEXT(",") + Key))
 			{
-				AddRow(FString(), Namespace, Key, FString(), Source, FString(), 0, FString(), TEXT(""), 0);
+				AddRow(FString(), Namespace, Key, FString(), Source, FString(), 0, FString(), TEXT(""), ExportHash(Source));
 			}
 		});
 	}
@@ -371,6 +373,7 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 	const int32* SourceTextCol = Table.Columns.Find(TEXT("SourceText"));
 	const int32* TranslationCol = Table.Columns.Find(TEXT("Translation"));
 	const int32* HashCol = Table.Columns.Find(TEXT("SourceHash"));
+	const int32* TranslationHashCol = Table.Columns.Find(TEXT("TranslationHash"));
 
 	FKzLocTargetInfo Target;
 	if (!ReadLocTargetInfo(Target, OutError))
@@ -407,6 +410,20 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 
 		const FString AssetPath = Cell(AssetCol);
 		const FString Key = Cell(KeyCol);
+
+		// An untouched pre-filled cell would revert archive edits made while the file was out.
+		const FString TranslationHash = TranslationHashCol ? Cell(TranslationHashCol) : FString();
+		if (!TranslationHash.IsEmpty() && ExportHash(Translation) == static_cast<uint32>(FCString::Strtoui64(*TranslationHash, nullptr, 10)))
+		{
+			++OutStats.Unchanged;
+			continue;
+		}
+		if (IsSpreadsheetError(Translation))
+		{
+			++OutStats.Unresolved;
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Row %d, key '%s': the spreadsheet turned the translation into '%s' (a cell starting with =, +, - or @ read as a formula); type it again as text."), RowIdx + 1, *Key, *Translation));
+			continue;
+		}
 
 		// Asset-less rows are project texts: the manifest (not an asset hash) validates them,
 		// same as the PO import.
@@ -487,7 +504,7 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 
 	if (!Writer.Save(OutError)) { return false; }
 
-	Log.Info(FText::Format(LOCTEXT("ImportLogSummary", "{0} imported, {1} drifted, {2} untranslated, {3} unresolved."), OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
+	Log.Info(FText::Format(LOCTEXT("CsvImportLogSummary", "{0} imported, {1} unchanged, {2} drifted, {3} untranslated, {4} unresolved."), OutStats.Imported, OutStats.Unchanged, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
 	return true;
 }
 

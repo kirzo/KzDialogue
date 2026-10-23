@@ -36,4 +36,21 @@ void UKzNamedAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChange
 	}
 }
 
+void UKzNamedAsset::PreEditUndo()
+{
+	Super::PreEditUndo();
+	TokenBeforeEdit = Token;
+}
+
+void UKzNamedAsset::PostEditUndo()
+{
+	Super::PostEditUndo();
+
+	// Undoing or redoing a rename is a rename too: the transaction restores the lines, the listeners the archives.
+	if (Token != TokenBeforeEdit && !TokenBeforeEdit.IsNone())
+	{
+		OnTokenRenamed.Broadcast(this, TokenBeforeEdit);
+	}
+}
+
 #endif
