@@ -15,9 +15,6 @@ class UKzDialogueAsset;
 class UKzDialogueAssetSession;
 struct FKzDialogueChannelDefinition;
 
-/** Resolves the value of one line template token (e.g. "PlayerName" for "{PlayerName}"). Bind to a function (BP function graphs or C++ UFUNCTIONs; BP custom events cannot return values). */
-DECLARE_DYNAMIC_DELEGATE_RetVal_OneParam(FText, FKzDialogueTextArgumentResolver, const FKzDialogueLine&, Line);
-
 /**
  * World-level manager of dialogue playback. Owns a UKzDialoguePlayer per channel and
  * arbitrates between requests using priority. Channels let independent dialogue streams
@@ -160,22 +157,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void ResetAllAliasStates();
 
-	/**
-	 * Register an ambient resolver for one template token: "PlayerName" resolves "{PlayerName}"
-	 * in any line played through this subsystem. Called when a line enters, only if the line's
-	 * pattern uses the token AND the play call did not already provide a value for it (explicit
-	 * per-play arguments win over ambient resolvers). Re-registering a token replaces it.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
-	void RegisterTextArgumentResolver(FName Token, FKzDialogueTextArgumentResolver Resolver);
-
-	/** Remove the resolver registered for Token. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
-	void UnregisterTextArgumentResolver(FName Token);
-
-	/** Resolver registered for Token, or null. Consulted by players when a line enters. */
-	const FKzDialogueTextArgumentResolver* FindTextArgumentResolver(FName Token) const;
-
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
@@ -190,9 +171,6 @@ private:
 
 	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
 	bool bDeinitializing = false;
-
-	/** Ambient token resolvers, keyed by template token name. Dynamic delegates bind weakly, so stale owners just unbind. */
-	TMap<FName, FKzDialogueTextArgumentResolver> TextArgumentResolvers;
 
 	/**
 	 * Resolve the priority to use given:
@@ -260,7 +238,7 @@ private:
 		 * World time of the last successful resolution. Used to gate
 		 * further resolutions while CooldownSeconds hasn't elapsed.
 		 *
-		 * Negative means "never resolved" — the cooldown check always passes on first use.
+		 * Negative means "never resolved": the cooldown check always passes on first use.
 		 */
 		double LastResolvedWorldTime = -1.0;
 	};

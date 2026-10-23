@@ -119,7 +119,7 @@ void UKzAsyncDialogueAction::Interrupt()
 	if (!DialoguePlayer)
 	{
 		// Already resolved. Two legitimate late-interrupt targets remain: an idle channel ringing
-		// our Continue-policy tails, and OUR OWN line still winding down — the specific-line
+		// our Continue-policy tails, and OUR OWN line still winding down: the specific-line
 		// Finished fires when the line's exit STARTS, so this action can be resolved while its
 		// line's fades and audio are still live. Foreign content on the channel is never touched.
 		if (UKzDialoguePlayer* Late = WeakDialoguePlayer.Get())
@@ -252,6 +252,7 @@ void UKzAsyncDialogueSequenceAction::Activate()
 	Super::Activate();
 
 	GatherEntryRefs(EntryRefs);
+	LastFinishedLine = NoLine();
 
 	if (!WorldContext || EntryRefs.IsEmpty() || !AcquirePlayer())
 	{
@@ -330,25 +331,9 @@ UKzAsyncPlayDialogueLineList* UKzAsyncPlayDialogueLineList::PlayDialogueLineList
 	return Action;
 }
 
-void UKzAsyncPlayDialogueLineList::GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const
+UKzDialogueAssetSession* UKzAsyncPlayDialogueLineList::LaunchSession()
 {
-	LaunchList.GetLineRefs(OutRefs);
-}
-
-UKzDialoguePlayer* UKzAsyncPlayDialogueLineList::LaunchPlayback()
-{
-	// Player-based node -> ONE player on ONE channel (first-entry rule), unlike the library's
-	// PlayDialogueLineList, which chains per-entry channels through a session.
-	if (!LaunchList.IsValid()) { return nullptr; }
-
-	const UWorld* World = WorldContext ? WorldContext->GetWorld() : nullptr;
-	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
-	if (!Subsystem) { return nullptr; }
-
-	UKzDialogueAsset* Loaded = LaunchList.Asset.LoadSynchronous();
-	if (!Loaded) { return nullptr; }
-
-	return Subsystem->PlayAssetLineList(Loaded, LaunchList.LineIds, Channel, Priority, Subsystem->ResolveAdvanceMode(EKzDialogueAdvanceMode::Inherit, Loaded));
+	return UKzDialogueFunctionLibrary::PlayDialogueLineList(WorldContext, LaunchList, Channel, Priority);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -397,19 +382,23 @@ UKzAsyncPlayDialogueAsset* UKzAsyncPlayDialogueAsset::PlayDialogueAsset(const UO
 	return Action;
 }
 
-void UKzAsyncPlayDialogueAsset::Activate()
+UKzDialogueAssetSession* UKzAsyncPlayDialogueAsset::LaunchSession()
+{
+	return Asset ? UKzDialogueFunctionLibrary::PlayDialogueAsset(WorldContext, Asset, Channel, AdvanceMode) : nullptr;
+}
+
+// ------------------------------------------------------------------------------------------------
+// UKzAsyncDialogueSessionAction
+// ------------------------------------------------------------------------------------------------
+
+void UKzAsyncDialogueSessionAction::Activate()
 {
 	Super::Activate();
+	LastFinishedLine = NoLine();
 
-	if (!WorldContext || !Asset)
-	{
-		NotifyCancelled();
-		return;
-	}
-
-	// The session resolves each line's channel and chains runs across channel changes, finishing ONCE
-	// for the whole asset. We wait on it instead of a single channel player.
-	Session = UKzDialogueFunctionLibrary::PlayDialogueAsset(WorldContext, Asset, Channel, AdvanceMode);
+	// The session resolves each entry's channel and chains runs across channel changes, finishing ONCE
+	// for the whole dialogue. We wait on it instead of a single channel player.
+	Session = WorldContext ? LaunchSession() : nullptr;
 	if (!Session)
 	{
 		NotifyCancelled();
@@ -418,25 +407,32 @@ void UKzAsyncPlayDialogueAsset::Activate()
 
 	if (!Session->IsPlaying())
 	{
-		// Finished within the play call (empty asset, or the first run was refused). Resolve with the
+		// Finished within the play call (nothing to play, or the first run was refused). Resolve with the
 		// session's recorded reason instead of waiting for a finish event that already fired.
-		HandleAssetFinished(Session->GetCurrentPlayer(), Session->GetFinishReason());
+		HandleSessionFinished(Session->GetCurrentPlayer(), Session->GetFinishReason());
 		return;
 	}
 
-	// Bind completion AFTER playing: launching may interrupt previous channel content, which broadcasts
+	// Bind AFTER playing: launching may interrupt previous channel content, which broadcasts
 	// the session's OnDialogueFinished during the play call above.
-	Session->OnDialogueFinished.AddDynamic(this, &UKzAsyncPlayDialogueAsset::HandleAssetFinished);
+	Session->OnLineFinished.AddDynamic(this, &UKzAsyncDialogueSessionAction::HandleSessionLineFinished);
+	Session->OnDialogueFinished.AddDynamic(this, &UKzAsyncDialogueSessionAction::HandleSessionFinished);
 	Started.Broadcast(Session->GetCurrentPlayer(), NoLine());
 }
 
-void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
+void UKzAsyncDialogueSessionAction::HandleSessionLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line)
+{
+	LastFinishedLine = Line;
+	LineFinished.Broadcast(Player, Line);
+}
+
+void UKzAsyncDialogueSessionAction::HandleSessionFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
 	if (!MarkResolved()) { return; }
 
 	if (Reason == EKzDialogueFinishReason::Completed)
 	{
-		Finished.Broadcast(Player, NoLine());
+		Finished.Broadcast(Player, LastFinishedLine);
 	}
 	else
 	{
@@ -445,37 +441,40 @@ void UKzAsyncPlayDialogueAsset::HandleAssetFinished(UKzDialoguePlayer* Player, E
 	SetReadyToDestroy();
 }
 
-void UKzAsyncPlayDialogueAsset::Stop()
+void UKzAsyncDialogueSessionAction::Stop()
 {
 	if (!Session) { return; }
 
-	// Unbind first so the session's finish (fired by Stop) doesn't also route through HandleAssetFinished;
+	// Unbind first so the session's finish (fired by Stop) doesn't also route through HandleSessionFinished;
 	// then resolve as cancelled ourselves.
+	Session->OnLineFinished.RemoveAll(this);
 	Session->OnDialogueFinished.RemoveAll(this);
 	Session->Stop();
 	NotifyCancelled();
 }
 
-void UKzAsyncPlayDialogueAsset::Interrupt()
+void UKzAsyncDialogueSessionAction::Interrupt()
 {
 	if (!Session) { return; }
 
+	Session->OnLineFinished.RemoveAll(this);
 	Session->OnDialogueFinished.RemoveAll(this);
 	Session->Interrupt();
 	NotifyCancelled();
 }
 
-void UKzAsyncPlayDialogueAsset::SetReadyToDestroy()
+void UKzAsyncDialogueSessionAction::SetReadyToDestroy()
 {
 	if (Session)
 	{
+		Session->OnLineFinished.RemoveAll(this);
 		Session->OnDialogueFinished.RemoveAll(this);
 		Session = nullptr;
 	}
 	Super::SetReadyToDestroy();
 }
 
-void UKzAsyncPlayDialogueAsset::NotifyCancelled()
+void UKzAsyncDialogueSessionAction::NotifyCancelled()
 {
 	if (!MarkResolved()) { return; }
 

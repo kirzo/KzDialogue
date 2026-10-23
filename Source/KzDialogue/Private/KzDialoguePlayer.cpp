@@ -6,6 +6,7 @@
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueFunctionLibrary.h"
+#include "KzNamedTokenSubsystem.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
@@ -573,16 +574,13 @@ void UKzDialoguePlayer::ResolveLineFormatArguments()
 	FTextFormat(CurrentLine.Text).GetFormatArgumentNames(ArgumentNames);
 	if (ArgumentNames.Num() == 0) { return; }
 
-	UWorld* World = GetWorld();
-	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
-	if (!Subsystem) { return; }
-
+	const UKzNamedTokenSubsystem* Tokens = UKzNamedTokenSubsystem::Get(this);
 	for (const FString& ArgumentName : ArgumentNames)
 	{
 		// Explicit per-play arguments (set by the call site on its line copy) win over ambient resolvers.
 		if (CurrentLine.FormatArguments.Contains(ArgumentName)) { continue; }
 
-		const FKzDialogueTextArgumentResolver* Resolver = Subsystem->FindTextArgumentResolver(FName(*ArgumentName));
+		const FKzDialogueTextArgumentResolver* Resolver = Tokens ? Tokens->FindTextArgumentResolver(FName(*ArgumentName)) : nullptr;
 		if (Resolver && Resolver->IsBound())
 		{
 			CurrentLine.FormatArguments.Add(ArgumentName, FFormatArgumentValue(Resolver->Execute(CurrentLine)));

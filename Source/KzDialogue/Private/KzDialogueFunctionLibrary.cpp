@@ -183,15 +183,14 @@ bool UKzDialogueFunctionLibrary::TryResolveNamedText(const UObject* WorldContext
 	FString Modifier;
 	TokenAndModifier.Split(TEXT(":"), &Token, &Modifier);
 
-	const UKzNamedTokenSubsystem* Tokens = UKzNamedTokenSubsystem::Get(WorldContextObject);
-	const FSoftObjectPath* Path = Tokens ? Tokens->FindNamedAssetPath(FName(*Token)) : nullptr;
-	if (!Path) { return false; }
+	FSoftObjectPath Path;
+	if (!UKzNamedTokenSubsystem::FindNamedAssetPathFor(WorldContextObject, FName(*Token), Path)) { return false; }
 
 	// Small data assets: a synchronous load on first resolve is fine; later resolves hit memory.
-	const UKzNamedAsset* Thing = Cast<UKzNamedAsset>(Path->TryLoad());
+	const UKzNamedAsset* Thing = Cast<UKzNamedAsset>(Path.TryLoad());
 	if (!Thing) { return false; }
 
-	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier), Tokens->FindOverride(FName(*Token)));
+	OutText = Thing->ResolveName(Modifier.IsEmpty() ? NAME_None : FName(*Modifier), UKzNamedTokenSubsystem::FindOverrideFor(WorldContextObject, FName(*Token)));
 	return true;
 }
 
@@ -242,11 +241,10 @@ bool UKzDialogueFunctionLibrary::TryResolveNamedArgument(const UObject* WorldCon
 
 	if (Modifier.Equals(TEXT("gender"), ESearchCase::IgnoreCase))
 	{
-		const UKzNamedTokenSubsystem* Tokens = UKzNamedTokenSubsystem::Get(WorldContextObject);
-		const FSoftObjectPath* Path = Tokens ? Tokens->FindNamedAssetPath(FName(*Token)) : nullptr;
-		if (const UKzSpeakerAsset* Speaker = Path ? Cast<UKzSpeakerAsset>(Path->TryLoad()) : nullptr)
+		FSoftObjectPath Path;
+		if (const UKzSpeakerAsset* Speaker = UKzNamedTokenSubsystem::FindNamedAssetPathFor(WorldContextObject, FName(*Token), Path) ? Cast<UKzSpeakerAsset>(Path.TryLoad()) : nullptr)
 		{
-			const FKzNamedTokenOverride* Override = Tokens->FindOverride(FName(*Token));
+			const FKzNamedTokenOverride* Override = UKzNamedTokenSubsystem::FindOverrideFor(WorldContextObject, FName(*Token));
 			const EKzGender Gender = (Override && Override->bOverrideGender) ? Override->Gender : Speaker->Gender;
 
 			// Unspecified maps to Neuter, the |gender() fallback form.

@@ -59,6 +59,42 @@ void UKzNamedTokenSubsystem::ClearAllNamedTokenOverrides()
 	Overrides.Tokens.Reset();
 }
 
+void UKzNamedTokenSubsystem::RegisterTextArgumentResolver(FName Token, FKzDialogueTextArgumentResolver Resolver)
+{
+	if (Token.IsNone() || !Resolver.IsBound()) { return; }
+	TextArgumentResolvers.Add(Token, MoveTemp(Resolver));
+}
+
+void UKzNamedTokenSubsystem::UnregisterTextArgumentResolver(FName Token)
+{
+	TextArgumentResolvers.Remove(Token);
+}
+
+bool UKzNamedTokenSubsystem::FindNamedAssetPathFor(const UObject* WorldContextObject, FName Token, FSoftObjectPath& OutPath)
+{
+	if (const UKzNamedTokenSubsystem* Store = Get(WorldContextObject))
+	{
+		const FSoftObjectPath* Path = Store->FindNamedAssetPath(Token);
+		if (Path) { OutPath = *Path; }
+		return Path != nullptr;
+	}
+	if (Token.IsNone()) { return false; }
+
+	// Uncached on purpose: editor previews must see assets created or retokened a moment ago.
+	TArray<FAssetData> Assets;
+	FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), Assets, /*bSearchSubClasses=*/true);
+	for (const FAssetData& Asset : Assets)
+	{
+		FName AssetToken;
+		if (Asset.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), AssetToken) && AssetToken == Token)
+		{
+			OutPath = Asset.ToSoftObjectPath();
+			return true;
+		}
+	}
+	return false;
+}
+
 const FSoftObjectPath* UKzNamedTokenSubsystem::FindNamedAssetPath(FName Token) const
 {
 	if (Token.IsNone()) { return nullptr; }

@@ -562,21 +562,6 @@ void UKzDialogueSubsystem::ResetAllAliasStates()
 	AliasStates.Reset();
 }
 
-void UKzDialogueSubsystem::RegisterTextArgumentResolver(FName Token, FKzDialogueTextArgumentResolver Resolver)
-{
-	if (Token.IsNone() || !Resolver.IsBound()) { return; }
-	TextArgumentResolvers.Add(Token, MoveTemp(Resolver));
-}
-
-void UKzDialogueSubsystem::UnregisterTextArgumentResolver(FName Token)
-{
-	TextArgumentResolvers.Remove(Token);
-}
-
-const FKzDialogueTextArgumentResolver* UKzDialogueSubsystem::FindTextArgumentResolver(FName Token) const
-{
-	return TextArgumentResolvers.Find(Token);
-}
 
 FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 {

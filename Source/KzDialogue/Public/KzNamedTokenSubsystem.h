@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "KzDialogueTypes.h"
 #include "KzWordAsset.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "KzNamedTokenSubsystem.generated.h"
@@ -39,9 +40,12 @@ struct KZDIALOGUE_API FKzNamedTokenOverrides
 	TMap<FName, FKzNamedTokenOverride> Tokens;
 };
 
+/** Resolves the value of one line template token (e.g. "PlayerName" for "{PlayerName}"). Bind to a function (BP function graphs or C++ UFUNCTIONs; BP custom events cannot return values). */
+DECLARE_DYNAMIC_DELEGATE_RetVal_OneParam(FText, FKzDialogueTextArgumentResolver, const FKzDialogueLine&, Line);
+
 /**
- * Game-instance home of named tokens: the token-to-asset registry cache and the runtime
- * overrides, both surviving level travel. A token must already be claimed by a
+ * Game-instance home of text tokens: the token-to-asset registry cache, the runtime
+ * overrides and the ambient argument resolvers, all surviving level travel. A token must already be claimed by a
  * UKzNamedAsset (the asset is the promise: it declares the parts schema and the fallback
  * values); the setters reject unknown tokens. Persistence is the game's business through
  * the snapshot: GetNamedTokenOverrides into the save, ApplyNamedTokenOverrides on load.
@@ -81,11 +85,30 @@ public:
 	/** Asset path claiming Token, building the registry-scan cache on first use. Null when unclaimed. */
 	const FSoftObjectPath* FindNamedAssetPath(FName Token) const;
 
+	/**
+	 * Register an ambient resolver for one template token: "PlayerName" resolves "{PlayerName}"
+	 * in any line played. Called when a line enters, only if the line's pattern uses the token
+	 * AND the play call did not already provide a value for it (explicit per-play arguments win
+	 * over ambient resolvers). Re-registering a token replaces it.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
+	void RegisterTextArgumentResolver(FName Token, FKzDialogueTextArgumentResolver Resolver);
+
+	/** Remove the resolver registered for Token. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Named Tokens")
+	void UnregisterTextArgumentResolver(FName Token);
+
+	/** Resolver registered for Token, or null. Consulted by players when a line enters. */
+	const FKzDialogueTextArgumentResolver* FindTextArgumentResolver(FName Token) const { return TextArgumentResolvers.Find(Token); }
+
 	/** The store reachable through WorldContextObject's game instance, or null. */
 	static UKzNamedTokenSubsystem* Get(const UObject* WorldContextObject);
 
 	/** Override for Token reachable through WorldContextObject's game instance, or null (no world, no subsystem, no override). */
 	static const FKzNamedTokenOverride* FindOverrideFor(const UObject* WorldContextObject, FName Token);
+
+	/** Asset path claiming Token: the game instance's cache, else (editor previews have none) a direct registry lookup. False when unclaimed. */
+	static bool FindNamedAssetPathFor(const UObject* WorldContextObject, FName Token, FSoftObjectPath& OutPath);
 
 private:
 	UPROPERTY(Transient)
@@ -94,4 +117,7 @@ private:
 	/** Named-asset tokens gathered from the asset registry on first use (session-lifetime cache; assets load lazily). */
 	mutable TMap<FName, FSoftObjectPath> NamedAssetTokens;
 	mutable bool bNamedAssetTokensBuilt = false;
+
+	/** Ambient token resolvers, keyed by template token name. Dynamic delegates bind weakly, so stale owners just unbind. */
+	TMap<FName, FKzDialogueTextArgumentResolver> TextArgumentResolvers;
 };
