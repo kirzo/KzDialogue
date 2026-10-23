@@ -856,7 +856,6 @@ void UKzDialoguePlayer::BakeTimeline()
 
 			FKzDialogueActiveNotify& Entry = ActiveNotifies.AddDefaulted_GetRef();
 			Entry.Notify = Event.Notify;
-			Event.Notify->SetOwningPlayer(this);
 			Entry.LineSpeaker = LineSpeaker;
 			Entry.bIsState = Event.Notify->IsA<UKzDialogueNotifyState>();
 			Entry.Start = Start;
@@ -912,6 +911,12 @@ void UKzDialoguePlayer::FlushTimeline()
 
 FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration)
 {
+	// One notify instance serves every playback of the line, in every world: claim it for the call about to happen.
+	if (IsValid(Entry.Notify))
+	{
+		Entry.Notify->SetOwningPlayer(this);
+	}
+
 	FKzDialogueNotifyContext Context;
 	Context.Player = this;
 	Context.LineSpeaker = Entry.LineSpeaker;

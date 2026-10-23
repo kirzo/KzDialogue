@@ -137,13 +137,14 @@ UWorld* FKzDialogueDebugOverlay::ResolveActiveWorld() const
 // Drawing
 // =======================================================================================
 
-void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC*/)
+void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* PC)
 {
 	if (bDebugEnabled == 0 || !Canvas) { return; }
 
 	using namespace KzDialogueDebugDraw;
 
-	UWorld* World = ResolveActiveWorld();
+	// Each viewport draws its own world (PIE clients each have theirs).
+	UWorld* World = PC ? PC->GetWorld() : ResolveActiveWorld();
 	if (!World) { return; }
 
 	UKzDialogueSubsystem* Sub = World->GetSubsystem<UKzDialogueSubsystem>();

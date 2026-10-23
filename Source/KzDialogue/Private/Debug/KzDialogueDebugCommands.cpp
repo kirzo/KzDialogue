@@ -23,15 +23,15 @@ namespace KzDialogueCmd
 	// World / subsystem resolution
 	// ===================================================================================
 
-	/**
-	 * Resolve the most relevant active world: PIE first, then Game, then any. Logs a
-	 * warning if nothing is found.
-	 */
+	/** World of the viewport the running command was typed in; null outside a command. */
+	static UWorld* GCommandWorld = nullptr;
+
+	/** The world the command was typed in when it is a game world (each PIE client has its own), else PIE first, then Game, then any. */
 	static UWorld* ResolveActiveWorld()
 	{
+		if (GCommandWorld && GCommandWorld->IsGameWorld()) { return GCommandWorld; }
 		if (!GEngine) { return nullptr; }
 
-		// Prefer PIE. UWorld::Type covers both PIE clients and standalone game worlds.
 		for (const FWorldContext& Context : GEngine->GetWorldContexts())
 		{
 			if (Context.World() && Context.WorldType == EWorldType::PIE)
@@ -292,8 +292,12 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 		{
 			Commands.Add(MakeUnique<FAutoConsoleCommand>(
 				Name, Help,
-				FConsoleCommandWithArgsDelegate::CreateLambda(
-					[Handler](const TArray<FString>& Args) { Handler(Args); })));
+				FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateLambda(
+					[Handler](const TArray<FString>& Args, UWorld* World, FOutputDevice& /*Ar*/)
+					{
+						TGuardValue<UWorld*> CommandWorld(GCommandWorld, World);
+						Handler(Args);
+					})));
 		};
 
 	Make(TEXT("Kz.Dialogue.Play"), TEXT("Play <AssetPath> [Channel]"), HandlePlay);

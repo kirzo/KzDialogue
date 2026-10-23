@@ -32,10 +32,7 @@ private:
 	/** Hooked into UDebugDrawService::Register("Game", ...). */
 	void DrawDebug(UCanvas* Canvas, APlayerController* PC);
 
-	/**
-	 * Resolve the most relevant world for debug rendering. Mirrors the logic in
-	 * FKzDialogueDebugCommands so console + overlay stay consistent.
-	 */
+	/** Fallback world when the viewport has no player controller: PIE first, then Game, then any. */
 	class UWorld* ResolveActiveWorld() const;
 
 	FDelegateHandle DrawHandle;

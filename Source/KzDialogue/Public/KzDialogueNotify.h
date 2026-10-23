@@ -79,8 +79,7 @@ public:
 	FText GetNotifyName() const;
 	virtual FText GetNotifyName_Implementation() const;
 
-	/** Cached by the player driving this notify so GetWorld() resolves at runtime (for blueprint
-	 * world-context nodes, spawning, timers). The context still carries the player per call. */
+	/** Set by the player right before each call, so GetWorld() resolves to the world of the playback being served (blueprint world-context nodes, spawning, timers). */
 	void SetOwningPlayer(UKzDialoguePlayer* InPlayer);
 
 	//~ UObject

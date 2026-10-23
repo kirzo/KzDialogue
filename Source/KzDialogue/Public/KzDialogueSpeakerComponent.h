@@ -33,13 +33,21 @@ class KZDIALOGUE_API UKzDialogueSpeakerComponent : public UActorComponent, publi
 public:
 	UKzDialogueSpeakerComponent();
 
-	/** Character this actor speaks as. Injected into speakerless lines by SpeakLine. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
+	/** Character this actor speaks as. Injected into speakerless lines by SpeakLine. Changed at runtime through SetSpeaker. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Speaker")
 	TObjectPtr<UKzSpeakerAsset> Speaker;
 
-	/** Additional identities this actor also answers to (hidden persona before a reveal, disguises). Lines referencing any of them resolve to this component. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
+	/** Additional identities this actor also answers to (hidden persona before a reveal, disguises). Lines referencing any of them resolve to this component. Changed at runtime through SetExtraPersonas. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Speaker")
 	TArray<TObjectPtr<UKzSpeakerAsset>> ExtraPersonas;
+
+	/** Swaps this actor's identity; FindSpeaker resolves the new one, and no longer the old, right away. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
+	void SetSpeaker(UKzSpeakerAsset* InSpeaker);
+
+	/** Replaces the extra identities (a persona revealed, a disguise dropped), re-registered right away. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
+	void SetExtraPersonas(const TArray<UKzSpeakerAsset*>& InPersonas);
 
 	/** Default channel for this speaker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Speaker")
@@ -82,7 +90,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker|Speaking")
 	void PopSpeakingSuppression();
 
-	/** True while the speaking level is suppressed — the face ABP should gate its mouth curve OFF so the other animation wins. */
+	/** True while the speaking level is suppressed: the face ABP should gate its mouth curve OFF so the other animation wins. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker|Speaking")
 	bool IsSpeakingSuppressed() const { return SpeakingSuppressionCount > 0; }
 
@@ -128,6 +136,10 @@ protected:
 	virtual void OnUnregister() override;
 
 private:
+	/** Puts Speaker and ExtraPersonas in the world registry FindSpeaker reads, or takes this component's own entries out. */
+	void RegisterIdentities();
+	void UnregisterIdentities();
+
 	/** Talking amplitude for this speaker; written by the active dialogue player, read by the face / anim. */
 	float SpeakingLevel = 0.0f;
 

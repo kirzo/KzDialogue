@@ -71,7 +71,7 @@ void UKzDialogueSpeakerComponent::PopSpeakingSuppression()
 {
 	if (SpeakingSuppressionCount <= 0)
 	{
-		return; // unbalanced Pop — nothing to release
+		return; // unbalanced Pop, nothing to release
 	}
 	--SpeakingSuppressionCount;
 	if (SpeakingSuppressionCount == 0)
@@ -83,7 +83,34 @@ void UKzDialogueSpeakerComponent::PopSpeakingSuppression()
 void UKzDialogueSpeakerComponent::OnRegister()
 {
 	Super::OnRegister();
+	RegisterIdentities();
+}
 
+void UKzDialogueSpeakerComponent::OnUnregister()
+{
+	UnregisterIdentities();
+	Super::OnUnregister();
+}
+
+void UKzDialogueSpeakerComponent::SetSpeaker(UKzSpeakerAsset* InSpeaker)
+{
+	if (InSpeaker == Speaker) { return; }
+
+	if (IsRegistered()) { UnregisterIdentities(); }
+	Speaker = InSpeaker;
+	if (IsRegistered()) { RegisterIdentities(); }
+}
+
+void UKzDialogueSpeakerComponent::SetExtraPersonas(const TArray<UKzSpeakerAsset*>& InPersonas)
+{
+	if (IsRegistered()) { UnregisterIdentities(); }
+	ExtraPersonas.Reset();
+	ExtraPersonas.Append(InPersonas);
+	if (IsRegistered()) { RegisterIdentities(); }
+}
+
+void UKzDialogueSpeakerComponent::RegisterIdentities()
+{
 	if (UWorld* World = GetWorld(); World && (Speaker || ExtraPersonas.Num() > 0))
 	{
 		auto& WorldMap = KzDialogueSpeakerInternal::Registry.FindOrAdd(World);
@@ -103,7 +130,7 @@ void UKzDialogueSpeakerComponent::OnRegister()
 	}
 }
 
-void UKzDialogueSpeakerComponent::OnUnregister()
+void UKzDialogueSpeakerComponent::UnregisterIdentities()
 {
 	if (UWorld* World = GetWorld())
 	{
@@ -115,7 +142,7 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 				const TObjectKey<const UKzSpeakerAsset> Key(Identity);
 				if (TArray<TWeakObjectPtr<UKzDialogueSpeakerComponent>>* Stack = WorldMap->Find(Key))
 				{
-					// Remove only our own entry — never evict another registrant sharing the speaker.
+					// Remove only our own entry; never evict another registrant sharing the speaker.
 					Stack->Remove(this);
 					if (Stack->IsEmpty()) { WorldMap->Remove(Key); }
 				}
@@ -128,7 +155,6 @@ void UKzDialogueSpeakerComponent::OnUnregister()
 			}
 		}
 	}
-	Super::OnUnregister();
 }
 
 void UKzDialogueSpeakerComponent::SetSpeakingLevel(float NewLevel)
