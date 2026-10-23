@@ -183,6 +183,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Interrupt();
 
+	/** Ends a dialogue that only has its exit animations left as it would have ended (Completed, or Stopped after Stop), so taking the channel over does not report it as interrupted. No-op outside Exiting. */
+	void FinishExit();
+
 	/** Hard-stop every audio this player spawned (the current line's and released Continue-policy tails) without touching dialogue state. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void StopAllAudio(float FadeTime = 0.1f);
@@ -342,6 +345,10 @@ private:
 
 	// Notify timeline driven during LinePlaying.
 	void BakeTimeline();
+
+	/** Advances the timeline clock by DeltaTime and fires what it crossed; stops early when a notify moves the player on. */
+	void EvaluateTimeline(float DeltaTime);
+
 	void FlushTimeline();
 	FKzDialogueNotifyContext BuildNotifyContext(const FKzDialogueActiveNotify& Entry, float Clock, float LineDuration);
 

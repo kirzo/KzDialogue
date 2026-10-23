@@ -177,6 +177,18 @@ void UKzDialoguePlayer::Interrupt()
 	FinishWithReason(EKzDialogueFinishReason::Interrupted);
 }
 
+void UKzDialoguePlayer::FinishExit()
+{
+	if (State != EKzDialogueState::Exiting)
+	{
+		return;
+	}
+
+	// The tails of its last line would overlap the dialogue taking over, as on Interrupt.
+	StopReleasedAudios(0.1f);
+	FinishWithReason(bStopRequested ? EKzDialogueFinishReason::Stopped : EKzDialogueFinishReason::Completed);
+}
+
 void UKzDialoguePlayer::StopAllAudio(float FadeTime)
 {
 	StopLineAudio(FadeTime);
@@ -503,11 +515,21 @@ void UKzDialoguePlayer::SetTimersPaused(bool bPause)
 
 void UKzDialoguePlayer::HandleLineTimerElapsed()
 {
-	if (State == EKzDialogueState::LinePlaying)
+	if (State != EKzDialogueState::LinePlaying)
 	{
-		bLineTimeElapsed = true;
-		Enter_LineExiting();
+		return;
 	}
+
+	// Timers tick before tickables: catch the timeline up to the line end, so points placed there still fire.
+	const uint32 Serial = StateSerial;
+	EvaluateTimeline(FMath::Max(0.0f, CachedLineDuration - TimelineClock));
+	if (Serial != StateSerial)
+	{
+		return;
+	}
+
+	bLineTimeElapsed = true;
+	Enter_LineExiting();
 }
 
 void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
@@ -535,7 +557,8 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 
 float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 {
-	const USoundBase* Sound = Line.Audio.Get();
+	// Loaded, not Get(): in cooked builds or behind an AudioStartDelay the wave may not be in memory yet.
+	const USoundBase* Sound = Line.Audio.IsNull() ? nullptr : Line.Audio.LoadSynchronous();
 	const float Duration = Line.ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.0f);
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
@@ -708,7 +731,8 @@ bool UKzDialoguePlayer::IsTickable() const
 	{
 		return true; // keep ticking to release the jaw toward 0
 	}
-	return !bPaused && State == EKzDialogueState::LinePlaying && (ActiveNotifies.Num() > 0 || IsValid(ActiveAudio));
+	// Live audio drives the mouth in any phase (it starts while the line fades in); the timeline only runs in LinePlaying.
+	return !bPaused && (IsValid(ActiveAudio) || (State == EKzDialogueState::LinePlaying && ActiveNotifies.Num() > 0));
 }
 
 TStatId UKzDialoguePlayer::GetStatId() const
@@ -720,11 +744,14 @@ void UKzDialoguePlayer::Tick(float DeltaTime)
 {
 	UpdateSpeakingLevel(DeltaTime);
 
-	if (bPaused || State != EKzDialogueState::LinePlaying)
+	if (!bPaused && State == EKzDialogueState::LinePlaying)
 	{
-		return;
+		EvaluateTimeline(DeltaTime);
 	}
+}
 
+void UKzDialoguePlayer::EvaluateTimeline(float DeltaTime)
+{
 	TimelineClock += DeltaTime;
 
 	// A notify may move the player on (Next, Stop, a new line on this channel). Flags are set before each

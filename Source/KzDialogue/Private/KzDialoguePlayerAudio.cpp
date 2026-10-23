@@ -10,6 +10,7 @@
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
+#include "TimerManager.h"
 
 namespace
 {
@@ -303,11 +304,22 @@ void UKzDialoguePlayer::ResolveOutgoingAudio(const FKzDialogueLine& OutgoingLine
 	}
 	else
 	{
-		// Release: stop tracking ActiveAudio but keep a weak
-		// ref so Abort/Interrupt can still hard-stop it.
-		// The UAudioComponent has bAutoDestroy = true, so it
-		// self-cleans when the sound finishes.
+		// Release: stop tracking ActiveAudio but keep a weak ref so Abort/Interrupt can still hard-stop it.
+		// The component auto-destroys when the sound finishes.
 		ReleasedAudios.Add(ActiveAudio);
+
+		// A pending AudioEndTime cut belongs to this take: it follows the released tail instead of cutting the next line's voice.
+		UWorld* World = GetWorld();
+		if (World && World->GetTimerManager().IsTimerActive(AudioStopTimerHandle))
+		{
+			const float Remaining = World->GetTimerManager().GetTimerRemaining(AudioStopTimerHandle);
+			ClearTimer(AudioStopTimerHandle);
+			FTimerHandle TailCut;
+			World->GetTimerManager().SetTimer(TailCut, FTimerDelegate::CreateWeakLambda(ActiveAudio.Get(), [Tail = TWeakObjectPtr<UAudioComponent>(ActiveAudio)]()
+			{
+				if (UAudioComponent* Audio = Tail.Get()) { Audio->FadeOut(0.1f, 0.0f); }
+			}), Remaining, false);
+		}
 		ActiveAudio = nullptr;
 	}
 }

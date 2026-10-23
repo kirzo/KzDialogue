@@ -243,7 +243,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player
 {
 	if (Player.IsPlaying() || IsValid(Player.GetProvider()))
 	{
-		Player.Interrupt();
+		// A dialogue past its last line closes as it would have; anything else is interrupted.
+		if (Player.GetState() == EKzDialogueState::Exiting) { Player.FinishExit(); }
+		else { Player.Interrupt(); }
 		if (Player.IsPlaying() || IsValid(Player.GetProvider()))
 		{
 			return nullptr;
