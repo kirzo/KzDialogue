@@ -62,36 +62,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText NickName;
 
-#if WITH_EDITORONLY_DATA
-	/** CRC32 of DisplayName's source string. Updated automatically; used to detect translation drift. */
-	UPROPERTY()
-	uint32 SourceDisplayNameHash = 0;
-
-	/** CRC32 of GivenName's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceGivenNameHash = 0;
-
-	/** CRC32 of FamilyName's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceFamilyNameHash = 0;
-
-	/** CRC32 of SecondFamilyName's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceSecondFamilyNameHash = 0;
-
-	/** CRC32 of Honorific's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceHonorificHash = 0;
-
-	/** CRC32 of Qualifier's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceQualifierHash = 0;
-
-	/** CRC32 of NickName's source string. Same role as SourceDisplayNameHash. */
-	UPROPERTY()
-	uint32 SourceNickNameHash = 0;
-#endif
-
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
 	FText GetResolvedDisplayName() const;
@@ -105,7 +75,7 @@ public:
 	//~ UObject
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 #if WITH_EDITOR
-	/** Calls Func(Key, Text, SourceHash, WordText) for every localizable name field; Key is its stable localization key, WordText is null for DisplayName. */
+	/** Calls Func(Key, Text, WordText) for every localizable name field; Key is its stable localization key, WordText is null for DisplayName. */
 	template <typename FuncType>
 	void ForEachLocalizedField(FuncType&& Func) { VisitLocalizedFields(*this, Func); }
 	template <typename FuncType>
@@ -120,7 +90,7 @@ public:
 	virtual void PostInitProperties() override;
 
 private:
-	/** Editor-only invariant pass: AssetId, stable FText keys, source hashes. Idempotent. */
+	/** Editor-only invariant pass: AssetId and stable FText keys. Idempotent. */
 	void RefreshMetadata();
 
 	/** Re-anchor every localizable FText to its stable GUID-derived (Namespace, Key). True when a text changed. */
@@ -129,13 +99,13 @@ private:
 	template <typename SelfType, typename FuncType>
 	static void VisitLocalizedFields(SelfType& Self, FuncType& Func)
 	{
-		Func(TEXT("DisplayName"), Self.DisplayName, Self.SourceDisplayNameHash, static_cast<decltype(&Self.GivenName)>(nullptr));
-		Func(TEXT("GivenName"), Self.GivenName.Text, Self.SourceGivenNameHash, &Self.GivenName);
-		Func(TEXT("FamilyName"), Self.FamilyName.Text, Self.SourceFamilyNameHash, &Self.FamilyName);
-		Func(TEXT("SecondFamilyName"), Self.SecondFamilyName.Text, Self.SourceSecondFamilyNameHash, &Self.SecondFamilyName);
-		Func(TEXT("Honorific"), Self.Honorific.Text, Self.SourceHonorificHash, &Self.Honorific);
-		Func(TEXT("Qualifier"), Self.Qualifier.Text, Self.SourceQualifierHash, &Self.Qualifier);
-		Func(TEXT("NickName"), Self.NickName.Text, Self.SourceNickNameHash, &Self.NickName);
+		Func(TEXT("DisplayName"), Self.DisplayName, static_cast<decltype(&Self.GivenName)>(nullptr));
+		Func(TEXT("GivenName"), Self.GivenName.Text, &Self.GivenName);
+		Func(TEXT("FamilyName"), Self.FamilyName.Text, &Self.FamilyName);
+		Func(TEXT("SecondFamilyName"), Self.SecondFamilyName.Text, &Self.SecondFamilyName);
+		Func(TEXT("Honorific"), Self.Honorific.Text, &Self.Honorific);
+		Func(TEXT("Qualifier"), Self.Qualifier.Text, &Self.Qualifier);
+		Func(TEXT("NickName"), Self.NickName.Text, &Self.NickName);
 	}
 #endif
 };

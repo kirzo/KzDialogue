@@ -180,7 +180,7 @@ void UKzSpeakerAsset::RefreshMetadata()
 	// A referenced shared word wins: the inline text empties so the localization gather
 	// only ever sees one of the two. Emptiness is judged by SOURCE string and identity, not
 	// FText::IsEmpty: a keyed empty text can display a stale translation and lie.
-	ForEachLocalizedField([&bDirty](const TCHAR*, FText& Text, uint32&, FKzWordText* WordText)
+	ForEachLocalizedField([&bDirty](const TCHAR*, FText& Text, FKzWordText* WordText)
 	{
 		const FString* Source = FTextInspector::GetSourceString(Text);
 		if (WordText && WordText->Word && ((Source && !Source->IsEmpty()) || FTextInspector::GetNamespace(Text).IsSet()))
@@ -191,16 +191,6 @@ void UKzSpeakerAsset::RefreshMetadata()
 	});
 
 	bDirty |= RebindFTextKeys();
-
-	ForEachLocalizedField([&bDirty](const TCHAR*, const FText& Text, uint32& Hash, FKzWordText*)
-	{
-		const uint32 NewHash = KzComputeSourceTextHash(Text);
-		if (NewHash != Hash)
-		{
-			Hash = NewHash;
-			bDirty = true;
-		}
-	});
 
 	if (bDirty)
 	{
@@ -215,7 +205,7 @@ bool UKzSpeakerAsset::RebindFTextKeys()
 	const FString Namespace = FString::Printf(TEXT("KzSpeaker.%s"), *AssetId.ToString(EGuidFormats::Digits));
 
 	bool bChanged = false;
-	ForEachLocalizedField([&bChanged, &Namespace](const TCHAR* Key, FText& Text, uint32&, FKzWordText*)
+	ForEachLocalizedField([&bChanged, &Namespace](const TCHAR* Key, FText& Text, FKzWordText*)
 	{
 		bChanged |= KzAnchorText(Text, Namespace, Key);
 	});

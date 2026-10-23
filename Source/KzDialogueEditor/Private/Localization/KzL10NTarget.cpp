@@ -484,9 +484,9 @@ void KzDialogueL10N::CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, co
 	TSet<UKzWordAsset*> WordSet;
 	for (const UKzSpeakerAsset* Speaker : Speakers)
 	{
-		Speaker->ForEachLocalizedField([&](const TCHAR* Field, const FText& Text, uint32 SourceHash, const FKzWordText* WordText)
+		Speaker->ForEachLocalizedField([&](const TCHAR* Field, const FText& Text, const FKzWordText* WordText)
 		{
-			Add(Text, Speaker, nullptr, Field, SourceHash);
+			Add(Text, Speaker, nullptr, Field, KzComputeSourceTextHash(Text));
 			if (WordText && WordText->Word) { WordSet.Add(WordText->Word); }
 		});
 	}

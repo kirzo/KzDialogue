@@ -660,23 +660,32 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 					Line.LineId, i);
 			}
 
-			// Every source placeholder must survive into the translation. EXTRA translation
-			// placeholders are fine when they are named-asset tokens: the gender mechanism
+			// Every source placeholder must survive into the translation. A named-asset token may
+			// change its part ("{Kirzo}" as "{Kirzo:given}"): how to name someone is the translator's
+			// call. EXTRA named-token placeholders are fine too: the gender mechanism
 			// ("{player:gender}|gender(...)") exists only in translations by design.
-			const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
-			TSet<FString> Problems;
-			for (const FString& Arg : SourceArgs)
+			auto TokenOf = [](const FString& Arg)
 			{
-				if (!TranslationArgs.Contains(Arg)) { Problems.Add(Arg); }
-			}
-			for (const FString& Arg : TranslationArgs)
-			{
-				if (SourceArgs.Contains(Arg)) { continue; }
-
 				FString Token = Arg;
 				FString Modifier;
 				Arg.Split(TEXT(":"), &Token, &Modifier);
-				if (!NamedTokens.Contains(FName(*Token))) { Problems.Add(Arg); }
+				return Token;
+			};
+			const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
+			TSet<FString> TranslationTokens;
+			for (const FString& Arg : TranslationArgs) { TranslationTokens.Add(TokenOf(Arg)); }
+
+			TSet<FString> Problems;
+			for (const FString& Arg : SourceArgs)
+			{
+				if (TranslationArgs.Contains(Arg)) { continue; }
+
+				const FString Token = TokenOf(Arg);
+				if (!NamedTokens.Contains(FName(*Token)) || !TranslationTokens.Contains(Token)) { Problems.Add(Arg); }
+			}
+			for (const FString& Arg : TranslationArgs)
+			{
+				if (!SourceArgs.Contains(Arg) && !NamedTokens.Contains(FName(*TokenOf(Arg)))) { Problems.Add(Arg); }
 			}
 			if (Problems.Num() > 0)
 			{
@@ -732,7 +741,7 @@ void UKzDialogueValidator_NamedAsset::ValidateSpeakerAsset(const UKzSpeakerAsset
 	const FString ExpectedNamespace = FString::Printf(TEXT("KzSpeaker.%s"), *Speaker->AssetId.ToString(EGuidFormats::Digits));
 
 	// Flags exactly what the resave rebind would change.
-	Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
+	Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, const FKzWordText*)
 	{
 		FText Anchored = Text;
 		if (KzAnchorText(Anchored, ExpectedNamespace, Key))
@@ -755,7 +764,7 @@ void UKzDialogueValidator_NamedAsset::ValidateSpeakerAsset(const UKzSpeakerAsset
 	{
 		if (!LocHelper.LoadForeignArchive(Culture, ELocTextHelperLoadFlags::Load, nullptr)) { continue; }
 
-		Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, uint32, const FKzWordText*)
+		Speaker->ForEachLocalizedField([&](const TCHAR* Key, const FText& Text, const FKzWordText*)
 		{
 			const FString* SourceString = FTextInspector::GetSourceString(Text);
 			if (Text.IsEmpty() || !SourceString) { return; }

@@ -81,9 +81,9 @@ namespace KzDialogueL10N::Detail
 		FText* Found = nullptr;
 		if (UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Asset))
 		{
-			Speaker->ForEachLocalizedField([&](const TCHAR* FieldKey, FText& Text, uint32 Hash, FKzWordText*)
+			Speaker->ForEachLocalizedField([&](const TCHAR* FieldKey, FText& Text, FKzWordText*)
 			{
-				if (Key == FieldKey) { Found = &Text; OutHash = Hash; }
+				if (Key == FieldKey) { Found = &Text; OutHash = KzComputeSourceTextHash(Text); }
 			});
 		}
 		return Found;
