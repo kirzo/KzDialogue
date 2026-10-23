@@ -14,6 +14,7 @@ class UAudioComponent;
 class USoundWave;
 class UKzDialogueProvider;
 class UKzDialogueSpeakerComponent;
+struct FStreamableHandle;
 
 /**
  * Runtime, baked-to-seconds copy of a timeline event for the currently playing line.
@@ -334,6 +335,9 @@ private:
 	void HandleAudioStopElapsed();
 	void StopLineAudio(float FadeTime = 0.1f);
 
+	/** Async-loads the current line's audio and the next one's, so a line start does not hitch on a synchronous load. */
+	void PrefetchLineAudio();
+
 	// Speaking level: drive a smoothed 0..1 amplitude from the current line's audio envelope.
 	void BindAudioEnvelope();
 	void UnbindAudioEnvelope();
@@ -366,6 +370,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UAudioComponent> ActiveAudio = nullptr;
+
+	/** Holds the prefetched audio in memory until the next line replaces it. */
+	TSharedPtr<FStreamableHandle> AudioPrefetchHandle;
 
 	/** Component whose audio envelope currently drives SpeakingLevel. */
 	TWeakObjectPtr<UAudioComponent> EnvelopeBoundAudio;

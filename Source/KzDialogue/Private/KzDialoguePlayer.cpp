@@ -348,6 +348,7 @@ void UKzDialoguePlayer::Enter_Entering()
 {
 	SetState(EKzDialogueState::Entering);
 	const uint32 Serial = StateSerial;
+	PrefetchLineAudio();
 
 	PendingViewAcks = 0;
 	OnRequestDialogueEnter.Broadcast(this);
@@ -370,6 +371,7 @@ void UKzDialoguePlayer::Enter_LineEntering()
 
 	const FKzDialogueLine PreviousLine = MoveTemp(CurrentLine);
 	CurrentLine = Provider->Advance();
+	PrefetchLineAudio();
 
 	// Decide what to do with the previous line's audio now that we know the incoming one.
 	ResolveOutgoingAudio(PreviousLine, &CurrentLine);
@@ -569,6 +571,7 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 	PendingViewAcks = 0;
 	Provider = nullptr;
 	CurrentLine = FKzDialogueLine{};
+	AudioPrefetchHandle.Reset();
 
 	OnDialogueFinished.Broadcast(this, Reason);
 }

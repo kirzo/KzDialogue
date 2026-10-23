@@ -24,6 +24,11 @@ public:
 	FKzDialogueLine Advance();
 	virtual FKzDialogueLine Advance_Implementation() PURE_VIRTUAL(UKzDialogueProvider::Advance, return {};);
 
+	/** The line Advance would return, without advancing; the player prefetches its audio. Empty when not known yet. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
+	FKzDialogueLine PeekNext() const;
+	virtual FKzDialogueLine PeekNext_Implementation() const { return {}; }
+
 	/** Reset the cursor so playback can start over. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
 	void Reset();
@@ -84,6 +89,7 @@ public:
 
 	virtual bool HasNext_Implementation() const override { return CursorIndex + 1 < Lines.Num(); }
 	virtual FKzDialogueLine Advance_Implementation() override;
+	virtual FKzDialogueLine PeekNext_Implementation() const override { return Lines.IsValidIndex(CursorIndex + 1) ? Lines[CursorIndex + 1] : FKzDialogueLine{}; }
 	virtual void Reset_Implementation() override { CursorIndex = INDEX_NONE; }
 
 private:

@@ -1,12 +1,14 @@
 // Copyright 2026 kirzo
 
 #include "KzDialoguePlayer.h"
+#include "KzDialogueProvider.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueSpeakerComponent.h"
 
 #include "AudioDevice.h"
 #include "Sound/SoundWave.h"
 #include "Components/AudioComponent.h"
+#include "Engine/AssetManager.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
 #include "Sound/SoundBase.h"
@@ -36,6 +38,17 @@ void UKzDialoguePlayer::StartLineAudio()
 	}
 
 	StartLineAudioNow();
+}
+
+void UKzDialoguePlayer::PrefetchLineAudio()
+{
+	// The new handle takes the current audio before the old one lets it go, so it never drops out of memory.
+	TArray<FSoftObjectPath> Paths;
+	if (!CurrentLine.Audio.IsNull()) { Paths.Add(CurrentLine.Audio.ToSoftObjectPath()); }
+	const FKzDialogueLine NextLine = IsValid(Provider) ? Provider->PeekNext() : FKzDialogueLine{};
+	if (!NextLine.Audio.IsNull()) { Paths.Add(NextLine.Audio.ToSoftObjectPath()); }
+
+	AudioPrefetchHandle = Paths.IsEmpty() ? nullptr : UAssetManager::GetStreamableManager().RequestAsyncLoad(MoveTemp(Paths));
 }
 
 void UKzDialoguePlayer::HandleAudioDelayElapsed()
