@@ -109,7 +109,7 @@ void SKzDialogueDashboard::RebuildPanel()
 			[
 				SNew(SButton)
 					.Text(LOCTEXT("GeneratePseudo", "Pseudo"))
-					.ToolTipText(LOCTEXT("GeneratePseudoTip", "Fill the pseudo culture's archive with machine translations of every gathered text: lengthened, accented and bracketed. UI overflowing with the padding would overflow in real languages; on-screen text WITHOUT brackets escaped the gather. Re-run after each Gather, then compile the pseudo culture and switch to it in PIE. Editor-only data unless a build stages the culture explicitly."))
+					.ToolTipText(LOCTEXT("GeneratePseudoTip", "Gather, fill the pseudo culture's archive with machine translations of every gathered text (lengthened, accented and bracketed) and compile it. UI overflowing with the padding would overflow in real languages; on-screen text WITHOUT brackets escaped the gather. Then switch to the pseudo culture in PIE. Editor-only data unless a build stages the culture explicitly."))
 					.OnClicked(this, &SKzDialogueDashboard::OnGeneratePseudoClicked)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(4.f, 0.f, 0.f, 0.f)
@@ -134,26 +134,39 @@ void SKzDialogueDashboard::RebuildPanel()
 
 FReply SKzDialogueDashboard::OnGeneratePseudoClicked()
 {
+	// The whole round in one click: pseudo-translate what the Gather just found, then compile it.
+	if (!RunGather()) { return FReply::Handled(); }
+
 	int32 Count = 0;
 	FText Error;
-	const bool bRan = FKzDialogueTranslationCsv::GeneratePseudoTranslations(Count, Error);
+	if (!FKzDialogueTranslationCsv::GeneratePseudoTranslations(Count, Error))
+	{
+		ShowDashboardNotification(Error, false);
+		return FReply::Handled();
+	}
 
-	ShowDashboardNotification(bRan
-		? FText::Format(LOCTEXT("PseudoDone", "Generated {0} pseudo-translations. Compile the pseudo culture and switch to it in PIE (run Gather first if the culture was just added, so it shows up in the lists)."), FText::AsNumber(Count))
-		: Error, bRan);
+	const FString PseudoCulture = UKzDialogueSettings::Get()->PseudoCulture;
+	RunCompile(PseudoCulture);
+	ShowDashboardNotification(FText::Format(LOCTEXT("PseudoDone", "Gathered, generated {0} pseudo-translations and compiled '{1}'. Switch to it in PIE."), FText::AsNumber(Count), FText::FromString(PseudoCulture)), true);
 
 	// A fresh archive changes the coverage the panel shows.
-	if (bRan) { RebuildPanel(); }
+	RebuildPanel();
 	return FReply::Handled();
 }
 
 FReply SKzDialogueDashboard::OnGatherClicked()
 {
+	RunGather();
+	return FReply::Handled();
+}
+
+bool SKzDialogueDashboard::RunGather()
+{
 	ULocalizationTarget* Target = FindDialogueLocTarget();
 	if (!Target)
 	{
 		ShowDashboardNotification(LOCTEXT("NoLocTarget", "Localization target not found. Create it once in the Localization Dashboard (Tools menu)."), false);
-		return FReply::Handled();
+		return false;
 	}
 
 	// Same flow as the engine Localization Dashboard button: gather reads SAVED packages,
@@ -164,24 +177,23 @@ FReply SKzDialogueDashboard::OnGatherClicked()
 	{
 		if (FMessageDialog::Open(EAppMsgType::OkCancel, LOCTEXT("UnsavedBeforeGatherMsg", "There are unsaved changes. These changes may not be gathered from correctly."), LOCTEXT("UnsavedBeforeGatherTitle", "Unsaved Changes Before Gather")) == EAppReturnType::Cancel)
 		{
-			return FReply::Handled();
+			return false;
 		}
 	}
 
 	TSharedPtr<SWindow> Window = FSlateApplication::Get().FindWidgetWindow(AsShared());
 	if (!Window.IsValid()) { Window = FSlateApplication::Get().GetActiveTopLevelWindow(); }
-	if (!Window.IsValid()) { return FReply::Handled(); }
+	if (!Window.IsValid()) { return false; }
 
-	if (LocalizationCommandletTasks::GatherTextForTarget(Window.ToSharedRef(), Target))
-	{
-		// Keep the engine dashboard's word counts / conflict status in sync, like its own button does.
-		Target->UpdateWordCountsFromCSV();
-		Target->UpdateStatusFromConflictReport();
+	if (!LocalizationCommandletTasks::GatherTextForTarget(Window.ToSharedRef(), Target)) { return false; }
 
-		// The manifest/archives changed: a fresh panel re-reads them.
-		RebuildPanel();
-	}
-	return FReply::Handled();
+	// Keep the engine dashboard's word counts / conflict status in sync, like its own button does.
+	Target->UpdateWordCountsFromCSV();
+	Target->UpdateStatusFromConflictReport();
+
+	// The manifest/archives changed: a fresh panel re-reads them.
+	RebuildPanel();
+	return true;
 }
 
 TSharedRef<SWidget> SKzDialogueDashboard::BuildCompileMenu()

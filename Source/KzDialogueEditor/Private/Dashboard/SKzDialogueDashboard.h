@@ -36,13 +36,16 @@ private:
 	/** Runs the engine's Gather Text / Compile Text commandlet for the plugin's localization target, without opening the Localization Dashboard. */
 	FReply OnGatherClicked();
 
+	/** Gather Text with the dirty-package prompt; false when cancelled or failed. */
+	bool RunGather();
+
 	/** Compile menu: every culture at once, or one culture alone (only its .locres changes, which keeps source control clean after a single-language edit). */
 	TSharedRef<SWidget> BuildCompileMenu();
 
 	/** Compile Text for the whole target, or for one culture when given. */
 	void RunCompile(FString Culture);
 
-	/** Regenerates the pseudo culture's archive from the gathered manifest (overflow/font/hardcoded-text QA). */
+	/** Gathers, regenerates the pseudo culture's archive from the manifest and compiles it (overflow/font/hardcoded-text QA). */
 	FReply OnGeneratePseudoClicked();
 
 	void OnAssetRegistryChanged(const FAssetData& Data);

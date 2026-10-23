@@ -150,7 +150,7 @@ private:
 	};
 
 	/** Translation editors in build (visual) order, keyed "<culture>|<namespace>|<key>"; rebuilt every Refresh. */
-	TArray<TPair<FString, TWeakPtr<class SEditableText>>> TranslationEditors;
+	TArray<TPair<FString, TWeakPtr<class SMultiLineEditableText>>> TranslationEditors;
 
 	/** Set by the Tab handler right before it forces the commit, so that commit advances the focus like Enter. */
 	bool bAdvanceTranslationFocus = false;

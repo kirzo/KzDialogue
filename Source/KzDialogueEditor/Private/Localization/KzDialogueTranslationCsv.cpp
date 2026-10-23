@@ -28,7 +28,10 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Internationalization/InternationalizationManifest.h"
+#include "EditorDirectories.h"
 #include "LocalizationModule.h"
+#include "Logging/MessageLog.h"
+#include "Logging/TokenizedMessage.h"
 #include "LocalizationSettings.h"
 #include "LocalizationTargetTypes.h"
 #include "LocTextHelper.h"
@@ -46,6 +49,8 @@
 #define LOCTEXT_NAMESPACE "KzDialogueTranslationCsv"
 
 DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueL10N, Log, All);
+
+const FName FKzDialogueTranslationCsv::MessageLogName(TEXT("KzDialogueL10N"));
 
 bool FKzDialogueTranslationCsv::ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError)
 {
@@ -468,14 +473,43 @@ namespace
 		return true;
 	}
 
-	void ShowNotification(const FText& Message, bool bSuccess)
+	/** Inline writes share one log page until an import opens its own. */
+	bool GInlineEditsPageOpen = false;
+
+	void BeginLogPage(FMessageLog& Log, const FText& Title)
+	{
+		Log.NewPage(Title);
+		GInlineEditsPageOpen = false;
+	}
+
+	/** A row an import skipped, with its asset as a clickable token when it has one. */
+	void LogRow(FMessageLog& Log, const FString& AssetPath, const FString& Message)
+	{
+		TSharedRef<FTokenizedMessage> Entry = Log.Warning();
+		if (!AssetPath.IsEmpty()) { Entry->AddToken(FAssetNameToken::Create(AssetPath)); }
+		Entry->AddToken(FTextToken::Create(FText::FromString(Message)));
+	}
+
+	void ShowNotification(const FText& Message, bool bSuccess, bool bWithLogLink = false)
 	{
 		FNotificationInfo Info(Message);
 		Info.ExpireDuration = 6.0f;
+		if (bWithLogLink)
+		{
+			Info.HyperlinkText = LOCTEXT("ShowLog", "Show log");
+			Info.Hyperlink = FSimpleDelegate::CreateLambda([] { FMessageLog(FKzDialogueTranslationCsv::MessageLogName).Open(EMessageSeverity::Info, /*bOpenEvenIfEmpty=*/true); });
+		}
 		if (TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info))
 		{
 			Item->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 		}
+	}
+
+	/** The folder the last dialog of this kind used, so a round trip does not start from Saved each time. */
+	FString LastDirectory(ELastDirectory::Type Kind)
+	{
+		const FString Last = FEditorDirectories::Get().GetLastDirectory(Kind);
+		return Last.IsEmpty() ? FPaths::ProjectSavedDir() : Last;
 	}
 
 	void OnExportClicked(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& TranslationCulture = FString())
@@ -500,10 +534,11 @@ namespace
 		TArray<FString> OutFiles;
 		const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 		if (!FDesktopPlatformModule::Get()->SaveFileDialog(ParentWindow, LOCTEXT("ExportDialogTitle", "Export translation CSV").ToString(),
-			FPaths::ProjectSavedDir(), DefaultName, TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
+			LastDirectory(ELastDirectory::GENERIC_EXPORT), DefaultName, TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
 		{
 			return;
 		}
+		FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_EXPORT, FPaths::GetPath(OutFiles[0]));
 
 		FText Error;
 		if (FKzDialogueTranslationCsv::ExportAssets(Assets, OutFiles[0], Error, LineFilter, OtherIdentities.Get(), TranslationCulture))
@@ -522,10 +557,11 @@ namespace
 		const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 		if (!FDesktopPlatformModule::Get()->OpenFileDialog(ParentWindow,
 			FText::Format(LOCTEXT("ImportDialogTitle", "Import translation CSV ({0})"), FText::FromString(Culture)).ToString(),
-			FPaths::ProjectSavedDir(), FString(), TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
+			LastDirectory(ELastDirectory::GENERIC_IMPORT), FString(), TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
 		{
 			return;
 		}
+		FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_IMPORT, FPaths::GetPath(OutFiles[0]));
 
 		// Wrong-file guard: warn when the file name carries a culture token that is not the chosen culture.
 		FKzLocTargetInfo Target;
@@ -573,9 +609,9 @@ namespace
 		}
 
 		const FText Summary = FText::Format(
-			LOCTEXT("ImportSummary", "{0}: {1} imported, {2} drifted (skipped, see Output Log), {3} untranslated, {4} unresolved. Run Compile Text in the Localization Dashboard to apply."),
+			LOCTEXT("ImportSummary", "{0}: {1} imported, {2} drifted (skipped), {3} untranslated, {4} unresolved. Run Compile Text in the Localization Dashboard to apply."),
 			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
-		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0);
+		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 	}
 }
 
@@ -891,6 +927,9 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 	if (!Writer.Open(OutError, { Culture })) { return false; }
 	FLocTextHelper& LocHelper = Writer.GetHelper();
 
+	FMessageLog Log(MessageLogName);
+	BeginLogPage(Log, FText::Format(LOCTEXT("CsvImportPage", "Import {0} ({1})"), FText::FromString(FPaths::GetCleanFilename(CsvPath)), FText::FromString(Culture)));
+
 	TMap<FString, UObject*> LoadedAssets;
 
 	for (int32 RowIdx = 1; RowIdx < Rows.Num(); ++RowIdx)
@@ -918,13 +957,13 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			if (!ManifestEntry.IsValid())
 			{
 				++OutStats.Unresolved;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved row %d: project text '%s,%s' is not in the manifest anymore. Re-run Gather Text or drop the row."), RowIdx + 1, *Namespace, *Key);
+				LogRow(Log, FString(), FString::Printf(TEXT("Unresolved row %d: project text '%s,%s' is not gathered (added since the last Gather, or gone). Run Gather Text, or drop the row."), RowIdx + 1, *Namespace, *Key));
 				continue;
 			}
 			if (SourceTextCol && !SourceMatches(ManifestEntry->Source.Text, Cell(SourceTextCol)))
 			{
 				++OutStats.Drifted;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: project text '%s,%s' changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Namespace, *Key);
+				LogRow(Log, FString(), FString::Printf(TEXT("Drifted row %d: project text '%s,%s' changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Namespace, *Key));
 				continue;
 			}
 
@@ -935,7 +974,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			else
 			{
 				++OutStats.Unresolved;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Failed to write row %d into the '%s' archive: project text '%s,%s'."), RowIdx + 1, *Culture, *Namespace, *Key);
+				LogRow(Log, FString(), FString::Printf(TEXT("Failed to write row %d into the '%s' archive: project text '%s,%s'."), RowIdx + 1, *Culture, *Namespace, *Key));
 			}
 			continue;
 		}
@@ -952,7 +991,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		if (!SourceText)
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved row %d: asset '%s', key '%s'. The asset, line or field no longer exists."), RowIdx + 1, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Unresolved row %d, key '%s': the asset, line or field no longer exists."), RowIdx + 1, *Key));
 			continue;
 		}
 
@@ -965,7 +1004,7 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 			if (!SourceTextCol || !CurrentSource || !SourceMatches(*CurrentSource, Cell(SourceTextCol)))
 			{
 				++OutStats.Drifted;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted row %d: asset '%s', key '%s'. The source text changed after this CSV was exported; needs retranslation."), RowIdx + 1, *AssetPath, *Key);
+				LogRow(Log, AssetPath, FString::Printf(TEXT("Drifted row %d, key '%s': the source text changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Key));
 				continue;
 			}
 		}
@@ -982,14 +1021,13 @@ bool FKzDialogueTranslationCsv::ImportCsv(const FString& CsvPath, const FString&
 		else
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Failed to write row %d into the '%s' archive: asset '%s', key '%s'."), RowIdx + 1, *Culture, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Failed to write row %d, key '%s', into the '%s' archive."), RowIdx + 1, *Key, *Culture));
 		}
 	}
 
 	if (!Writer.Save(OutError)) { return false; }
 
-	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
-		*Culture, *CsvPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
+	Log.Info(FText::Format(LOCTEXT("ImportLogSummary", "{0} imported, {1} drifted, {2} untranslated, {3} unresolved."), OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
 	return true;
 }
 
@@ -1003,20 +1041,35 @@ bool FKzDialogueTranslationCsv::WriteTranslation(const FString& Culture, const T
 	FKzArchiveWriter Writer;
 	if (!Writer.Open(OutError, { Culture })) { return false; }
 
-	int32 Written = 0;
+	// Archive writes have no undo: each one is logged with what it replaced, to restore by hand.
+	TArray<FText> Replaced;
 	for (const TPair<FString, FString>& Identity : Identities)
 	{
+		const TSharedPtr<FArchiveEntry> Previous = Writer.GetHelper().FindTranslation(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr);
+		const FString OldTranslation = Previous.IsValid() ? Previous->Translation.Text : FString();
 		if (Writer.Write(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr, FLocItem(Source), FLocItem(Translation)))
 		{
-			++Written;
+			Replaced.Add(FText::Format(LOCTEXT("InlineWriteLog", "{0} {1},{2}: '{3}' -> '{4}'"), FText::FromString(Culture), FText::FromString(Identity.Key), FText::FromString(Identity.Value), FText::FromString(OldTranslation), FText::FromString(Translation)));
 		}
 	}
-	if (Written == 0)
+	if (Replaced.IsEmpty())
 	{
 		OutError = LOCTEXT("WriteTranslationFailed", "The translation could not be written into the archive (identity no longer gathered?).");
 		return false;
 	}
-	return Writer.Save(OutError);
+	if (!Writer.Save(OutError)) { return false; }
+
+	FMessageLog Log(MessageLogName);
+	if (!GInlineEditsPageOpen)
+	{
+		Log.NewPage(LOCTEXT("InlineEditsPage", "Inline translation edits"));
+		GInlineEditsPageOpen = true;
+	}
+	for (const FText& Entry : Replaced)
+	{
+		Log.Info(Entry);
+	}
+	return true;
 }
 
 void FKzDialogueTranslationCsv::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken)
@@ -1319,10 +1372,11 @@ void FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData> SelectedA
 
 	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 	FString OutDirectory;
-	if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(ParentWindow, LOCTEXT("ExportPoDialogTitle", "Export PO files to...").ToString(), FPaths::ProjectSavedDir(), OutDirectory))
+	if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(ParentWindow, LOCTEXT("ExportPoDialogTitle", "Export PO files to...").ToString(), LastDirectory(ELastDirectory::GENERIC_EXPORT), OutDirectory))
 	{
 		return;
 	}
+	FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_EXPORT, OutDirectory);
 
 	// Dialogue and Other files land in the same per-culture folders; either half alone is a
 	// valid export, so success means at least one of them wrote.
@@ -1371,8 +1425,11 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 	if (!Writer.Open(OutError, { Culture })) { return false; }
 	FLocTextHelper& LocHelper = Writer.GetHelper();
 
+	FMessageLog Log(MessageLogName);
+	BeginLogPage(Log, FText::Format(LOCTEXT("PoImportPage", "Import {0} ({1})"), FText::FromString(FPaths::GetCleanFilename(PoPath)), FText::FromString(Culture)));
+
 	// A msgid that no longer matches the manifest source is drifted. Fuzzy entries are unconfirmed work: translators clear the flag when they revise them.
-	auto ProcessEntry = [&Writer, &LocHelper, &OutStats, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
+	auto ProcessEntry = [&Writer, &LocHelper, &OutStats, &Log, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
 	{
 		const FString Ctxt = PoUnescape(RawCtxt);
 		const FString Id = PoUnescape(RawId);
@@ -1391,7 +1448,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		if (!Ctxt.Split(TEXT(","), &Namespace, &Key))
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("PO entry with unrecognized msgctxt '%s' (expected 'Namespace,Key')."), *Ctxt);
+			LogRow(Log, FString(), FString::Printf(TEXT("PO entry with unrecognized msgctxt '%s' (expected 'Namespace,Key')."), *Ctxt));
 			return;
 		}
 
@@ -1399,13 +1456,13 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		if (!ManifestEntry.IsValid())
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Unresolved PO entry '%s,%s': not in the manifest anymore. Re-run Gather Text or drop the entry."), *Namespace, *Key);
+			LogRow(Log, FString(), FString::Printf(TEXT("Unresolved PO entry '%s,%s': not gathered (added since the last Gather, or gone). Run Gather Text, or drop the entry."), *Namespace, *Key));
 			return;
 		}
 		if (!SourceMatches(ManifestEntry->Source.Text, Id))
 		{
 			++OutStats.Drifted;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Drifted PO entry '%s,%s': the source text changed after this file was exported; needs retranslation."), *Namespace, *Key);
+			LogRow(Log, FString(), FString::Printf(TEXT("Drifted PO entry '%s,%s': the source text changed after this file was exported; needs retranslation."), *Namespace, *Key));
 			return;
 		}
 
@@ -1416,7 +1473,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 		else
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Failed to write PO entry '%s,%s' into the '%s' archive."), *Namespace, *Key, *Culture);
+			LogRow(Log, FString(), FString::Printf(TEXT("Failed to write PO entry '%s,%s' into the '%s' archive."), *Namespace, *Key, *Culture));
 		}
 	};
 
@@ -1486,8 +1543,7 @@ bool FKzDialogueTranslationCsv::ImportPoFile(const FString& PoPath, const FStrin
 
 	if (!Writer.Save(OutError)) { return false; }
 
-	UE_LOG(LogKzDialogueL10N, Log, TEXT("Imported %s translations from %s: %d imported, %d drifted, %d untranslated, %d unresolved."),
-		*Culture, *PoPath, OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved);
+	Log.Info(FText::Format(LOCTEXT("ImportLogSummary", "{0} imported, {1} drifted, {2} untranslated, {3} unresolved."), OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
 	return true;
 }
 
@@ -1963,6 +2019,9 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 
 	const FScopedTransaction Transaction(LOCTEXT("SourceFixTrans", "Import Source Fixes"));
 
+	FMessageLog Log(MessageLogName);
+	BeginLogPage(Log, FText::Format(LOCTEXT("SourceFixPage", "Source fixes {0}"), FText::FromString(FPaths::GetCleanFilename(CsvPath))));
+
 	TMap<FString, UObject*> LoadedAssets;
 	for (int32 RowIdx = 1; RowIdx < Rows.Num(); ++RowIdx)
 	{
@@ -1979,7 +2038,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		if (CsvSource.IsEmpty())
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: empty SourceText for '%s,%s'; emptying a text is an editor decision, not a CSV one."), RowIdx + 1, *Namespace, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Source-fix row %d: empty SourceText for '%s,%s'; emptying a text is an editor decision, not a CSV one."), RowIdx + 1, *Namespace, *Key));
 			continue;
 		}
 
@@ -1991,7 +2050,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 			if (!bQueryLoaded || !Query.GetManifestSource(Namespace, Key, ManifestSource))
 			{
 				++OutStats.Unresolved;
-				UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: project text '%s,%s' is not in the manifest anymore."), RowIdx + 1, *Namespace, *Key);
+				LogRow(Log, FString(), FString::Printf(TEXT("Source-fix row %d: project text '%s,%s' is not gathered (added since the last Gather, or gone)."), RowIdx + 1, *Namespace, *Key));
 				continue;
 			}
 			if (SourceMatches(ManifestSource, CsvSource))
@@ -2019,8 +2078,9 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 			if (Handled.IsEmpty())
 			{
 				// The authored text no longer matches the exported source (edited on both
-				// sides) or lives where the rewrite cannot reach; details logged above.
+				// sides) or lives where the rewrite cannot reach.
 				++OutStats.Conflicted;
+				LogRow(Log, FString(), FString::Printf(TEXT("Conflicted source-fix row %d: project text '%s,%s' could not be rewritten; the Output Log says where it lives."), RowIdx + 1, *Namespace, *Key));
 			}
 			else if (Rewritten > 0)
 			{
@@ -2047,13 +2107,13 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		{
 			// Editing one line would detach it from the others; the fix is a decision for the editor.
 			++OutStats.Conflicted;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is a shared text; fix it in the editor or unmerge it first."), RowIdx + 1, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Conflicted source-fix row %d, key '%s': a shared text; fix it in the editor or unmerge it first."), RowIdx + 1, *Key));
 			continue;
 		}
 		if (!TargetText)
 		{
 			++OutStats.Unresolved;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Source-fix row %d: asset '%s', key '%s'. The asset, line or field no longer exists."), RowIdx + 1, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Source-fix row %d, key '%s': the asset, line or field no longer exists."), RowIdx + 1, *Key));
 			continue;
 		}
 
@@ -2069,7 +2129,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		if (CsvHash != CurrentHash)
 		{
 			++OutStats.Conflicted;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' changed after this CSV was exported; fix it in the editor instead."), RowIdx + 1, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Conflicted source-fix row %d, key '%s': changed after this CSV was exported; fix it in the editor instead."), RowIdx + 1, *Key));
 			continue;
 		}
 
@@ -2078,7 +2138,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		if (!CurrentNamespace.IsSet() || !CurrentKey.IsSet())
 		{
 			++OutStats.Conflicted;
-			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Conflicted source-fix row %d: asset '%s', key '%s' is no longer localizable."), RowIdx + 1, *AssetPath, *Key);
+			LogRow(Log, AssetPath, FString::Printf(TEXT("Conflicted source-fix row %d, key '%s': no longer localizable."), RowIdx + 1, *Key));
 			continue;
 		}
 
@@ -2089,8 +2149,7 @@ bool FKzDialogueTranslationCsv::ImportSourceFixes(const FString& CsvPath, FKzSou
 		++OutStats.Fixed;
 	}
 
-	UE_LOG(LogKzDialogueL10N, Log, TEXT("Source fixes from %s: %d fixed, %d conflicted, %d unchanged, %d unresolved. Save the dirty assets and re-run Gather."),
-		*CsvPath, OutStats.Fixed, OutStats.Conflicted, OutStats.Unchanged, OutStats.Unresolved);
+	Log.Info(FText::Format(LOCTEXT("SourceFixLogSummary", "{0} fixed, {1} conflicted, {2} unchanged, {3} unresolved. Save the dirty assets and re-run Gather."), OutStats.Fixed, OutStats.Conflicted, OutStats.Unchanged, OutStats.Unresolved));
 	return true;
 }
 
@@ -2099,10 +2158,11 @@ void FKzDialogueTranslationCsv::ImportSourceFixesInteractive()
 	TArray<FString> OutFiles;
 	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 	if (!FDesktopPlatformModule::Get()->OpenFileDialog(ParentWindow, LOCTEXT("SourceFixDialogTitle", "Import source fixes from CSV").ToString(),
-		FPaths::ProjectSavedDir(), FString(), TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
+		LastDirectory(ELastDirectory::GENERIC_IMPORT), FString(), TEXT("CSV files (*.csv)|*.csv"), EFileDialogFlags::None, OutFiles))
 	{
 		return;
 	}
+	FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_IMPORT, FPaths::GetPath(OutFiles[0]));
 
 	FKzSourceFixStats Stats;
 	FText Error;
@@ -2113,9 +2173,9 @@ void FKzDialogueTranslationCsv::ImportSourceFixesInteractive()
 	}
 
 	const FText Summary = FText::Format(
-		LOCTEXT("SourceFixSummary", "Source fixes: {0} fixed, {1} conflicted (skipped, see Output Log), {2} unchanged, {3} unresolved. Save the dirty assets and run Gather; translations against the old wording turn stale."),
+		LOCTEXT("SourceFixSummary", "Source fixes: {0} fixed, {1} conflicted (skipped), {2} unchanged, {3} unresolved. Save the dirty assets and run Gather; translations against the old wording turn stale."),
 		Stats.Fixed, Stats.Conflicted, Stats.Unchanged, Stats.Unresolved);
-	ShowNotification(Summary, Stats.Conflicted == 0 && Stats.Unresolved == 0);
+	ShowNotification(Summary, Stats.Conflicted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 }
 
 void FKzDialogueTranslationCsv::ImportPoInteractive(const FString& Culture)
@@ -2124,17 +2184,18 @@ void FKzDialogueTranslationCsv::ImportPoInteractive(const FString& Culture)
 	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
 	if (!FDesktopPlatformModule::Get()->OpenFileDialog(ParentWindow,
 		FText::Format(LOCTEXT("ImportPoDialogTitle", "Import PO ({0})"), FText::FromString(Culture)).ToString(),
-		FPaths::ProjectSavedDir(), FString(), TEXT("PO files (*.po)|*.po"), EFileDialogFlags::None, OutFiles))
+		LastDirectory(ELastDirectory::GENERIC_IMPORT), FString(), TEXT("PO files (*.po)|*.po"), EFileDialogFlags::None, OutFiles))
 	{
 		return;
 	}
+	FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_IMPORT, FPaths::GetPath(OutFiles[0]));
 
 	FKzTranslationImportStats Stats;
 	FText Error;
 	if (ImportPoFile(OutFiles[0], Culture, Stats, Error))
 	{
-		ShowNotification(FText::Format(LOCTEXT("PoImportDone", "PO import ({0}): {1} imported, {2} drifted, {3} untranslated, {4} unresolved."),
-			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved), true);
+		ShowNotification(FText::Format(LOCTEXT("PoImportDone", "PO import ({0}): {1} imported, {2} drifted (skipped), {3} untranslated, {4} unresolved. Run Compile Text to apply."),
+			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved), Stats.Drifted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 	}
 	else
 	{

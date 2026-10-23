@@ -14,6 +14,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Misc/MessageDialog.h"
 #include "Misc/Paths.h"
 #include "SourceCodeNavigation.h"
 #include "Components/AudioComponent.h"
@@ -37,7 +38,7 @@
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SComboButton.h"
-#include "Widgets/Input/SEditableText.h"
+#include "Widgets/Text/SMultiLineEditableText.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SSeparator.h"
 #include "Widgets/Layout/SBorder.h"
@@ -204,7 +205,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 					[
 						SNew(SComboButton)
 							.OnGetMenuContent(this, &SKzDialogueCoveragePanel::BuildImportMenu)
-							.ToolTipText(LOCTEXT("ImportTip", "Import a translated CSV or PO file into a culture's archive."))
+							.ToolTipText(LOCTEXT("ImportTip", "Import a translated CSV or PO file into a culture's archive, or source-text fixes from a CSV back into the assets."))
 							.ButtonContent()
 							[
 								SNew(STextBlock).Text(LOCTEXT("Import", "Import"))
@@ -1307,7 +1308,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 					[
 						SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
 						[
-							SNew(SImage).Image(FAppStyle::GetBrush("Icons.Unlink")).ColorAndOpacity(FSlateColor::UseForeground())
+							SNew(SImage).Image(FAppStyle::GetBrush("Icons.Lock")).ColorAndOpacity(FSlateColor::UseForeground())
 						]
 					]
 			];
@@ -1387,7 +1388,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 	const FString EditorKey = (!Entry.TranslationCulture.IsEmpty() && Entry.TranslationIdentities.Num() > 0)
 		? Entry.TranslationCulture + TEXT("|") + Entry.TranslationIdentities[0].Key + TEXT("|") + Entry.TranslationIdentities[0].Value
 		: FString();
-	TSharedPtr<SEditableText> TranslationEditor;
+	TSharedPtr<SMultiLineEditableText> TranslationEditor;
 
 	TSharedRef<SWidget> RowWidget = SNew(SBorder)
 		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
@@ -1437,13 +1438,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(2.0f, 0.0f, 4.0f, 0.0f)
 			[
-				SAssignNew(TranslationEditor, SEditableText)
+				SAssignNew(TranslationEditor, SMultiLineEditableText)
 					.Text(Entry.Translation)
 					.HintText(LOCTEXT("TranslationHint", "untranslated"))
 					.ToolTipText(Entry.Translation.IsEmpty()
-						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter or Tab: it is written into this culture's archive and the focus moves to the next row.")
+						? LOCTEXT("TranslationEditTip", "Type the translation and press Enter or Tab: it is written into this culture's archive and the focus moves to the next row. Shift+Enter starts a new line.")
 						: Entry.Translation)
 					.SelectAllTextWhenFocused(true)
+					.ModiferKeyForNewLine(EModifierKey::Shift)
 					.RevertTextOnEscape(true)
 					.ClearKeyboardFocusOnCommit(true)
 					.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent)
@@ -1656,7 +1658,10 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 		return;
 	}
 
-	// Project text: rewrite every authored occurrence (same machinery as Merge).
+	// Project text: rewrite every authored occurrence (same machinery as Merge), which may touch many packages.
+	const FText Confirm = FText::Format(LOCTEXT("NonLocConfirm", "Make '{0}' non-localizable? Every asset-authored occurrence is rewritten, possibly across many packages, and leaves the localization pipeline."), FText::FromString(Source));
+	if (FMessageDialog::Open(EAppMsgType::OkCancel, Confirm) != EAppReturnType::Ok) { return; }
+
 	FText Error;
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
@@ -1684,6 +1689,9 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 
 void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FString, FString>> Identities)
 {
+	const FText Confirm = FText::Format(LOCTEXT("MergeConfirm", "Merge the {0} identities of '{1}' into one? Every asset-authored occurrence is re-keyed, possibly across many packages."), Identities.Num(), FText::FromString(Source));
+	if (FMessageDialog::Open(EAppMsgType::OkCancel, Confirm) != EAppReturnType::Ok) { return; }
+
 	FText Error;
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
@@ -1796,7 +1804,7 @@ TArray<FString> SKzDialogueCoveragePanel::NextEditorKeysAfter(const FString& Edi
 {
 	TArray<FString> Keys;
 	bool bFound = false;
-	for (const TPair<FString, TWeakPtr<SEditableText>>& Editor : TranslationEditors)
+	for (const TPair<FString, TWeakPtr<SMultiLineEditableText>>& Editor : TranslationEditors)
 	{
 		if (bFound) { Keys.Add(Editor.Key); }
 		else if (Editor.Key == EditorKey) { bFound = true; }
@@ -1808,11 +1816,11 @@ void SKzDialogueCoveragePanel::FocusTranslationEditor(const TArray<FString>& Can
 {
 	for (const FString& Key : CandidateKeys)
 	{
-		for (const TPair<FString, TWeakPtr<SEditableText>>& Editor : TranslationEditors)
+		for (const TPair<FString, TWeakPtr<SMultiLineEditableText>>& Editor : TranslationEditors)
 		{
 			if (Editor.Key == Key)
 			{
-				if (TSharedPtr<SEditableText> Widget = Editor.Value.Pin())
+				if (TSharedPtr<SMultiLineEditableText> Widget = Editor.Value.Pin())
 				{
 					FSlateApplication::Get().SetKeyboardFocus(Widget, EFocusCause::SetDirectly);
 					return;
@@ -1841,6 +1849,17 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 {
 	FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/true, nullptr);
 
+	// Culture-less: SourceText edits made in the sheet go back into the AUTHORED assets.
+	MenuBuilder.BeginSection(NAME_None, LOCTEXT("ImportIntoAssets", "Source texts, into the assets"));
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("ImportSourceFixes", "Source fixes (CSV)..."),
+		LOCTEXT("ImportSourceFixesTip", "Apply SourceText edits made in an exported CSV back to the authored assets (dialogue lines, speaker fields, project texts). Rows whose asset changed after the export are skipped as conflicted; save the dirty assets and re-run Gather afterwards."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); RequestRefresh(); })));
+	MenuBuilder.EndSection();
+
+	MenuBuilder.BeginSection(NAME_None, LOCTEXT("ImportIntoArchives", "Translations, into a culture's archive"));
+
 	FKzLocTargetInfo Target;
 	FText Error;
 	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error) || Target.ForeignCultures.IsEmpty())
@@ -1850,17 +1869,9 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 			Error,
 			FSlateIcon(),
 			FUIAction(FExecuteAction(), FCanExecuteAction::CreateLambda([] { return false; })));
+		MenuBuilder.EndSection();
 		return MenuBuilder.MakeWidget();
 	}
-
-	// Culture-less: SourceText edits made in the sheet go back into the AUTHORED assets.
-	MenuBuilder.AddMenuEntry(
-		LOCTEXT("ImportSourceFixes", "Source fixes (CSV)..."),
-		LOCTEXT("ImportSourceFixesTip", "Apply SourceText edits made in an exported CSV back to the authored assets (dialogue lines, speaker fields, project texts). Rows whose asset changed after the export are skipped as conflicted; save the dirty assets and re-run Gather afterwards."),
-		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); RequestRefresh(); })));
-
-	MenuBuilder.AddMenuSeparator();
 
 	// Same culture list under each format; entries run the matching interactive import.
 	auto AddCultureEntries = [this](FMenuBuilder& Sub, const TArray<FString>& Cultures, TFunction<void(const FString&)> Run)
@@ -1891,6 +1902,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { FKzDialogueTranslationCsv::ImportPoInteractive(Culture); });
 		}));
 
+	MenuBuilder.EndSection();
 	return MenuBuilder.MakeWidget();
 }
 

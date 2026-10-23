@@ -163,6 +163,9 @@ struct FKzLocText
 class FKzDialogueTranslationCsv
 {
 public:
+	/** The "Dialogue Localization" message log: one page per import, plus the inline edits. Registered at module startup. */
+	static const FName MessageLogName;
+
 	/** Adds the Export / Import entries to the content browser context menu of UKzDialogueAsset. */
 	static void RegisterMenus();
 
@@ -172,10 +175,10 @@ public:
 	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. OtherIdentities appends those gathered project texts ("Namespace,Key") as asset-less rows validated by the manifest at import. TranslationCulture pre-fills the Translation column with that culture's current translations (stale ones land in StaleTranslation as reference only). */
 	static bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const TSet<FString>* OtherIdentities = nullptr, const FString& TranslationCulture = FString());
 
-	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed in the output log. */
+	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed on a message log page. */
 	static bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
 
-	/** Writes one translation for every given (Namespace, Key) identity straight into Culture's archive: the panel's inline editing. Source is the string the translation was made against (the current one). */
+	/** Writes one translation for every given (Namespace, Key) identity straight into Culture's archive: the panel's inline editing. Source is the string the translation was made against (the current one). There is no undo, so each write lands on the message log with the translation it replaced. */
 	static bool WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError);
 
 	/**

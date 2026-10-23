@@ -27,6 +27,8 @@
 
 #include "EdGraphUtilities.h"
 #include "ISequencerModule.h"
+#include "MessageLogInitializationOptions.h"
+#include "MessageLogModule.h"
 #include "Widgets/Input/SButton.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
 #include "ToolMenus.h"
@@ -113,6 +115,11 @@ void FKzDialogueEditorModule::OnStartupModule()
 	// Token renames refactor the lines and archives that reference the old token.
 	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&FKzDialogueTranslationCsv::RenameNamedTokenReferences);
 
+	FMessageLogInitializationOptions LogOptions;
+	LogOptions.bShowPages = true;
+	LogOptions.bAllowClear = true;
+	FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog").RegisterLogListing(FKzDialogueTranslationCsv::MessageLogName, LOCTEXT("L10NLogLabel", "Dialogue Localization"), LogOptions);
+
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		SKzDialogueDashboard::TabId,
 		FOnSpawnTab::CreateLambda([](const FSpawnTabArgs&)
@@ -133,6 +140,11 @@ void FKzDialogueEditorModule::OnStartupModule()
 void FKzDialogueEditorModule::OnShutdownModule()
 {
 	UKzNamedAsset::OnTokenRenamed.Remove(NamedTokenRenamedHandle);
+
+	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
+	{
+		FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog").UnregisterLogListing(FKzDialogueTranslationCsv::MessageLogName);
+	}
 
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SKzDialogueDashboard::TabId);
 
