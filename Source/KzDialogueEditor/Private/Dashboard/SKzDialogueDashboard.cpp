@@ -3,7 +3,7 @@
 #include "Dashboard/SKzDialogueDashboard.h"
 
 #include "KzDialogueAsset.h"
-#include "Localization/KzDialogueTranslationCsv.h"
+#include "Localization/KzL10N.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
 #include "Settings/KzDialogueSettings.h"
 
@@ -139,7 +139,7 @@ FReply SKzDialogueDashboard::OnGeneratePseudoClicked()
 
 	int32 Count = 0;
 	FText Error;
-	if (!FKzDialogueTranslationCsv::GeneratePseudoTranslations(Count, Error))
+	if (!KzDialogueL10N::GeneratePseudoTranslations(Count, Error))
 	{
 		ShowDashboardNotification(Error, false);
 		return FReply::Handled();
@@ -208,7 +208,7 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCompileMenu()
 
 	FKzLocTargetInfo TargetInfo;
 	FText Error;
-	if (FKzDialogueTranslationCsv::ReadLocTargetInfo(TargetInfo, Error))
+	if (KzDialogueL10N::ReadLocTargetInfo(TargetInfo, Error))
 	{
 		TArray<FString> Cultures;
 		if (!TargetInfo.NativeCulture.IsEmpty()) { Cultures.Add(TargetInfo.NativeCulture); }
@@ -216,7 +216,7 @@ TSharedRef<SWidget> SKzDialogueDashboard::BuildCompileMenu()
 		for (const FString& Culture : Cultures)
 		{
 			MenuBuilder.AddMenuEntry(
-				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+				KzDialogueL10N::GetCultureDisplayLabel(Culture),
 				FText::Format(LOCTEXT("CompileCultureTip", "Compile only the '{0}' .locres; the other cultures' files stay untouched."), FText::FromString(Culture)),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { RunCompile(Culture); })));

@@ -6,7 +6,7 @@
 #include "KzDialogueNotify.h"
 #include "KzNamedAsset.h"
 #include "KzSpeakerAsset.h"
-#include "Localization/KzDialogueTranslationCsv.h"
+#include "Localization/KzL10N.h"
 #include "Widgets/SKzDialogueTimeline.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Sound/SoundBase.h"
@@ -612,7 +612,7 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 	// Translation-dependent checks need a localization target; without one there is nothing to compare against.
 	FKzLocTargetInfo Target;
 	FText TargetError;
-	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
+	if (!KzDialogueL10N::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
 
 	// Archives are re-read on every validation; fine at this project's asset counts.
 	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
@@ -766,7 +766,7 @@ void UKzDialogueValidator_NamedAsset::ValidateSpeakerAsset(const UKzSpeakerAsset
 	// Stale name translations, against the localization target archives.
 	FKzLocTargetInfo Target;
 	FText TargetError;
-	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
+	if (!KzDialogueL10N::ReadLocTargetInfo(Target, TargetError) || Target.ForeignCultures.IsEmpty()) { return; }
 
 	FLocTextHelper LocHelper(Target.TargetPath, Target.ManifestName, Target.ArchiveName, Target.NativeCulture, Target.ForeignCultures, nullptr);
 	if (!LocHelper.LoadManifest(ELocTextHelperLoadFlags::Load, nullptr)) { return; }

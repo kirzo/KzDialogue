@@ -7,7 +7,7 @@
 #include "KzSpeakerAsset.h"
 #include "KzLibEditorStyle.h"
 #include "Editors/KzArrayAssetEditor.h"
-#include "Localization/KzDialogueTranslationCsv.h"
+#include "Localization/KzL10N.h"
 #include "Settings/KzDialogueSettings.h"
 
 #include "AssetRegistry/AssetData.h"
@@ -150,7 +150,7 @@ void SKzDialogueCoveragePanel::Construct(const FArguments& InArgs, const TArray<
 							.ToolTipText(LOCTEXT("CultureFilterTip", "Show only one culture's card."))
 							.ButtonContent()
 							[
-								SNew(STextBlock).Text_Lambda([this]() { return CultureFilter.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : FKzDialogueTranslationCsv::GetCultureDisplayLabel(CultureFilter); })
+								SNew(STextBlock).Text_Lambda([this]() { return CultureFilter.IsEmpty() ? LOCTEXT("AllCultures", "All Cultures") : KzDialogueL10N::GetCultureDisplayLabel(CultureFilter); })
 							]
 					]
 					+ SHorizontalBox::Slot().AutoWidth().Padding(4.0f, 0.0f, 0.0f, 0.0f)
@@ -487,7 +487,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 		if (!(bOnlyIncomplete && PendingCount == 0))
 		{
 			FCultureCard& Card = Cards.AddDefaulted_GetRef();
-			Card.Title = FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Query.GetTarget().NativeCulture));
+			Card.Title = FText::Format(LOCTEXT("NativeCardTitle", "{0} - native"), KzDialogueL10N::GetCultureDisplayLabel(Query.GetTarget().NativeCulture));
 			Card.Culture = Query.GetTarget().NativeCulture;
 			Card.KeyPrefix = TEXT("native");
 			Card.Bars.Add({ LOCTEXT("BarRecording", "Recording"), AudioDone, AudioTotal });
@@ -508,7 +508,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 		FKzExportLineFilter SpeakerLines;
 		if (bSpeakerFilterActive) { SpeakerLines = [&PassesSpeaker](const UKzDialogueAsset&, const FKzDialogueLine& Line) { return PassesSpeaker(Line); }; }
 		const bool bProjectWide = bIncludeProjectTexts && !bSpeakerFilterActive;
-		FKzDialogueTranslationCsv::CollectLocTexts(LiveAssets, SpeakerLines, bProjectWide, bProjectWide, OwnedTexts);
+		KzDialogueL10N::CollectLocTexts(LiveAssets, SpeakerLines, bProjectWide, bProjectWide, OwnedTexts);
 		OwnedTexts.RemoveAll([](const FKzLocText& Text) { return Text.Line != nullptr; });
 	}
 
@@ -873,7 +873,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 		}
 
 		FCultureCard& Card = Cards.AddDefaulted_GetRef();
-		Card.Title = FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture);
+		Card.Title = KzDialogueL10N::GetCultureDisplayLabel(Culture);
 		Card.Culture = Culture;
 		Card.KeyPrefix = Culture;
 		if (bShowDialogueLines)
@@ -1666,7 +1666,7 @@ void SKzDialogueCoveragePanel::MakeRowNonLocalizable(TWeakObjectPtr<UKzDialogueA
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
 	TArray<TPair<FString, FString>> Handled;
-	const bool bRan = FKzDialogueTranslationCsv::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped, &Handled);
+	const bool bRan = KzDialogueL10N::MakeTextsNonLocalizable(Source, Identities, Error, Rewritten, Skipped, &Handled);
 
 	// Fully resolved identities leave the view right away instead of waiting for the next
 	// Gather; ones with skipped occurrences (C++ sites, unreachable storage) stay visible.
@@ -1696,7 +1696,7 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 	int32 Rewritten = 0;
 	int32 Skipped = 0;
 	TArray<TPair<FString, FString>> Handled;
-	const bool bRan = FKzDialogueTranslationCsv::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped, &Handled);
+	const bool bRan = KzDialogueL10N::MergeIdenticalTexts(Source, Identities, Error, Rewritten, Skipped, &Handled);
 
 	// Fully merged identities leave the view right away; the canonical one stays as the single
 	// row. Ones with skipped occurrences (C++ sites, unreachable storage) stay visible.
@@ -1719,7 +1719,7 @@ void SKzDialogueCoveragePanel::MergeOtherTexts(FString Source, TArray<TPair<FStr
 
 void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>>& Group)
 {
-	TArray<FKzDialogueTranslationCsv::FKzLineTextRef> Lines;
+	TArray<KzDialogueL10N::FKzLineTextRef> Lines;
 	for (const TPair<TWeakObjectPtr<UKzDialogueAsset>, FGuid>& Entry : Group)
 	{
 		if (UKzDialogueAsset* Asset = Entry.Key.Get())
@@ -1729,7 +1729,7 @@ void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectP
 	}
 
 	FText Error;
-	const bool bRan = FKzDialogueTranslationCsv::MergeLineTexts(Lines, Error);
+	const bool bRan = KzDialogueL10N::MergeLineTexts(Lines, Error);
 
 	FNotificationInfo Info(bRan
 		? FText::Format(LOCTEXT("MergeLinesDone", "Merged {0} line texts into one shared identity. Save the dirty assets and run Gather to see them as one text."), FText::AsNumber(Lines.Num()))
@@ -1746,7 +1746,7 @@ void SKzDialogueCoveragePanel::MergeLineRowTexts(const TArray<TPair<TWeakObjectP
 void SKzDialogueCoveragePanel::UnmergeLineRowText(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
 {
 	FText Error;
-	const bool bRan = FKzDialogueTranslationCsv::UnmergeLineText(InAsset.Get(), LineId, Error);
+	const bool bRan = KzDialogueL10N::UnmergeLineText(InAsset.Get(), LineId, Error);
 
 	FNotificationInfo Info(bRan
 		? LOCTEXT("UnmergeLineDone", "The line has its own localization identity again. Save the dirty asset and re-run Gather.")
@@ -1785,7 +1785,7 @@ void SKzDialogueCoveragePanel::CompileCulture(const FString& Culture)
 void SKzDialogueCoveragePanel::CommitTranslation(FString Culture, TArray<TPair<FString, FString>> Identities, FString Source, FString NewTranslation, TArray<FString> FocusAfter)
 {
 	FText Error;
-	if (!FKzDialogueTranslationCsv::WriteTranslation(Culture, Identities, Source, NewTranslation, Error))
+	if (!KzDialogueL10N::WriteTranslation(Culture, Identities, Source, NewTranslation, Error))
 	{
 		FNotificationInfo Info(Error);
 		Info.ExpireDuration = 6.0f;
@@ -1855,14 +1855,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		LOCTEXT("ImportSourceFixes", "Source fixes (CSV)..."),
 		LOCTEXT("ImportSourceFixesTip", "Apply SourceText edits made in an exported CSV back to the authored assets (dialogue lines, speaker fields, project texts). Rows whose asset changed after the export are skipped as conflicted; save the dirty assets and re-run Gather afterwards."),
 		FSlateIcon(),
-		FUIAction(FExecuteAction::CreateLambda([this]() { FKzDialogueTranslationCsv::ImportSourceFixesInteractive(); RequestRefresh(); })));
+		FUIAction(FExecuteAction::CreateLambda([this]() { KzDialogueL10N::ImportSourceFixesInteractive(); RequestRefresh(); })));
 	MenuBuilder.EndSection();
 
 	MenuBuilder.BeginSection(NAME_None, LOCTEXT("ImportIntoArchives", "Translations, into a culture's archive"));
 
 	FKzLocTargetInfo Target;
 	FText Error;
-	if (!FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error) || Target.ForeignCultures.IsEmpty())
+	if (!KzDialogueL10N::ReadLocTargetInfo(Target, Error) || Target.ForeignCultures.IsEmpty())
 	{
 		MenuBuilder.AddMenuEntry(
 			LOCTEXT("NoImportCultures", "No localization target cultures found"),
@@ -1879,7 +1879,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		for (const FString& Culture : Cultures)
 		{
 			Sub.AddMenuEntry(
-				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+				KzDialogueL10N::GetCultureDisplayLabel(Culture),
 				FText::Format(LOCTEXT("ImportCultureEntryTip", "Import a translated file into the '{0}' archive."), FText::FromString(Culture)),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([this, Culture, Run]() { Run(Culture); RequestRefresh(); })));
@@ -1891,7 +1891,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		FText::GetEmpty(),
 		FNewMenuDelegate::CreateLambda([AddCultureEntries, Cultures = Target.ForeignCultures](FMenuBuilder& Sub)
 		{
-			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { FKzDialogueTranslationCsv::ImportInteractive(Culture); });
+			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { KzDialogueL10N::ImportCsvInteractive(Culture); });
 		}));
 
 	MenuBuilder.AddSubMenu(
@@ -1899,7 +1899,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildImportMenu()
 		FText::GetEmpty(),
 		FNewMenuDelegate::CreateLambda([AddCultureEntries, Cultures = Target.ForeignCultures](FMenuBuilder& Sub)
 		{
-			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { FKzDialogueTranslationCsv::ImportPoInteractive(Culture); });
+			AddCultureEntries(Sub, Cultures, [](const FString& Culture) { KzDialogueL10N::ImportPoInteractive(Culture); });
 		}));
 
 	MenuBuilder.EndSection();
@@ -2115,7 +2115,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 			for (const FString& Culture : ExportCultures)
 			{
 				CultureSub.AddMenuEntry(
-					FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+					KzDialogueL10N::GetCultureDisplayLabel(Culture),
 					FText::Format(LOCTEXT("ExportCultureEntryTip", "Pre-fill the file with the current '{0}' translations."), FText::FromString(Culture)),
 					FSlateIcon(),
 					FUIAction(
@@ -2160,7 +2160,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		{
 			AddScopeEntries(Sub, /*bAllCulturesEntry=*/false, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter, const FString& Culture)
 			{
-				FKzDialogueTranslationCsv::ExportInteractive(MoveTemp(Data), Filter, RideAlong, Culture);
+				KzDialogueL10N::ExportCsvInteractive(MoveTemp(Data), Filter, RideAlong, Culture);
 			});
 		}));
 
@@ -2171,7 +2171,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 		{
 			AddScopeEntries(Sub, /*bAllCulturesEntry=*/true, [RideAlong](TArray<FAssetData> Data, const FKzExportLineFilter& Filter, const FString& Culture)
 			{
-				FKzDialogueTranslationCsv::ExportPoInteractive(MoveTemp(Data), Filter, RideAlong.IsValid(), RideAlong, Culture);
+				KzDialogueL10N::ExportPoInteractive(MoveTemp(Data), Filter, RideAlong.IsValid(), RideAlong, Culture);
 			});
 		}));
 
@@ -2194,7 +2194,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildExportMenu()
 			LOCTEXT("ExportOtherTextsTip", "Just the gathered texts outside the dialogue assets, one <Target>_Other.po per culture. The speaker and pending filters do not apply."),
 			FSlateIcon(),
 			FUIAction(
-				FExecuteAction::CreateLambda([OtherIdentities]() { FKzDialogueTranslationCsv::ExportPoInteractive(TArray<FAssetData>(), nullptr, true, OtherIdentities); }),
+				FExecuteAction::CreateLambda([OtherIdentities]() { KzDialogueL10N::ExportPoInteractive(TArray<FAssetData>(), nullptr, true, OtherIdentities); }),
 				FCanExecuteAction::CreateLambda([OtherCount]() { return OtherCount > 0; })));
 	}
 
@@ -2213,10 +2213,10 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 
 	FKzLocTargetInfo Target;
 	FText Error;
-	if (FKzDialogueTranslationCsv::ReadLocTargetInfo(Target, Error))
+	if (KzDialogueL10N::ReadLocTargetInfo(Target, Error))
 	{
 		MenuBuilder.AddMenuEntry(
-			FText::Format(LOCTEXT("NativeFilterEntry", "{0} - native"), FKzDialogueTranslationCsv::GetCultureDisplayLabel(Target.NativeCulture)),
+			FText::Format(LOCTEXT("NativeFilterEntry", "{0} - native"), KzDialogueL10N::GetCultureDisplayLabel(Target.NativeCulture)),
 			FText::GetEmpty(),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([this, Culture = Target.NativeCulture]() { CultureFilter = Culture; RequestRefresh(); })));
@@ -2224,7 +2224,7 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::BuildCultureFilterMenu()
 		for (const FString& Culture : Target.ForeignCultures)
 		{
 			MenuBuilder.AddMenuEntry(
-				FKzDialogueTranslationCsv::GetCultureDisplayLabel(Culture),
+				KzDialogueL10N::GetCultureDisplayLabel(Culture),
 				FText::GetEmpty(),
 				FSlateIcon(),
 				FUIAction(FExecuteAction::CreateLambda([this, Culture]() { CultureFilter = Culture; RequestRefresh(); })));

@@ -4,13 +4,19 @@
 
 #include "CoreMinimal.h"
 #include "AssetRegistry/AssetData.h"
+#include "EditorDirectories.h"
+#include "Serialization/Csv/CsvParser.h"
 
 class FLocKey;
 class FLocMetadataObject;
 class FLocTextHelper;
+class FMessageLog;
 class UKzDialogueAsset;
+class UKzNamedAsset;
 struct FKzDialogueLine;
 struct FLocItem;
+
+DECLARE_LOG_CATEGORY_EXTERN(LogKzDialogueL10N, Log, All);
 
 /** Optional per-line export filter: return false to skip a line's row. Speaker rows follow the included lines. */
 using FKzExportLineFilter = TFunction<bool(const UKzDialogueAsset&, const FKzDialogueLine&)>;
@@ -150,36 +156,65 @@ struct FKzLocText
 };
 
 /**
- * CSV translation round-trip for dialogue assets.
- *
- * Export writes one row per localizable FText (line text, speaker override) carrying the
- * stable namespace/key plus translator context: speaker, notes, max characters, tags,
- * audio path and the source hash used later for drift detection.
- *
- * Import parses the filled CSV back, skips rows whose source hash drifted from the asset,
- * and writes the surviving translations straight into the project's localization target
- * archive (FLocTextHelper), ready for the dashboard's Compile Text step.
+ * Localization tooling for the dialogue set: the target, its manifest and archives (KzL10NTarget.cpp), the CSV
+ * round-trip with translator context and drift detection (KzL10NCsv.cpp), the PO round-trip (KzL10NPo.cpp), and
+ * the operations that rewrite authored texts inside transactions (KzL10NRewrite.cpp).
  */
-class FKzDialogueTranslationCsv
+namespace KzDialogueL10N
 {
-public:
 	/** The "Dialogue Localization" message log: one page per import, plus the inline edits. Registered at module startup. */
-	static const FName MessageLogName;
+	inline const FName MessageLogName(TEXT("KzDialogueL10N"));
 
 	/** Adds the Export / Import entries to the content browser context menu of UKzDialogueAsset. */
-	static void RegisterMenus();
+	void RegisterMenus();
+
+	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
+	bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
+
+	/** "Spanish (es)" style label for a culture code, falling back to the bare code when the engine has no display name for it. */
+	FText GetCultureDisplayLabel(const FString& Culture);
 
 	/** The texts of Assets' lines passing LineFilter, of their speakers (and the aliases' when unfiltered) and of those speakers' words, each identity once. bAllSpeakers / bAllWords add every speaker / word asset of the project. */
-	static void CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, const FKzExportLineFilter& LineFilter, bool bAllSpeakers, bool bAllWords, TArray<FKzLocText>& Out);
-
-	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. OtherIdentities appends those gathered project texts ("Namespace,Key") as asset-less rows validated by the manifest at import. TranslationCulture pre-fills the Translation column with that culture's current translations (stale ones land in StaleTranslation as reference only). */
-	static bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const TSet<FString>* OtherIdentities = nullptr, const FString& TranslationCulture = FString());
-
-	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed on a message log page. */
-	static bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+	void CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, const FKzExportLineFilter& LineFilter, bool bAllSpeakers, bool bAllWords, TArray<FKzLocText>& Out);
 
 	/** Writes one translation for every given (Namespace, Key) identity straight into Culture's archive: the panel's inline editing. Source is the string the translation was made against (the current one). There is no undo, so each write lands on the message log with the translation it replaced. */
-	static bool WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError);
+	bool WriteTranslation(const FString& Culture, const TArray<TPair<FString, FString>>& Identities, const FString& Source, const FString& Translation, FText& OutError);
+
+	/**
+	 * Fills the pseudo culture's archive (KzDialogue settings) with machine-generated
+	 * translations of every gathered source: accented letters, ~40% length padding and
+	 * bracket delimiters, format arguments preserved. Adds the culture to the localization
+	 * target when missing (persisted like the Localization Dashboard does) and warns when it
+	 * is staged for packaging. Idempotent; re-run after each Gather, then compile the culture.
+	 */
+	bool GeneratePseudoTranslations(int32& OutCount, FText& OutError);
+
+	/** Writes the assets' localizable texts to CsvPath. Fails with OutError when there is nothing to export or the file cannot be written. OtherIdentities appends those gathered project texts ("Namespace,Key") as asset-less rows validated by the manifest at import. TranslationCulture pre-fills the Translation column with that culture's current translations (stale ones land in StaleTranslation as reference only). */
+	bool ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const TSet<FString>* OtherIdentities = nullptr, const FString& TranslationCulture = FString());
+
+	/** Interactive export flow (load assets, dirty warning, save-file dialog, ExportAssets, notification). Shared by the content browser menu and the dashboard. OtherIdentities appends those project texts to the same CSV; TranslationCulture pre-fills its translations and suffixes the default file name ("_es"). */
+	void ExportCsvInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& TranslationCulture = FString());
+
+	/** Imports a filled CSV into the localization target archive of the given culture. Drift and resolution failures are counted in OutStats and detailed on a message log page. */
+	bool ImportCsv(const FString& CsvPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+
+	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
+	void ImportCsvInteractive(const FString& Culture);
+
+	/** Writes one .po per foreign culture into Directory (<Culture>/<Target>.po), scoped to the assets' lines passing LineFilter. Context (speaker, notes, max characters) travels as "#." comments; existing translations fill msgstr, stale ones flagged "#, fuzzy". OnlyCulture narrows the file set to that culture. */
+	bool ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const FString& OnlyCulture = FString());
+
+	/** Writes one <Culture>/<Target>_Other.po per foreign culture with the gathered texts outside the dialogue namespaces (all of them, or just the "Namespace,Key" identities in OnlyIdentities). Complements the dialogue exports without overlap. */
+	bool ExportOtherTextsPoFiles(const FString& Directory, FText& OutError, const TSet<FString>* OnlyIdentities = nullptr, const FString& OnlyCulture = FString());
+
+	/** Interactive PO export: directory dialog + ExportPoFiles + notification. With bWithOtherTexts the same directory also receives the _Other files (OtherIdentities narrows them to those "Namespace,Key" texts); assets may then be empty for an Other-texts-only export. */
+	void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, bool bWithOtherTexts = false, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& OnlyCulture = FString());
+
+	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
+	bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+
+	/** Interactive per-culture PO import flow (open-file dialog, ImportPoFile, stats notification). */
+	void ImportPoInteractive(const FString& Culture);
 
 	/**
 	 * Token-rename refactor, bound to UKzNamedAsset::OnTokenRenamed at module startup:
@@ -188,31 +223,13 @@ public:
 	 * and updates the archives' sources and translations so nothing turns stale. Up-to-date
 	 * recorded-take hashes are preserved: renaming a token does not change what was spoken.
 	 */
-	static void RenameNamedTokenReferences(class UKzNamedAsset* Renamed, FName OldToken);
+	void RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken);
 
 	/** Culture-less import of SourceText edits made in an exported CSV: rewrites the AUTHORED texts (dialogue lines, speaker fields, project-text occurrences) keeping their namespace/key. A row applies only when the asset did not change after the export (hash still matches); both-sides edits count as conflicted and the asset wins. Transacted; dirty assets must be saved and Gather re-run. */
-	static bool ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError);
+	bool ImportSourceFixes(const FString& CsvPath, FKzSourceFixStats& OutStats, FText& OutError);
 
 	/** Interactive flow for ImportSourceFixes: open-file dialog + stats notification. */
-	static void ImportSourceFixesInteractive();
-
-	/** Resolves the project's localization target layout from the KzDialogue settings target name. Fails when the target was never created. */
-	static bool ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError);
-
-	/** Interactive export flow (load assets, dirty warning, save-file dialog, ExportAssets, notification). Shared by the content browser menu and the dashboard. OtherIdentities appends those project texts to the same CSV; TranslationCulture pre-fills its translations and suffixes the default file name ("_es"). */
-	static void ExportInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& TranslationCulture = FString());
-
-	/** Interactive per-culture import flow (open-file dialog, culture-mismatch guard, ImportCsv, stats notification). Shared by the content browser menu and the dashboard. */
-	static void ImportInteractive(const FString& Culture);
-
-	/** Writes one .po per foreign culture into Directory (<Culture>/<Target>.po), scoped to the assets' lines passing LineFilter. Context (speaker, notes, max characters) travels as "#." comments; existing translations fill msgstr, stale ones flagged "#, fuzzy". OnlyCulture narrows the file set to that culture. */
-	static bool ExportPoFiles(const TArray<UKzDialogueAsset*>& Assets, const FString& Directory, FText& OutError, const FKzExportLineFilter& LineFilter = nullptr, const FString& OnlyCulture = FString());
-
-	/** Interactive PO export: directory dialog + ExportPoFiles + notification. With bWithOtherTexts the same directory also receives the _Other files (OtherIdentities narrows them to those "Namespace,Key" texts); assets may then be empty for an Other-texts-only export. */
-	static void ExportPoInteractive(TArray<FAssetData> SelectedAssets, const FKzExportLineFilter& LineFilter = nullptr, bool bWithOtherTexts = false, TSharedPtr<TSet<FString>> OtherIdentities = nullptr, const FString& OnlyCulture = FString());
-
-	/** Writes one <Culture>/<Target>_Other.po per foreign culture with the gathered texts outside the dialogue namespaces (all of them, or just the "Namespace,Key" identities in OnlyIdentities). Complements the dialogue exports without overlap. */
-	static bool ExportOtherTextsPoFiles(const FString& Directory, FText& OutError, const TSet<FString>* OnlyIdentities = nullptr, const FString& OnlyCulture = FString());
+	void ImportSourceFixesInteractive();
 
 	/**
 	 * Rewrites every ASSET-authored occurrence of the given identical-source texts so they all
@@ -222,7 +239,7 @@ public:
 	 * OutHandled collects the non-canonical identities fully resolved (rewritten now or by an
 	 * earlier merge): their manifest entries are leftovers safe to hide until the next Gather.
 	 */
-	static bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
+	bool MergeIdenticalTexts(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
 
 	/**
 	 * Rewrites every ASSET-authored occurrence of the given texts as culture invariant
@@ -230,7 +247,7 @@ public:
 	 * be rewritten and count as skipped. Dirty assets must be saved and Gather re-run.
 	 * OutHandled collects the identities fully resolved, as in MergeIdenticalTexts.
 	 */
-	static bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
+	bool MakeTextsNonLocalizable(const FString& SourceText, const TArray<TPair<FString, FString>>& Identities, FText& OutError, int32& OutRewritten, int32& OutSkipped, TArray<TPair<FString, FString>>* OutHandled = nullptr);
 
 	/** One dialogue line participating in a text merge. */
 	struct FKzLineTextRef
@@ -247,26 +264,43 @@ public:
 	 * culture's best existing translation into the shared identity. Editing a merged text
 	 * detaches that line automatically. Dirty assets must be saved and Gather re-run.
 	 */
-	static bool MergeLineTexts(const TArray<FKzLineTextRef>& Lines, FText& OutError);
+	bool MergeLineTexts(const TArray<FKzLineTextRef>& Lines, FText& OutError);
 
 	/** Reverts one line to its own localization identity, seeding it with the shared translation so no work is lost. Transacted; save + Gather afterwards. */
-	static bool UnmergeLineText(UKzDialogueAsset* Asset, const FGuid LineId, FText& OutError);
+	bool UnmergeLineText(UKzDialogueAsset* Asset, const FGuid LineId, FText& OutError);
+}
 
-	/**
-	 * Fills the pseudo culture's archive (KzDialogue settings) with machine-generated
-	 * translations of every gathered source: accented letters, ~40% length padding and
-	 * bracket delimiters, format arguments preserved. Adds the culture to the localization
-	 * target when missing (persisted like the Localization Dashboard does) and warns when it
-	 * is staged for packaging. Idempotent; re-run after each Gather, then compile the culture.
-	 */
-	static bool GeneratePseudoTranslations(int32& OutCount, FText& OutError);
+/** Shared by the KzL10N*.cpp files; not for other callers. */
+namespace KzDialogueL10N::Detail
+{
+	/** LF line endings, as the archives store them: spreadsheet round-trips rewrite in-cell newlines as CRLF. */
+	FString NormalizeNewlines(FString Value);
 
-	/** Imports a translated .po into Culture's archive. Entries whose msgid no longer matches the gathered source are skipped as drifted. */
-	static bool ImportPoFile(const FString& PoPath, const FString& Culture, FKzTranslationImportStats& OutStats, FText& OutError);
+	/** Newline-flavor-insensitive source comparison: file round-trips (the PO \n escape, spreadsheet editors) lose the original CRLF/LF flavor, and that must not count as drift. */
+	bool SourceMatches(const FString& A, const FString& B);
 
-	/** Interactive per-culture PO import flow (open-file dialog, ImportPoFile, stats notification). */
-	static void ImportPoInteractive(const FString& Culture);
+	/** A CSV with its columns indexed by header name, so reordered or extended files keep importing. */
+	struct FKzCsvTable
+	{
+		TUniquePtr<FCsvParser> Parser;
+		TMap<FString, int32> Columns;
+	};
 
-	/** "Spanish (es)" style label for a culture code, falling back to the bare code when the engine has no display name for it. */
-	static FText GetCultureDisplayLabel(const FString& Culture);
-};
+	/** Reads CsvPath and indexes its header row; fails when it has no data rows or lacks one of RequiredColumns. */
+	bool ParseTranslationCsv(const FString& CsvPath, std::initializer_list<const TCHAR*> RequiredColumns, FKzCsvTable& Out, FText& OutError);
+
+	/** The dialogue line text or speaker field a CSV row targets, with its drift hash; null when the asset, line or field is gone. */
+	FText* ResolveAuthoredText(UObject* Asset, const FString& Namespace, const FString& Key, uint32& OutHash, bool& bOutSharedLine);
+
+	/** Opens the message log page of one operation (an import). */
+	void BeginLogPage(FMessageLog& Log, const FText& Title);
+
+	/** A row an import skipped, with its asset as a clickable token when it has one. */
+	void LogRow(FMessageLog& Log, const FString& AssetPath, const FString& Message);
+
+	/** The toast closing an interactive flow; bWithLogLink adds a "Show log" link to the message log. */
+	void ShowNotification(const FText& Message, bool bSuccess, bool bWithLogLink = false);
+
+	/** The folder the last dialog of this kind used, so a round trip does not start from Saved each time. */
+	FString LastDirectory(ELastDirectory::Type Kind);
+}

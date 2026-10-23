@@ -22,7 +22,7 @@
 
 #include "Dashboard/SKzDialogueDashboard.h"
 #include "Editors/KzArrayAssetEditor.h"
-#include "Localization/KzDialogueTranslationCsv.h"
+#include "Localization/KzL10N.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
 
 #include "EdGraphUtilities.h"
@@ -110,15 +110,15 @@ void FKzDialogueEditorModule::OnStartupModule()
 	LinePinFactory = MakeShared<FKzDialogueLinePinFactory>();
 	FEdGraphUtilities::RegisterVisualPinFactory(LinePinFactory);
 
-	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FKzDialogueTranslationCsv::RegisterMenus));
+	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&KzDialogueL10N::RegisterMenus));
 
 	// Token renames refactor the lines and archives that reference the old token.
-	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&FKzDialogueTranslationCsv::RenameNamedTokenReferences);
+	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&KzDialogueL10N::RenameNamedTokenReferences);
 
 	FMessageLogInitializationOptions LogOptions;
 	LogOptions.bShowPages = true;
 	LogOptions.bAllowClear = true;
-	FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog").RegisterLogListing(FKzDialogueTranslationCsv::MessageLogName, LOCTEXT("L10NLogLabel", "Dialogue Localization"), LogOptions);
+	FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog").RegisterLogListing(KzDialogueL10N::MessageLogName, LOCTEXT("L10NLogLabel", "Dialogue Localization"), LogOptions);
 
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		SKzDialogueDashboard::TabId,
@@ -143,7 +143,7 @@ void FKzDialogueEditorModule::OnShutdownModule()
 
 	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
 	{
-		FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog").UnregisterLogListing(FKzDialogueTranslationCsv::MessageLogName);
+		FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog").UnregisterLogListing(KzDialogueL10N::MessageLogName);
 	}
 
 	FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SKzDialogueDashboard::TabId);
