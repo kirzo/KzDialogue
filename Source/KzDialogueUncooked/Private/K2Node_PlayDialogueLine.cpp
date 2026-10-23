@@ -108,6 +108,22 @@ FSlateIcon UK2Node_PlayDialogueLine::GetIconAndTint(FLinearColor& OutColor) cons
 	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
+void UK2Node_PlayDialogueLine::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
+{
+	Super::ValidateNodeDuringCompilation(MessageLog);
+	KzDialogueK2Nodes::ValidateLineNode(this, MessageLog);
+}
+
+bool UK2Node_PlayDialogueLine::CanJumpToDefinition() const
+{
+	return KzDialogueK2Nodes::CanJumpToLine(this);
+}
+
+void UK2Node_PlayDialogueLine::JumpToDefinition() const
+{
+	KzDialogueK2Nodes::JumpToLine(this);
+}
+
 FString UK2Node_PlayDialogueLine::GetPinMetaData(FName InPinName, FName InKey)
 {
 	// The gameplay tag pin widget asks the owning node for the category filter.

@@ -84,6 +84,22 @@ FSlateIcon UK2Node_MakeDialogueLineList::GetIconAndTint(FLinearColor& OutColor) 
 	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
+void UK2Node_MakeDialogueLineList::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
+{
+	Super::ValidateNodeDuringCompilation(MessageLog);
+	KzDialogueK2Nodes::ValidateLineNode(this, MessageLog);
+}
+
+bool UK2Node_MakeDialogueLineList::CanJumpToDefinition() const
+{
+	return KzDialogueK2Nodes::CanJumpToLine(this);
+}
+
+void UK2Node_MakeDialogueLineList::JumpToDefinition() const
+{
+	KzDialogueK2Nodes::JumpToLine(this);
+}
+
 // =======================================================================================
 // Dynamic line pins
 // =======================================================================================

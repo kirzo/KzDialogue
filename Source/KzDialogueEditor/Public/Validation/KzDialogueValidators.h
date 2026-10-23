@@ -164,3 +164,17 @@ public:
 	virtual bool CanValidate_Implementation(const UObject* Asset) const override;
 	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
 };
+
+/**
+ * Line refs, line lists and Sequencer dialogue sections anywhere (Blueprint defaults, data assets, levels,
+ * sequences) naming a line or alias their dialogue asset no longer has, or a dialogue asset that is gone.
+ * The line nodes check their own pins when the Blueprint compiles.
+ */
+UCLASS()
+class KZDIALOGUEEDITOR_API UKzDialogueValidator_DanglingLineRefs : public UKzAssetValidator
+{
+	GENERATED_BODY()
+public:
+	virtual bool CanValidate_Implementation(const UObject* Asset) const override { return Asset != nullptr; }
+	virtual void Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const override;
+};

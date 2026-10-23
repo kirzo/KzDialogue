@@ -25,6 +25,7 @@
 #include "Editors/KzArrayAssetEditor.h"
 #include "Localization/KzL10N.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
+#include "KzDialogueK2Nodes.h"
 
 #include "EdGraphUtilities.h"
 #include "Editor.h"
@@ -33,6 +34,7 @@
 #include "MessageLogModule.h"
 #include "Widgets/Input/SButton.h"
 #include "Sequencer/KzDialogueTrackEditor.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "ToolMenus.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "WorkspaceMenuStructure.h"
@@ -120,6 +122,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 	// The audition is a world-less editor preview: nothing else stops it when the game starts.
 	BeginPIEHandle = FEditorDelegates::BeginPIE.AddLambda([](bool) { KzDialogueAudition::Stop(); });
 
+	// The line nodes live in the uncooked module, which cannot reach the asset editor.
+	KzDialogueK2Nodes::OpenAssetAtEntry = &FKzDialogueEditorModule::OpenAssetAtEntry;
+
 	FMessageLogInitializationOptions LogOptions;
 	LogOptions.bShowPages = true;
 	LogOptions.bAllowClear = true;
@@ -146,6 +151,7 @@ void FKzDialogueEditorModule::OnShutdownModule()
 {
 	UKzNamedAsset::OnTokenRenamed.Remove(NamedTokenRenamedHandle);
 	FEditorDelegates::BeginPIE.Remove(BeginPIEHandle);
+	KzDialogueK2Nodes::OpenAssetAtEntry = nullptr;
 
 	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
 	{
@@ -171,6 +177,21 @@ void FKzDialogueEditorModule::OnShutdownModule()
 	{
 		FEdGraphUtilities::UnregisterVisualPinFactory(LinePinFactory);
 		LinePinFactory.Reset();
+	}
+}
+
+void FKzDialogueEditorModule::OpenAssetAtEntry(UKzDialogueAsset* Asset, const FGuid& EntryId)
+{
+	if (!Asset || !GEditor) { return; }
+
+	UAssetEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	Subsystem->OpenEditorForAsset(Asset);
+
+	// The entry selects in its own tab (Lines, or Aliases), as the validation panel's clicks do.
+	IAssetEditorInstance* Instance = Subsystem->FindEditorForAsset(Asset, /*bFocusIfOpen=*/false);
+	if (EntryId.IsValid() && Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
+	{
+		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(EntryId);
 	}
 }
 

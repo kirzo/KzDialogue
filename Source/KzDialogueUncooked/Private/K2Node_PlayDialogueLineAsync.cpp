@@ -62,6 +62,22 @@ FSlateIcon UK2Node_PlayDialogueLineAsync::GetIconAndTint(FLinearColor& OutColor)
 	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
+void UK2Node_PlayDialogueLineAsync::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
+{
+	Super::ValidateNodeDuringCompilation(MessageLog);
+	KzDialogueK2Nodes::ValidateLineNode(this, MessageLog);
+}
+
+bool UK2Node_PlayDialogueLineAsync::CanJumpToDefinition() const
+{
+	return KzDialogueK2Nodes::CanJumpToLine(this);
+}
+
+void UK2Node_PlayDialogueLineAsync::JumpToDefinition() const
+{
+	KzDialogueK2Nodes::JumpToLine(this);
+}
+
 FText UK2Node_PlayDialogueLineAsync::GetMenuCategory() const
 {
 	return LOCTEXT("MenuCategory", "Dialogue");

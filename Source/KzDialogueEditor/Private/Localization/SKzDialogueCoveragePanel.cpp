@@ -6,7 +6,7 @@
 #include "KzDialogueAsset.h"
 #include "KzSpeakerAsset.h"
 #include "KzLibEditorStyle.h"
-#include "Editors/KzArrayAssetEditor.h"
+#include "KzDialogueEditor.h"
 #include "Localization/KzL10N.h"
 #include "Settings/KzDialogueSettings.h"
 
@@ -1548,17 +1548,9 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeProgressRow(const FText& Label
 
 void SKzDialogueCoveragePanel::NavigateToLine(TWeakObjectPtr<UKzDialogueAsset> InAsset, FGuid LineId)
 {
-	UKzDialogueAsset* AssetPtr = InAsset.Get();
-	if (!AssetPtr || !LineId.IsValid() || !GEditor) { return; }
-
-	// Open (or focus) the asset's editor first: from the dashboard it may not be open yet.
-	UAssetEditorSubsystem* Subsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-	Subsystem->OpenEditorForAsset(AssetPtr);
-
-	IAssetEditorInstance* Instance = Subsystem->FindEditorForAsset(AssetPtr, /*bFocusIfOpen=*/false);
-	if (Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
+	if (LineId.IsValid())
 	{
-		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(LineId);
+		FKzDialogueEditorModule::OpenAssetAtEntry(InAsset.Get(), LineId);
 	}
 }
 

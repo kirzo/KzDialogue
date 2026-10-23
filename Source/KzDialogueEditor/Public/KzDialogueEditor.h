@@ -4,8 +4,14 @@
 
 #include "KzLibEditorModule_Base.h"
 
+class UKzDialogueAsset;
+
 class FKzDialogueEditorModule : public FKzLibEditorModule_Base
 {
+public:
+	/** Opens (or focuses) Asset's editor with the line or alias EntryId selected in its tab; an invalid id just opens it. */
+	static void OpenAssetAtEntry(UKzDialogueAsset* Asset, const FGuid& EntryId);
+
 private:
 	FDelegateHandle DialogueTrackEditorHandle;
 	FDelegateHandle NamedTokenRenamedHandle;

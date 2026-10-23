@@ -7,11 +7,9 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueTypes.h"
 
-#include "Editor.h"
-#include "Editors/KzArrayAssetEditor.h"
+#include "KzDialogueEditor.h"
 #include "PropertyHandle.h"
 #include "ScopedTransaction.h"
-#include "Subsystems/AssetEditorSubsystem.h"
 
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/AppStyle.h"
@@ -172,14 +170,9 @@ void FKzDialogueLineFromAssetRowCustomizer::OnRowDoubleClicked(TSharedPtr<IPrope
 {
 	UKzDialogueAsset* Asset = ResolveAsset();
 	const FGuid Id = ReadGuid(Handle);
-	if (!Asset || !Id.IsValid() || !GEditor) { return; }
-
-	// Jump to the referenced entry in its owning tab (Lines, or Aliases for alias entries),
-	// through the same per-tab ContextId resolution the validation panel uses.
-	IAssetEditorInstance* Instance = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->FindEditorForAsset(Asset, /*bFocusIfOpen=*/true);
-	if (Instance && Instance->GetEditorName() == TEXT("KzArrayAssetEditor"))
+	if (Asset && Id.IsValid())
 	{
-		static_cast<FKzArrayAssetEditor*>(Instance)->SelectElementById(Id);
+		FKzDialogueEditorModule::OpenAssetAtEntry(Asset, Id);
 	}
 }
 

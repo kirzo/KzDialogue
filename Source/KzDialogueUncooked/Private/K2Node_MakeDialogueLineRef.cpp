@@ -71,6 +71,22 @@ FSlateIcon UK2Node_MakeDialogueLineRef::GetIconAndTint(FLinearColor& OutColor) c
 	return KzDialogueK2Nodes::GetIcon(OutColor);
 }
 
+void UK2Node_MakeDialogueLineRef::ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const
+{
+	Super::ValidateNodeDuringCompilation(MessageLog);
+	KzDialogueK2Nodes::ValidateLineNode(this, MessageLog);
+}
+
+bool UK2Node_MakeDialogueLineRef::CanJumpToDefinition() const
+{
+	return KzDialogueK2Nodes::CanJumpToLine(this);
+}
+
+void UK2Node_MakeDialogueLineRef::JumpToDefinition() const
+{
+	KzDialogueK2Nodes::JumpToLine(this);
+}
+
 // =======================================================================================
 // Menu registration
 // =======================================================================================

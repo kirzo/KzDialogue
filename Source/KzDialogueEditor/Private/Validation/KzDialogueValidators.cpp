@@ -9,6 +9,10 @@
 #include "KzWordAsset.h"
 #include "Localization/KzL10N.h"
 #include "Widgets/SKzDialogueTimeline.h"
+#include "Sequencer/MovieSceneKzDialogueSection.h"
+#include "Sequencer/MovieSceneKzDialogueTrack.h"
+#include "UObject/UObjectHash.h"
+#include "UObject/UnrealType.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundWave.h"
@@ -817,6 +821,111 @@ void UKzDialogueValidator_DuplicateAssetId::Validate_Implementation(const UObjec
 			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error,
 				FText::Format(LOCTEXT("DuplicateAssetId", "AssetId is shared with {0}, a copy made outside the editor: both write their texts into the same localization namespace. Delete the copy and duplicate the original inside the editor, which gives it a fresh identity."), FText::FromString(Other.GetObjectPathString())),
 				GetValidatorId()));
+		}
+	}
+}
+// =======================================================================================
+// Dangling reference validator
+// =======================================================================================
+
+namespace
+{
+	/** Which types can hold a line ref or line list somewhere inside, cached for one validation (Blueprint types change between them). */
+	struct FLineRefTypeScan
+	{
+		TMap<const UStruct*, bool> Known;
+
+		bool Holds(const UStruct* Struct)
+		{
+			if (const bool* Found = Known.Find(Struct)) { return *Found; }
+
+			// False while scanning, so a type that contains itself ends the recursion.
+			Known.Add(Struct, false);
+			bool bHolds = false;
+			for (TFieldIterator<FProperty> It(Struct); It && !bHolds; ++It)
+			{
+				bHolds = Holds(*It);
+			}
+			Known.Add(Struct, bHolds);
+			return bHolds;
+		}
+
+		bool Holds(const FProperty* Property)
+		{
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Property))
+			{
+				return StructProp->Struct == FKzDialogueLineRef::StaticStruct() || StructProp->Struct == FKzDialogueLineList::StaticStruct() || Holds(StructProp->Struct);
+			}
+			if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Property)) { return Holds(ArrayProp->Inner); }
+			if (const FSetProperty* SetProp = CastField<FSetProperty>(Property)) { return Holds(SetProp->ElementProp); }
+			if (const FMapProperty* MapProp = CastField<FMapProperty>(Property)) { return Holds(MapProp->KeyProp) || Holds(MapProp->ValueProp); }
+			return false;
+		}
+	};
+}
+
+void UKzDialogueValidator_DanglingLineRefs::Validate_Implementation(const UObject* Asset, TArray<FKzValidationIssue>& OutIssues) const
+{
+	TArray<UObject*> Objects;
+	GetObjectsWithPackage(Asset->GetPackage(), Objects, /*bIncludeNestedObjects=*/true);
+
+	// A Blueprint repeats its defaults in copies (CDOs of compile-only classes): one issue per reference.
+	TSet<FString> Reported;
+	auto Check = [this, &OutIssues, &Reported](const FString& Where, const UKzDialogueAsset* Dialogue, const FString& MissingAssetPath, const FGuid& Id)
+	{
+		if (!Id.IsValid()) { return; }
+
+		FText Problem;
+		if (!Dialogue)
+		{
+			Problem = MissingAssetPath.IsEmpty()
+				? FText::Format(LOCTEXT("RefNoAsset", "{0} names a line but no dialogue asset."), FText::FromString(Where))
+				: FText::Format(LOCTEXT("RefAssetGone", "{0} points at {1}, which no longer exists."), FText::FromString(Where), FText::FromString(MissingAssetPath));
+		}
+		else if (!Dialogue->FindLine(Id) && !Dialogue->FindAlias(Id))
+		{
+			Problem = FText::Format(LOCTEXT("RefLineGone", "{0} names a line or alias that {1} no longer has."), FText::FromString(Where), FText::FromString(Dialogue->GetName()));
+		}
+
+		if (!Problem.IsEmpty() && !Reported.Contains(Problem.ToString()))
+		{
+			Reported.Add(Problem.ToString());
+			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, Problem, GetValidatorId()));
+		}
+	};
+
+	FLineRefTypeScan Scan;
+	for (const UObject* Object : Objects)
+	{
+		// Transient objects never save, skeleton classes included.
+		if (!Object || Object->HasAnyFlags(RF_Transient)) { continue; }
+
+		if (const UMovieSceneKzDialogueSection* Section = Cast<UMovieSceneKzDialogueSection>(Object))
+		{
+			const UMovieSceneKzDialogueTrack* Track = Section->GetTypedOuter<UMovieSceneKzDialogueTrack>();
+			Check(FString::Printf(TEXT("Dialogue section %s"), *Section->GetName()), Track ? Track->DialogueAsset.Get() : nullptr, FString(), Section->LineId);
+			continue;
+		}
+
+		if (!Scan.Holds(Object->GetClass())) { continue; }
+
+		for (TPropertyValueIterator<FStructProperty> It(Object->GetClass(), Object); It; ++It)
+		{
+			const FString Where = FString::Printf(TEXT("%s.%s"), *Object->GetName(), *It.Key()->GetName());
+			if (It.Key()->Struct == FKzDialogueLineRef::StaticStruct())
+			{
+				const FKzDialogueLineRef& Ref = *static_cast<const FKzDialogueLineRef*>(It.Value());
+				Check(Where, Ref.Asset.LoadSynchronous(), Ref.Asset.ToString(), Ref.LineId);
+			}
+			else if (It.Key()->Struct == FKzDialogueLineList::StaticStruct())
+			{
+				const FKzDialogueLineList& List = *static_cast<const FKzDialogueLineList*>(It.Value());
+				const UKzDialogueAsset* Dialogue = List.Asset.LoadSynchronous();
+				for (const FGuid& Id : List.LineIds)
+				{
+					Check(Where, Dialogue, List.Asset.ToString(), Id);
+				}
+			}
 		}
 	}
 }
