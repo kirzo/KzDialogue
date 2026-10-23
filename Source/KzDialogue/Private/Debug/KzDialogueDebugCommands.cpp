@@ -1,7 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Debug/KzDialogueDebugCommands.h"
-#include "UObject/UObjectIterator.h"
+#include "KzDialogue.h"
 
 #if !UE_BUILD_SHIPPING
 
@@ -16,8 +16,6 @@
 #include "Engine/World.h"
 #include "GameplayTagContainer.h"
 #include "Logging/LogMacros.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueCmd, Log, All);
 
 namespace KzDialogueCmd
 {
@@ -74,7 +72,7 @@ namespace KzDialogueCmd
 
 	static void LogToConsole(const FString& Message)
 	{
-		UE_LOG(LogKzDialogueCmd, Display, TEXT("%s"), *Message);
+		UE_LOG(LogKzDialogue, Display, TEXT("%s"), *Message);
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(INDEX_NONE, 5.0f, FColor::Cyan, Message);
@@ -132,7 +130,8 @@ namespace KzDialogueCmd
 		}
 	}
 
-	static void HandleNext(const TArray<FString>& Args)
+	/** Run a player command on the channel argument, or on the default channel. */
+	static void RunOnPlayer(const TArray<FString>& Args, const TCHAR* Done, void (UKzDialoguePlayer::*Command)())
 	{
 		UKzDialogueSubsystem* Sub = ResolveSubsystem();
 		if (!Sub) { return; }
@@ -140,36 +139,16 @@ namespace KzDialogueCmd
 		const FGameplayTag Channel = ParseChannelArg(Args, 0);
 		if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel.IsValid() ? Channel : Sub->DefaultChannel))
 		{
-			Player->Next();
-			LogToConsole(FString::Printf(TEXT("Advanced channel '%s'"), *Player->Channel.ToString()));
+			(Player->*Command)();
+			LogToConsole(FString::Printf(TEXT("%s channel '%s'"), Done, *Player->Channel.ToString()));
 		}
 	}
 
-	static void HandlePause(const TArray<FString>& Args)
-	{
-		UKzDialogueSubsystem* Sub = ResolveSubsystem();
-		if (!Sub) { return; }
-
-		const FGameplayTag Channel = ParseChannelArg(Args, 0);
-		if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel.IsValid() ? Channel : Sub->DefaultChannel))
-		{
-			Player->Pause();
-			LogToConsole(FString::Printf(TEXT("Paused channel '%s'"), *Player->Channel.ToString()));
-		}
-	}
-
-	static void HandleResume(const TArray<FString>& Args)
-	{
-		UKzDialogueSubsystem* Sub = ResolveSubsystem();
-		if (!Sub) { return; }
-
-		const FGameplayTag Channel = ParseChannelArg(Args, 0);
-		if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel.IsValid() ? Channel : Sub->DefaultChannel))
-		{
-			Player->Resume();
-			LogToConsole(FString::Printf(TEXT("Resumed channel '%s'"), *Player->Channel.ToString()));
-		}
-	}
+	static void HandleNext(const TArray<FString>& Args) { RunOnPlayer(Args, TEXT("Advanced"), &UKzDialoguePlayer::Next); }
+	static void HandlePause(const TArray<FString>& Args) { RunOnPlayer(Args, TEXT("Paused"), &UKzDialoguePlayer::Pause); }
+	static void HandleResume(const TArray<FString>& Args) { RunOnPlayer(Args, TEXT("Resumed"), &UKzDialoguePlayer::Resume); }
+	static void HandleAbort(const TArray<FString>& Args) { RunOnPlayer(Args, TEXT("Aborted"), &UKzDialoguePlayer::Abort); }
+	static void HandleInterrupt(const TArray<FString>& Args) { RunOnPlayer(Args, TEXT("Interrupted"), &UKzDialoguePlayer::Interrupt); }
 
 	static void HandleSetSpeed(const TArray<FString>& Args)
 	{
@@ -200,19 +179,13 @@ namespace KzDialogueCmd
 		}
 		else
 		{
-			// Apply to every existing player.
-			int32 Count = 0;
-			// Iterating Players directly requires friend access; we use FindPlayer per
-			// known channel from settings instead. Cheap enough.
-			for (const FGameplayTag& Tag : { Sub->DefaultChannel })
+			TArray<UKzDialoguePlayer*> Players;
+			Sub->GetAllPlayers(Players);
+			for (UKzDialoguePlayer* Player : Players)
 			{
-				if (UKzDialoguePlayer* Player = Sub->FindPlayer(Tag))
-				{
-					Player->TimeScale = Factor;
-					++Count;
-				}
+				Player->TimeScale = Factor;
 			}
-			LogToConsole(FString::Printf(TEXT("TimeScale = %.2f on %d player(s)"), Factor, Count));
+			LogToConsole(FString::Printf(TEXT("TimeScale = %.2f on %d player(s)"), Factor, Players.Num()));
 		}
 	}
 
@@ -221,8 +194,6 @@ namespace KzDialogueCmd
 		UKzDialogueSubsystem* Sub = ResolveSubsystem();
 		if (!Sub) { return; }
 
-		// We don't have a public iterator for Players; expose one via a debug-only API.
-		// (See note below — small addition to the subsystem header.)
 		TArray<UKzDialoguePlayer*> Active;
 		Sub->GetAllPlayers(Active);
 
@@ -250,15 +221,11 @@ namespace KzDialogueCmd
 
 	static void HandleListSpeakers(const TArray<FString>& /*Args*/)
 	{
-		// Speaker registry is per-world; we ask the world's speaker components directly.
 		UWorld* World = ResolveActiveWorld();
 		if (!World) { return; }
 
-		TArray<UKzDialogueSpeakerComponent*> Speakers;
-		for (TObjectIterator<UKzDialogueSpeakerComponent> It; It; ++It)
-		{
-			if (It->GetWorld() == World) { Speakers.Add(*It); }
-		}
+		TMap<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*> Speakers;
+		UKzDialogueSpeakerComponent::GetRegisteredSpeakers(World, Speakers);
 
 		if (Speakers.Num() == 0)
 		{
@@ -267,12 +234,9 @@ namespace KzDialogueCmd
 		}
 
 		LogToConsole(FString::Printf(TEXT("=== %d speaker(s) ==="), Speakers.Num()));
-		for (const UKzDialogueSpeakerComponent* Speaker : Speakers)
+		for (const TPair<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*>& Pair : Speakers)
 		{
-			LogToConsole(FString::Printf(
-				TEXT("  %s  on %s"),
-				Speaker->Speaker ? *Speaker->Speaker->GetName() : TEXT("<none>"),
-				Speaker->GetOwner() ? *Speaker->GetOwner()->GetName() : TEXT("<no owner>")));
+			LogToConsole(FString::Printf(TEXT("  %s%s  on %s"), *Pair.Key->GetName(), Pair.Value->Speaker != Pair.Key ? TEXT(" (persona)") : TEXT(""), *GetNameSafe(Pair.Value->GetOwner())));
 		}
 	}
 
@@ -337,9 +301,11 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 	Make(TEXT("Kz.Dialogue.Next"), TEXT("Next [Channel]"), HandleNext);
 	Make(TEXT("Kz.Dialogue.Pause"), TEXT("Pause [Channel]"), HandlePause);
 	Make(TEXT("Kz.Dialogue.Resume"), TEXT("Resume [Channel]"), HandleResume);
+	Make(TEXT("Kz.Dialogue.Abort"), TEXT("Abort [Channel]: hard stop, no exit phases"), HandleAbort);
+	Make(TEXT("Kz.Dialogue.Interrupt"), TEXT("Interrupt [Channel]: hard stop with a short audio fade"), HandleInterrupt);
 	Make(TEXT("Kz.Dialogue.SetSpeed"), TEXT("SetSpeed <factor> [Channel]"), HandleSetSpeed);
 	Make(TEXT("Kz.Dialogue.ListChannels"), TEXT("List active channels and their state"), HandleListChannels);
-	Make(TEXT("Kz.Dialogue.ListSpeakers"), TEXT("List speaker components in the active world"), HandleListSpeakers);
+	Make(TEXT("Kz.Dialogue.ListSpeakers"), TEXT("List registered speaker identities (personas included) in the active world"), HandleListSpeakers);
 	Make(TEXT("Kz.Dialogue.Status"), TEXT("Dump full dialogue state"), HandleStatus);
 	Make(TEXT("Kz.Dialogue.ResetAliasStates"), TEXT("Reset all cached alias playback states"), HandleResetAliasStates);
 	Make(TEXT("Kz.Dialogue.ResetAliasState"), TEXT("ResetAliasState <AliasGuid>: reset cached state for a single alias"), HandleResetAliasState);

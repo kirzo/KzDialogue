@@ -44,6 +44,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
 	UKzDialoguePlayer* GetCurrentPlayer() const { return CurrentPlayer; }
 
+	/** The asset this session plays. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
+	UKzDialogueAsset* GetAsset() const { return Asset; }
+
 	/** The channel the current run plays on. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset Session")
 	FGameplayTag GetChannel() const { return CurrentChannel; }

@@ -56,9 +56,9 @@ struct KZDIALOGUE_API FKzDialogueNotifyContext
 
 /**
  * Shared base for dialogue notifies. Holds only what point and state notifies have in
- * common; the firing contract lives in the two subclasses.
+ * common; the firing contract lives in the two subclasses, so Blueprints derive from those.
  */
-UCLASS(Abstract, EditInlineNew, Blueprintable)
+UCLASS(Abstract, EditInlineNew, NotBlueprintable)
 class KZDIALOGUE_API UKzDialogueNotifyBase : public UObject
 {
 	GENERATED_BODY()

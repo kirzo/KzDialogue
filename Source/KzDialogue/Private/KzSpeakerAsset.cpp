@@ -1,13 +1,12 @@
 // Copyright 2026 kirzo
 
 #include "KzSpeakerAsset.h"
+#include "KzDialogue.h"
 
 #include "KzDialogueTypes.h"
 #include "KzNamedTokenSubsystem.h"
 #include "Internationalization/Text.h"
 #include "Settings/KzDialogueSettings.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzSpeaker, Log, All);
 
 FText UKzSpeakerAsset::GetResolvedDisplayName() const
 {
@@ -84,7 +83,7 @@ FText UKzSpeakerAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Over
 	if (Part == TEXT("no-qualifier")) { return ComposeStructuredName(true, false, true, Overrides); }
 	if (Part == TEXT("no-family")) { return ComposeStructuredName(true, true, false, Overrides); }
 
-	UE_LOG(LogKzSpeaker, Warning, TEXT("'%s': unknown name part '%s'; using the default name."), *GetName(), *Part.ToString());
+	UE_LOG(LogKzDialogue, Warning, TEXT("'%s': unknown name part '%s'; using the default name."), *GetName(), *Part.ToString());
 	return ResolveName(NAME_None, Overrides);
 }
 

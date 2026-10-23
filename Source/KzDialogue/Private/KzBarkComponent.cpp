@@ -1,13 +1,12 @@
 // Copyright 2026 kirzo
 
 #include "KzBarkComponent.h"
+#include "KzDialogue.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "TimerManager.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzBark, Log, All);
 
 UKzBarkComponent::UKzBarkComponent()
 {
@@ -44,7 +43,7 @@ void UKzBarkComponent::StartBarking()
 
 	if (!Channel.IsValid() || !Bark.IsValid() || !GetSubsystem())
 	{
-		UE_LOG(LogKzBark, Warning, TEXT("UKzBarkComponent on %s: can't start — needs a valid Channel, Bark and dialogue subsystem."), *GetNameSafe(GetOwner()));
+		UE_LOG(LogKzDialogue, Warning, TEXT("UKzBarkComponent on %s: can't start, needs a valid Channel, Bark and dialogue subsystem."), *GetNameSafe(GetOwner()));
 		return;
 	}
 

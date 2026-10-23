@@ -94,6 +94,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
 	static UKzDialogueSpeakerComponent* FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker);
 
+	/** Every identity registered in the world, with the component FindSpeaker resolves it to. */
+	static void GetRegisteredSpeakers(const UObject* WorldContextObject, TMap<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*>& OutSpeakers);
+
 	/** Speak an asset on this speaker's default channel. Returns the session for the whole asset. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Speaker")
 	UKzDialogueAssetSession* Speak(UKzDialogueAsset* Asset);

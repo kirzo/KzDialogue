@@ -28,6 +28,8 @@ class KZDIALOGUE_API UKzDialogueSubsystem : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
+	friend class FKzDialogueDebugOverlay;
+
 public:
 	/** Default channel used when callers don't pass one. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subsystem")

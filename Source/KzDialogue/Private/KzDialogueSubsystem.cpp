@@ -321,7 +321,10 @@ void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)
 static bool IsPlayingManualLine(const UKzDialoguePlayer& Player, const FGuid& LineId)
 {
 	const UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
-	return ManualProv && ManualProv->Line.LineId == LineId;
+	if (!ManualProv || ManualProv->Line.LineId != LineId) { return false; }
+
+	UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s': line %s is already showing; the request joins it."), *Player.Channel.ToString(), *LineId.ToString());
+	return true;
 }
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority)
@@ -567,6 +570,7 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 		const UWorld* World = GetWorld();
 		if (World && World->TimeSince(State.LastResolvedWorldTime) < Alias.CooldownSeconds)
 		{
+			UE_LOG(LogKzDialogue, Verbose, TEXT("Alias '%s' is cooling down (%.1f s left); nothing plays."), *Alias.AliasName.ToString(), Alias.CooldownSeconds - World->TimeSince(State.LastResolvedWorldTime));
 			return FGuid();
 		}
 	}

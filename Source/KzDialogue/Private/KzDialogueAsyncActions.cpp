@@ -1,14 +1,13 @@
 // Copyright 2026 kirzo
 
 #include "KzDialogueAsyncActions.h"
+#include "KzDialogue.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
 #include "KzDialogueFunctionLibrary.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
 #include "Engine/World.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzDialogueAsync, Log, All);
 
 // ------------------------------------------------------------------------------------------------
 // UKzAsyncDialogueAction
@@ -20,7 +19,7 @@ bool UKzAsyncDialogueAction::AcquirePlayer()
 	UKzDialogueSubsystem* Subsystem = World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
 	if (!Subsystem)
 	{
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no dialogue subsystem available."), *GetName());
+		UE_LOG(LogKzDialogue, Warning, TEXT("%s: no dialogue subsystem available."), *GetName());
 		return false;
 	}
 
@@ -31,7 +30,7 @@ bool UKzAsyncDialogueAction::AcquirePlayer()
 	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Channel);
 	if (!IsValid(Player))
 	{
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: no dialogue player available for channel '%s'."), *GetName(), *Channel.ToString());
+		UE_LOG(LogKzDialogue, Warning, TEXT("%s: no dialogue player available for channel '%s'."), *GetName(), *Channel.ToString());
 		return false;
 	}
 
@@ -164,7 +163,7 @@ void UKzAsyncPlayDialogueLine::Activate()
 
 	if (DialoguePlayer->ResolveLineRefToMatchSet(LaunchRef).IsEmpty())
 	{
-		UE_LOG(LogKzDialogueAsync, Warning, TEXT("%s: line ref does not resolve in '%s'."), *GetName(), *LaunchRef.Asset.ToString());
+		UE_LOG(LogKzDialogue, Warning, TEXT("%s: line ref does not resolve in '%s'."), *GetName(), *LaunchRef.Asset.ToString());
 		NotifyCancelled();
 		return;
 	}

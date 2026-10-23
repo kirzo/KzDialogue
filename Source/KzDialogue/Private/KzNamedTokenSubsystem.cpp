@@ -1,13 +1,12 @@
 // Copyright 2026 kirzo
 
 #include "KzNamedTokenSubsystem.h"
+#include "KzDialogue.h"
 
 #include "KzNamedAsset.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzNamedToken, Log, All);
 
 UKzNamedTokenSubsystem* UKzNamedTokenSubsystem::Get(const UObject* WorldContextObject)
 {
@@ -28,7 +27,7 @@ bool UKzNamedTokenSubsystem::SetNamedTokenGender(FName Token, EKzGender Gender)
 {
 	if (!FindNamedAssetPath(Token))
 	{
-		UE_LOG(LogKzNamedToken, Warning, TEXT("SetNamedTokenGender: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
+		UE_LOG(LogKzDialogue, Warning, TEXT("SetNamedTokenGender: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
 		return false;
 	}
 
@@ -42,7 +41,7 @@ bool UKzNamedTokenSubsystem::SetNamedTokenPart(FName Token, FName Part, FText Te
 {
 	if (!FindNamedAssetPath(Token))
 	{
-		UE_LOG(LogKzNamedToken, Warning, TEXT("SetNamedTokenPart: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
+		UE_LOG(LogKzDialogue, Warning, TEXT("SetNamedTokenPart: no named asset claims token '%s'; create the asset first (it is the token's declaration and fallback)."), *Token.ToString());
 		return false;
 	}
 
@@ -79,7 +78,7 @@ const FSoftObjectPath* UKzNamedTokenSubsystem::FindNamedAssetPath(FName Token) c
 
 			if (const FSoftObjectPath* Existing = NamedAssetTokens.Find(AssetToken))
 			{
-				UE_LOG(LogKzNamedToken, Warning, TEXT("Named-asset token '%s' is claimed by both '%s' and '%s'; keeping the first."), *AssetToken.ToString(), *Existing->ToString(), *Asset.GetObjectPathString());
+				UE_LOG(LogKzDialogue, Warning, TEXT("Named-asset token '%s' is claimed by both '%s' and '%s'; keeping the first."), *AssetToken.ToString(), *Existing->ToString(), *Asset.GetObjectPathString());
 				continue;
 			}
 			NamedAssetTokens.Add(AssetToken, Asset.ToSoftObjectPath());

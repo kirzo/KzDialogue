@@ -17,6 +17,9 @@ struct FKzDialogueTimeResolveContext
 
 	/** Audio currently loaded for the line (for anchor sources). May be null. */
 	const USoundBase* Audio = nullptr;
+
+	/** Log when an anchor source falls back; runtime bakes only, editor previews stay quiet. */
+	bool bWarnOnFallback = false;
 };
 
 /**

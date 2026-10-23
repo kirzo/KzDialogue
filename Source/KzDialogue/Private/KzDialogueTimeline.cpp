@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "KzDialogueTimeline.h"
+#include "KzDialogue.h"
 
 #include "Sound/SoundWave.h"
 
@@ -17,28 +18,26 @@ void FKzDialogueTimeSource_AudioMarker::Resolve(const FKzDialogueTimeResolveCont
 	OutEnd = FallbackTime + Duration;
 
 	const USoundWave* Wave = Cast<USoundWave>(Context.Audio);
-	if (!Wave || MarkerName.IsNone())
+	const float SampleRate = Wave ? Wave->GetSampleRateForCurrentPlatform() : 0.0f;
+	if (SampleRate > 0.0f && !MarkerName.IsNone())
 	{
-		return;
-	}
-
-	const float SampleRate = Wave->GetSampleRateForCurrentPlatform();
-	if (SampleRate <= 0.0f)
-	{
-		return;
-	}
-
-	const FString MarkerLabel = MarkerName.ToString();
-	for (const FSoundWaveCuePoint& Cue : Wave->GetCuePoints())
-	{
-		if (Cue.Label == MarkerLabel)
+		const FString MarkerLabel = MarkerName.ToString();
+		for (const FSoundWaveCuePoint& Cue : Wave->GetCuePoints())
 		{
-			OutStart = static_cast<float>(Cue.FramePosition) / SampleRate;
-			// A region marker carries its own length; an explicit Duration overrides it.
-			const float RegionLength = static_cast<float>(Cue.FrameLength) / SampleRate;
-			OutEnd = OutStart + (Duration > 0.0f ? Duration : RegionLength);
-			return;
+			if (Cue.Label == MarkerLabel)
+			{
+				OutStart = static_cast<float>(Cue.FramePosition) / SampleRate;
+				// A region marker carries its own length; an explicit Duration overrides it.
+				const float RegionLength = static_cast<float>(Cue.FrameLength) / SampleRate;
+				OutEnd = OutStart + (Duration > 0.0f ? Duration : RegionLength);
+				return;
+			}
 		}
+	}
+
+	if (Context.bWarnOnFallback)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Audio marker '%s' not found in '%s'; using the fallback time (%.2f s)."), *MarkerName.ToString(), *GetNameSafe(Context.Audio), FallbackTime);
 	}
 }
 

@@ -238,8 +238,14 @@ void UKzDialoguePlayer::ClaimViewResponse()
 void UKzDialoguePlayer::HandleViewAck(EKzDialogueState Phase)
 {
 	// A late ack for a phase already left (stale fade) must not count against the next one.
-	if (State != Phase || PendingViewAcks <= 0)
+	if (State != Phase)
 	{
+		UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s': ignored a late %s ack in %s."), *Channel.ToString(), *UEnum::GetValueAsString(Phase), *UEnum::GetValueAsString(State));
+		return;
+	}
+	if (PendingViewAcks <= 0)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': a view finished %s without claiming it; call ClaimViewResponse in the request event."), *Channel.ToString(), *UEnum::GetValueAsString(Phase));
 		return;
 	}
 
@@ -267,6 +273,7 @@ void UKzDialoguePlayer::OnPhaseAcksDone()
 {
 	if (bPaused)
 	{
+		UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s': %s done while paused; advancing on resume."), *Channel.ToString(), *UEnum::GetValueAsString(State));
 		bAdvanceOnResume = true;
 		return;
 	}
@@ -322,6 +329,7 @@ void UKzDialoguePlayer::AdvanceToNextLine()
 
 void UKzDialoguePlayer::SetState(EKzDialogueState NewState)
 {
+	UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s': %s -> %s, line %s, %d pending view ack(s)."), *Channel.ToString(), *UEnum::GetValueAsString(State), *UEnum::GetValueAsString(NewState), *CurrentLine.LineId.ToString(), PendingViewAcks);
 	State = NewState;
 	++StateSerial;
 	bAdvanceOnResume = false;
@@ -1113,6 +1121,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	// Synchronous load, not Get(): with AudioStartDelay the wave may not be in memory yet at
 	// bake time, and anchor sources (audio markers) need it to resolve.
 	ResolveContext.Audio = CurrentLine.Audio.IsNull() ? nullptr : CurrentLine.Audio.LoadSynchronous();
+	ResolveContext.bWarnOnFallback = true;
 
 	for (const FKzDialogueNotifyTrack& Track : Timeline->Tracks)
 	{

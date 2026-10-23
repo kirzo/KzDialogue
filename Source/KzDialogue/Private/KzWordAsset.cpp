@@ -1,10 +1,9 @@
 // Copyright 2026 kirzo
 
 #include "KzWordAsset.h"
+#include "KzDialogue.h"
 
 #include "KzNamedTokenSubsystem.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogKzWord, Log, All);
 
 FText UKzWordAsset::Resolve(EKzGender Gender) const
 {
@@ -34,7 +33,7 @@ FText UKzWordAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Overrid
 	const int64 Value = StaticEnum<EKzGender>()->GetValueByNameString(Part.ToString());
 	if (Value == INDEX_NONE)
 	{
-		UE_LOG(LogKzWord, Warning, TEXT("'%s': unknown name part '%s' (expected a gender form); using the default form."), *GetName(), *Part.ToString());
+		UE_LOG(LogKzDialogue, Warning, TEXT("'%s': unknown name part '%s' (expected a gender form); using the default form."), *GetName(), *Part.ToString());
 		return Text;
 	}
 	return Resolve(static_cast<EKzGender>(Value));

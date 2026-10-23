@@ -63,6 +63,8 @@ class KZDIALOGUE_API UKzDialoguePlayer : public UObject, public FTickableGameObj
 {
 	GENERATED_BODY()
 
+	friend class FKzDialogueDebugOverlay;
+
 public:
 	UKzDialoguePlayer();
 

@@ -8,6 +8,8 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueAssetSession.h"
+#include "KzDialogueNotify.h"
 #include "KzDialogueSpeakerComponent.h"
 #include "KzSpeakerAsset.h"
 
@@ -16,7 +18,6 @@
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
-#include "UObject/UObjectIterator.h"
 #include "Sound/SoundBase.h"
 
 namespace KzDialogueDebugDraw
@@ -168,36 +169,30 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 	{
 		if (!IsValid(Player)) { continue; }
 
-		const FString ChannelHeader = FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString());
-		DrawLine(Canvas, X, Y, ChannelHeader, TitleColor);
+		DrawLine(Canvas, X, Y, FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString()), TitleColor);
 
-		// State + priority + scale
-		const FString State = StateName(Player->GetState());
-		const FString StateLine = FString::Printf(
-			TEXT("State: %s   Priority: %d   TimeScale: %.2fx"),
-			*State, Player->CurrentPriority, Player->TimeScale);
+		// The phase stays visible under a pause.
+		const FString StateLine = FString::Printf(TEXT("State: %s%s   Priority: %d   TimeScale: %.2fx   Pending acks: %d"),
+			*StateName(Player->State), Player->IsPaused() ? TEXT(" (paused)") : TEXT(""), Player->CurrentPriority, Player->TimeScale, Player->PendingViewAcks);
+		DrawLine(Canvas, X + Indent, Y, StateLine, StateColor(Player->GetState()));
 
-		FCanvasTextItem StateItem(FVector2D(X + Indent, Y), FText::FromString(StateLine),
-			GEngine->GetSmallFont(), StateColor(Player->GetState()));
-		StateItem.EnableShadow(FLinearColor::Black);
-		Canvas->DrawItem(StateItem);
-		Y += LineHeight;
+		FString Source = ProviderTypeName(Player->GetProvider());
+		for (const UKzDialogueAssetSession* Session : Sub->AssetSessions)
+		{
+			if (Session && Session->GetCurrentPlayer() == Player)
+			{
+				Source = FString::Printf(TEXT("%s (asset session)"), *GetNameSafe(Session->GetAsset()));
+				break;
+			}
+		}
+		DrawLabeled(Canvas, X + Indent, Y, TEXT("Source:"), Source);
 
-		// Provider
-		DrawLabeled(Canvas, X + Indent, Y, TEXT("Provider:"), ProviderTypeName(Player->GetProvider()));
-
-		// Current line (if any)
 		if (Player->IsPlaying())
 		{
-			const FKzDialogueLine& Line = Player->GetCurrentLine();
-			const FString LineDesc = FString::Printf(
-				TEXT("(%s) \"%s\""),
-				*Line.Speaker.GetDisplayLabel(Player).ToString(),
-				*Line.Text.ToString());
-
+			const FKzDialogueLine& Line = Player->CurrentLine;
+			const FString LineDesc = FString::Printf(TEXT("(%s) \"%s\""), *Line.Speaker.GetDisplayLabel(Player).ToString(), *Line.GetFormattedText().ToString());
 			DrawLabeled(Canvas, X + Indent, Y, TEXT("Line:"), LineDesc);
 
-			// Audio (if any)
 			if (USoundBase* Sound = Line.Audio.Get())
 			{
 				DrawLabeled(Canvas, X + Indent, Y, TEXT("Audio:"), Sound->GetName());
@@ -206,20 +201,31 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 			{
 				DrawLabeled(Canvas, X + Indent, Y, TEXT("Audio:"), TEXT("(unloaded)"));
 			}
+
+			if (Player->ActiveNotifies.Num() > 0)
+			{
+				DrawLabeled(Canvas, X + Indent, Y, TEXT("Timeline:"), FString::Printf(TEXT("%.2f / %.2f s"), Player->TimelineClock, Player->CachedLineDuration));
+
+				TArray<FString> ActiveStates;
+				for (const FKzDialogueActiveNotify& Entry : Player->ActiveNotifies)
+				{
+					if (Entry.bActive && IsValid(Entry.Notify)) { ActiveStates.Add(Entry.Notify->GetNotifyName().ToString()); }
+				}
+				if (ActiveStates.Num() > 0)
+				{
+					DrawLabeled(Canvas, X + Indent, Y, TEXT("States:"), FString::Join(ActiveStates, TEXT(", ")));
+				}
+			}
 		}
 
 		Y += SectionGap;
 	}
 
 	// --- Speakers --------------------------------------------------------------------
-	TArray<UKzDialogueSpeakerComponent*> Speakers;
-	for (TObjectIterator<UKzDialogueSpeakerComponent> It; It; ++It)
-	{
-		if (It->GetWorld() == World) { Speakers.Add(*It); }
-	}
+	TMap<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*> Speakers;
+	UKzDialogueSpeakerComponent::GetRegisteredSpeakers(World, Speakers);
 
-	const FString SpeakerHeader = FString::Printf(TEXT("=== Speakers (%d) ==="), Speakers.Num());
-	DrawLine(Canvas, X, Y, SpeakerHeader, TitleColor);
+	DrawLine(Canvas, X, Y, FString::Printf(TEXT("=== Speakers (%d) ==="), Speakers.Num()), TitleColor);
 	Y += SectionGap * 0.5f;
 
 	if (Speakers.Num() == 0)
@@ -227,16 +233,9 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* /*PC
 		DrawLine(Canvas, X + Indent, Y, TEXT("(none registered)"), MutedColor);
 	}
 
-	for (const UKzDialogueSpeakerComponent* Speaker : Speakers)
+	for (const TPair<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*>& Pair : Speakers)
 	{
-		if (!IsValid(Speaker)) { continue; }
-
-		const FString OwnerName = Speaker->GetOwner() ? Speaker->GetOwner()->GetName() : TEXT("<no owner>");
-		const FString SpeakerLine = FString::Printf(
-			TEXT("%s   on %s"),
-			Speaker->Speaker ? *Speaker->Speaker->GetName() : TEXT("<none>"),
-			*OwnerName);
-
+		const FString SpeakerLine = FString::Printf(TEXT("%s%s   on %s"), *Pair.Key->GetName(), Pair.Value->Speaker != Pair.Key ? TEXT(" (persona)") : TEXT(""), *GetNameSafe(Pair.Value->GetOwner()));
 		DrawLine(Canvas, X + Indent, Y, SpeakerLine, MutedColor);
 	}
 }

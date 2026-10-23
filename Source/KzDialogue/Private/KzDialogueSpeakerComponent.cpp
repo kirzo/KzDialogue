@@ -164,6 +164,22 @@ UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeaker(const UObj
 	return nullptr;
 }
 
+void UKzDialogueSpeakerComponent::GetRegisteredSpeakers(const UObject* WorldContextObject, TMap<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*>& OutSpeakers)
+{
+	const UWorld* World = IsValid(WorldContextObject) ? WorldContextObject->GetWorld() : nullptr;
+	const auto* WorldMap = World ? KzDialogueSpeakerInternal::Registry.Find(World) : nullptr;
+	if (!WorldMap) { return; }
+
+	for (const auto& Pair : *WorldMap)
+	{
+		const UKzSpeakerAsset* Identity = Pair.Key.ResolveObjectPtr();
+		if (UKzDialogueSpeakerComponent* Component = FindSpeaker(WorldContextObject, Identity))
+		{
+			OutSpeakers.Add(Identity, Component);
+		}
+	}
+}
+
 UKzDialogueAssetSession* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* Asset)
 {
 	if (!IsValid(Asset) || !GetWorld()) { return nullptr; }
