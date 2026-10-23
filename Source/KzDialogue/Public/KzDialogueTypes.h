@@ -226,6 +226,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 */
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Line")
 	TObjectPtr<UKzDialogueTimeline> Timeline = nullptr;
+
+	/** The asset the line was resolved from (UKzDialogueAsset::FinalizeResolvedLine); unset for a line built by hand, whose LineId is not stable. */
+	TWeakObjectPtr<const UKzDialogueAsset> SourceAsset;
 	
 #if WITH_EDITORONLY_DATA
 	/** Director notes for the translator: tone, intent, audience. Not localizable; exported alongside the line in the translation flow, never shipped. */

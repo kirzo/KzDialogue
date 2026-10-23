@@ -6,6 +6,7 @@
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueFunctionLibrary.h"
+#include "KzDialogueMemorySubsystem.h"
 #include "KzNamedTokenSubsystem.h"
 #include "KzDialogueSubsystem.h"
 #include "KzDialogueTimeline.h"
@@ -388,6 +389,10 @@ void UKzDialoguePlayer::PresentLine()
 	const uint32 Serial = StateSerial;
 	bLinePresented = true;
 
+	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(this))
+	{
+		Memory->RecordLinePresented(CurrentLine);
+	}
 	OnLineStarted.Broadcast(this, CurrentLine);
 	if (Serial != StateSerial) { return; }
 

@@ -199,8 +199,8 @@ public:
 	EKzDialogueAdvanceMode ResolveAdvanceMode(EKzDialogueAdvanceMode Override, const UKzDialogueAsset* Asset) const;
 
 	/**
-	 * Reset the cached playback state of a single alias. Next time the alias is
-	 * resolved, it starts as if it had never been played.
+	 * Reset the playback state of a single alias, its remembered picks and its cooldown. Next time the
+	 * alias is resolved, it starts as if it had never been played.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void ResetAliasState(FGuid AliasId);
@@ -273,48 +273,8 @@ private:
 	/** Resolves a line-or-alias id inside Asset to a concrete line (stateful alias selection). */
 	bool ResolveAssetEntry(UKzDialogueAsset* Asset, const FGuid& LineId, FKzDialogueLine& OutLine);
 
-	/**
-	 * Per-alias playback state. Keyed by AliasId. Created lazily on first resolve.
-	 *
-	 * Holds whatever the alias's selection mode needs to remember between resolves
-	 * (last picked line for RandomNoRepeat, shuffle order + cursor for ShuffleBag,
-	 * cursor for Sequential, etc.).
-	 */
-	struct FAliasPlaybackState
-	{
-		/**
-		 * Last line returned.
-		 * Used by RandomNoRepeat and the cross-bag check in ShuffleBag.
-		 * Invalid means "nothing played yet".
-		 */
-		FGuid LastPickedLineId;
-
-		/** ShuffleBag: current bag of LineIds in shuffle order. Drained as lines play. */
-		TArray<FGuid> ShuffleBag;
-
-		/** ShuffleBag: index of the next line to take from the bag. */
-		int32 ShuffleCursor = 0;
-
-		/**
-		 * ShuffleBag: snapshot of the alias's LineIds when the bag was built.
-		 * If the alias's LineIds change (asset edited, hot reload), the bag
-		 * is rebuilt.
-		 */
-		TArray<FGuid> ShuffleBagSourceIds;
-
-		/** Sequential: index of the next line to play. */
-		int32 SequentialCursor = 0;
-
-		/**
-		 * World time of the last successful resolution. Used to gate
-		 * further resolutions while CooldownSeconds hasn't elapsed.
-		 *
-		 * Negative means "never resolved": the cooldown check always passes on first use.
-		 */
-		double LastResolvedWorldTime = -1.0;
-	};
-
-	TMap<FGuid /*AliasId*/, FAliasPlaybackState> AliasStates;
+	/** World time each alias last resolved at, for its cooldown. Level-local on purpose; what the alias remembers between picks lives in UKzDialogueMemorySubsystem. */
+	TMap<FGuid /*AliasId*/, double> AliasCooldownStarts;
 
 	/**
 	 * Resolve an alias to a concrete LineId according to its SelectionMode, updating

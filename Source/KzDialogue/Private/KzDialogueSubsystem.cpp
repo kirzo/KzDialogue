@@ -8,6 +8,7 @@
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
 #include "Settings/KzDialogueSettings.h"
+#include "KzDialogueMemorySubsystem.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 #include "Algo/RandomShuffle.h"
@@ -722,12 +723,14 @@ void UKzDialogueSubsystem::GetAllPlayers(TArray<UKzDialoguePlayer*>& OutPlayers)
 
 void UKzDialogueSubsystem::ResetAliasState(FGuid AliasId)
 {
-	AliasStates.Remove(AliasId);
+	AliasCooldownStarts.Remove(AliasId);
+	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(this)) { Memory->ForgetAlias(AliasId); }
 }
 
 void UKzDialogueSubsystem::ResetAllAliasStates()
 {
-	AliasStates.Reset();
+	AliasCooldownStarts.Reset();
+	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(this)) { Memory->ForgetAllAliases(); }
 }
 
 
@@ -735,25 +738,29 @@ FGuid UKzDialogueSubsystem::ResolveAliasInternal(const FKzDialogueAlias& Alias)
 {
 	if (Alias.LineIds.Num() == 0) { return FGuid(); }
 
-	FAliasPlaybackState& State = AliasStates.FindOrAdd(Alias.AliasId);
+	// The picks outlive levels and go into saves; without a game instance (editor previews) each pick starts fresh.
+	FKzAliasMemory Scratch;
+	UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(this);
+	FKzAliasMemory& State = Memory ? Memory->FindOrAddAliasMemory(Alias.AliasId) : Scratch;
 
 	// World time, so pause and dilation stretch the cooldown too.
-	if (Alias.CooldownSeconds > 0.0f && State.LastResolvedWorldTime >= 0.0)
+	const double* LastResolved = AliasCooldownStarts.Find(Alias.AliasId);
+	if (Alias.CooldownSeconds > 0.0f && LastResolved)
 	{
 		const UWorld* World = GetWorld();
-		if (World && World->TimeSince(State.LastResolvedWorldTime) < Alias.CooldownSeconds)
+		if (World && World->TimeSince(*LastResolved) < Alias.CooldownSeconds)
 		{
-			UE_LOG(LogKzDialogue, Verbose, TEXT("Alias '%s' is cooling down (%.1f s left); nothing plays."), *Alias.AliasName.ToString(), Alias.CooldownSeconds - World->TimeSince(State.LastResolvedWorldTime));
+			UE_LOG(LogKzDialogue, Verbose, TEXT("Alias '%s' is cooling down (%.1f s left); nothing plays."), *Alias.AliasName.ToString(), Alias.CooldownSeconds - World->TimeSince(*LastResolved));
 			return FGuid();
 		}
 	}
 
-	auto MarkResolved = [this, &State](const FGuid& Picked) -> FGuid
+	auto MarkResolved = [this, &State, &Alias](const FGuid& Picked) -> FGuid
 	{
 		State.LastPickedLineId = Picked;
 		if (const UWorld* World = GetWorld())
 		{
-			State.LastResolvedWorldTime = World->GetTimeSeconds();
+			AliasCooldownStarts.Add(Alias.AliasId, World->GetTimeSeconds());
 		}
 		return Picked;
 	};

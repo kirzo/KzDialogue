@@ -79,9 +79,10 @@ UKzDialogueTimeline* UKzDialogueAsset::FindTimelineForLine(const FGuid& LineId) 
 void UKzDialogueAsset::FinalizeResolvedLine(FKzDialogueLine& OutLine) const
 {
 	// Single place every resolve path goes through, so consumers get a complete line: the transient
-	// per-line timeline, and the asset-wide tags merged into the line's own (AppendTags dedupes, so
-	// re-resolving the same line stays idempotent).
+	// per-line timeline, its source asset, and the asset-wide tags merged into the line's own
+	// (AppendTags dedupes, so re-resolving the same line stays idempotent).
 	OutLine.Timeline = FindTimelineForLine(OutLine.LineId);
+	OutLine.SourceAsset = this;
 	OutLine.Tags.AppendTags(Tags);
 }
 

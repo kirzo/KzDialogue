@@ -4,6 +4,7 @@
 #include "KzDialogueSubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueMemorySubsystem.h"
 #include "KzNamedAsset.h"
 #include "KzNamedTokenSubsystem.h"
 #include "KzSpeakerAsset.h"
@@ -100,6 +101,18 @@ EKzDialoguePlayResult UKzDialogueFunctionLibrary::GetLastDialoguePlayResult(cons
 {
 	const UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	return IsValid(Sub) ? Sub->GetLastPlayResult() : EKzDialoguePlayResult::RejectedNothingToPlay;
+}
+
+bool UKzDialogueFunctionLibrary::HasSeenDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref)
+{
+	const UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject);
+	return Memory && Memory->HasSeenLine(Ref);
+}
+
+int32 UKzDialogueFunctionLibrary::GetDialogueLineSeenCount(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref)
+{
+	const UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject);
+	return Memory ? Memory->GetLineSeenCount(Ref) : 0;
 }
 
 bool UKzDialogueFunctionLibrary::IsDialogueChannelPlaying(const UObject* WorldContextObject, FGameplayTag Channel)

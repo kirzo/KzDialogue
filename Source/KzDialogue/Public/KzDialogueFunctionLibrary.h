@@ -153,6 +153,14 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue", meta = (WorldContext = "WorldContextObject"))
 	static EKzDialoguePlayResult GetLastDialoguePlayResult(const UObject* WorldContextObject);
 
+	/** True when the line, or any line of the alias, has been presented this game (UKzDialogueMemorySubsystem). */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
+	static bool HasSeenDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref);
+
+	/** Times the line was presented this game; for an alias, the sum over its lines. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
+	static int32 GetDialogueLineSeenCount(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref);
+
 	/** Stop the dialogue on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static void StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);
