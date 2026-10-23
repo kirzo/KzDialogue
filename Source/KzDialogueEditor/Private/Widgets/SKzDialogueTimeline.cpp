@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Widgets/SKzDialogueTimeline.h"
+#include "KzDialogueAudition.h"
 #include "Widgets/KzWaveformPreview.h"
 #include "Widgets/SKzTimelineTrack.h"
 #include "KzDialogueTimeline.h"
@@ -21,8 +22,6 @@
 #include "Engine/Blueprint.h"
 #include "Editor.h"
 #include "Subsystems/AssetEditorSubsystem.h"
-#include "Components/AudioComponent.h"
-#include "Kismet/GameplayStatics.h"
 #include "EditorWidgetsModule.h"
 #include "ITransportControl.h"
 
@@ -73,11 +72,11 @@ namespace
 	};
 
 	// Editor clipboard for notify events, shared across timeline widgets so copy/paste works between
-	// lines. The notify is kept alive via AddToRoot; the time source / flags are plain value data.
+	// lines. The notify is rooted; weak, since a notify Blueprint recompile unroots and trashes it.
 	FInstancedStruct GClipboardTimeSource;
 	bool GClipboardFireIfSkipped = false;
 	bool GClipboardEnabled = true;
-	UKzDialogueNotifyBase* GClipboardNotify = nullptr;
+	TWeakObjectPtr<UKzDialogueNotifyBase> GClipboardNotify;
 
 	// Pending notify selection (e.g. from a validation-issue click); consumed by the timeline whose
 	// OwningLineId matches, on its next tick. LineId invalid means "nothing pending".
@@ -96,6 +95,8 @@ void SKzDialogueTimeline::Construct(const FArguments& InArgs, UKzDialogueTimelin
 	DisplayDuration = InArgs._DisplayDuration;
 	OnModified = InArgs._OnModified;
 	OnRequestHostRefresh = InArgs._OnRequestHostRefresh;
+	PreviewAudioKey = FString::Printf(TEXT("Timeline_%p"), this);
+	FEditorDelegates::BeginPIE.AddSPLambda(this, [this](bool) { StopPlayback(); });
 
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	FDetailsViewArgs DetailsArgs;
@@ -516,11 +517,7 @@ void SKzDialogueTimeline::StartPlayback()
 
 void SKzDialogueTimeline::PlayPreviewAudioFromPlayhead()
 {
-	if (PreviewAudio.IsValid())
-	{
-		PreviewAudio->Stop();
-		PreviewAudio.Reset();
-	}
+	KzDialogueAudition::Stop(PreviewAudioKey);
 
 	// Timeline time is line time, as the game plays it: silent through the AudioStartDelay (Tick starts the
 	// audio when the playhead gets there), then the wave from its AudioStartTime. The range end falls out of
@@ -529,25 +526,12 @@ void SKzDialogueTimeline::PlayPreviewAudioFromPlayhead()
 	bPreviewAudioPending = WaveTime < 0.f;
 	if (bPreviewAudioPending) { return; }
 
-	USoundBase* Audio = ResolveLineAudio();
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-	if (Audio && World)
-	{
-		if (UAudioComponent* Comp = UGameplayStatics::CreateSound2D(World, Audio, 1.f, 1.f, 0.f, nullptr, false, /*bAutoDestroy*/ false))
-		{
-			Comp->Play(WaveTime);
-			PreviewAudio = TStrongObjectPtr<UAudioComponent>(Comp);
-		}
-	}
+	KzDialogueAudition::Play(ResolveLineAudio(), PreviewAudioKey, WaveTime);
 }
 
 void SKzDialogueTimeline::StopPlayback()
 {
-	if (PreviewAudio.IsValid())
-	{
-		PreviewAudio->Stop();
-		PreviewAudio.Reset();
-	}
+	KzDialogueAudition::Stop(PreviewAudioKey);
 	bPreviewAudioPending = false;
 	bPlaying = false;
 }
@@ -632,7 +616,7 @@ FReply SKzDialogueTimeline::OnKeyDown(const FGeometry& MyGeometry, const FKeyEve
 			DuplicateEvent(SelTrack, SelEvent);
 			return FReply::Handled();
 		}
-		if (Key == EKeys::V && GClipboardNotify)
+		if (Key == EKeys::V && GClipboardNotify.IsValid())
 		{
 			// Onto the selected event's track, else the first one shown.
 			const UKzDialogueTimeline* T = Timeline.Get();
@@ -858,7 +842,7 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeAddMenuForTrack(int32 TrackIndex, f
 	}
 	Menu.EndSection();
 
-	if (GClipboardNotify)
+	if (GClipboardNotify.IsValid())
 	{
 		Menu.BeginSection(NAME_None, LOCTEXT("ClipboardSection", "Clipboard"));
 		{
@@ -1129,22 +1113,24 @@ void SKzDialogueTimeline::CopyEvent(int32 TrackIndex, int32 EventIndex)
 	const FKzDialogueNotifyEvent* Src = FindEvent(TrackIndex, EventIndex);
 	if (!Src) { return; }
 
-	if (GClipboardNotify) { GClipboardNotify->RemoveFromRoot(); GClipboardNotify = nullptr; }
+	if (UKzDialogueNotifyBase* Old = GClipboardNotify.Get()) { Old->RemoveFromRoot(); }
+	GClipboardNotify.Reset();
 	GClipboardTimeSource = Src->TimeSource;
 	GClipboardFireIfSkipped = Src->bFireIfSkipped;
 	GClipboardEnabled = Src->bEnabled;
 	if (Src->Notify)
 	{
 		// Duplicate into the transient package and root it so the clipboard survives until replaced.
-		GClipboardNotify = DuplicateObject<UKzDialogueNotifyBase>(Src->Notify, GetTransientPackage());
-		GClipboardNotify->AddToRoot();
+		UKzDialogueNotifyBase* Copy = DuplicateObject<UKzDialogueNotifyBase>(Src->Notify, GetTransientPackage());
+		Copy->AddToRoot();
+		GClipboardNotify = Copy;
 	}
 }
 
 void SKzDialogueTimeline::PasteEvent(int32 TrackIndex, float TimeSeconds)
 {
 	UKzDialogueTimeline* T = Timeline.Get();
-	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !GClipboardNotify) { return; }
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || !GClipboardNotify.IsValid()) { return; }
 
 	EditTimeline(LOCTEXT("PasteEventTransaction", "Paste Dialogue Notify"), [this, TrackIndex, TimeSeconds](UKzDialogueTimeline& Edited)
 	{
@@ -1152,7 +1138,7 @@ void SKzDialogueTimeline::PasteEvent(int32 TrackIndex, float TimeSeconds)
 		NewEvent.TimeSource = GClipboardTimeSource;
 		NewEvent.bFireIfSkipped = GClipboardFireIfSkipped;
 		NewEvent.bEnabled = GClipboardEnabled;
-		NewEvent.Notify = DuplicateObject<UKzDialogueNotifyBase>(GClipboardNotify, &Edited);
+		NewEvent.Notify = DuplicateObject<UKzDialogueNotifyBase>(GClipboardNotify.Get(), &Edited);
 
 		// Place it at the cursor time (converting to a fraction when the source is normalized).
 		if (FKzDialogueTimeSource_Relative* Rel = NewEvent.TimeSource.GetMutablePtr<FKzDialogueTimeSource_Relative>())

@@ -77,18 +77,7 @@ void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropert
 		})
 		.OnKeyDownHandler_Lambda([this](const FGeometry&, const FKeyEvent& KeyEvent) { return OnKeyDownInternal(KeyEvent); });
 
-	InTextHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateSPLambda(this, [this]()
-	{
-		if (TextEditor.IsValid())
-		{
-			FText Value;
-			TextHandle->GetValue(Value);
-			if (!Value.ToString().Equals(TextEditor->GetText().ToString(), ESearchCase::CaseSensitive))
-			{
-				TextEditor->SetText(Value);
-			}
-		}
-	}));
+	InTextHandle->SetOnPropertyValueChanged(FSimpleDelegate::CreateSP(this, &SKzTokenTextEditor::SyncFromHandle));
 
 	// The autocomplete popup anchors under the editor; it never takes the keyboard focus,
 	// the editor routes the keyboard to it while a session is active.
@@ -157,6 +146,19 @@ void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropert
 			MakeLocalizationControl()
 		]
 	];
+}
+
+void SKzTokenTextEditor::SyncFromHandle()
+{
+	FText Value;
+	if (!TextEditor.IsValid() || TextHandle->GetValue(Value) != FPropertyAccess::Success) { return; }
+
+	const FString ValueString = Value.ToString();
+	if (!ValueString.Equals(TextEditor->GetText().ToString(), ESearchCase::CaseSensitive))
+	{
+		TextSnapshot = ValueString;
+		TextEditor->SetText(Value);
+	}
 }
 
 TSharedRef<SWidget> SKzTokenTextEditor::MakeLocalizationControl()

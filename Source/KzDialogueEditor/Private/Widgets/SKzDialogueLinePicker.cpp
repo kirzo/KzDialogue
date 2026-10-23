@@ -282,7 +282,7 @@ void SKzDialogueLinePicker::RebuildVisibleItems()
 	}
 
 	// Second pass: assemble final list with headers between sections. Headers only
-	// appear when both sections have content — avoids a lone header at the top of
+	// appear when both sections have content: avoids a lone header at the top of
 	// a list with only one kind of entry.
 	auto MakeHeader = [](const FString& Label) -> KzDialoguePickerInternal::FEntryPtr
 		{
@@ -317,9 +317,12 @@ void SKzDialogueLinePicker::OnSearchTextChanged(const FText& NewText)
 
 void SKzDialogueLinePicker::OnSearchTextCommitted(const FText& /*Text*/, ETextCommit::Type Type)
 {
-	if (Type == ETextCommit::OnEnter && VisibleItems.Num() > 0)
+	if (Type != ETextCommit::OnEnter) { return; }
+
+	// The first pickable item: section headers lead the list when both aliases and lines show.
+	if (const KzDialoguePickerInternal::FEntryPtr* First = VisibleItems.FindByPredicate([](const KzDialoguePickerInternal::FEntryPtr& Item) { return Item.IsValid() && !Item->bIsHeader; }))
 	{
-		OnItemClicked(VisibleItems[0]);
+		OnItemClicked(*First);
 	}
 }
 

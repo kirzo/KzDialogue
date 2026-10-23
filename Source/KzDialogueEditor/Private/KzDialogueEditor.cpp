@@ -2,6 +2,7 @@
 
 #include "KzDialogueEditor.h"
 #include "KzDialogueEditorStyle.h"
+#include "KzDialogueAudition.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsset.h"
 #include "KzNamedAsset.h"
@@ -26,6 +27,7 @@
 #include "Localization/SKzDialogueCoveragePanel.h"
 
 #include "EdGraphUtilities.h"
+#include "Editor.h"
 #include "ISequencerModule.h"
 #include "MessageLogInitializationOptions.h"
 #include "MessageLogModule.h"
@@ -115,6 +117,9 @@ void FKzDialogueEditorModule::OnStartupModule()
 	// Token renames refactor the lines and archives that reference the old token.
 	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&KzDialogueL10N::RenameNamedTokenReferences);
 
+	// The audition is a world-less editor preview: nothing else stops it when the game starts.
+	BeginPIEHandle = FEditorDelegates::BeginPIE.AddLambda([](bool) { KzDialogueAudition::Stop(); });
+
 	FMessageLogInitializationOptions LogOptions;
 	LogOptions.bShowPages = true;
 	LogOptions.bAllowClear = true;
@@ -140,6 +145,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 void FKzDialogueEditorModule::OnShutdownModule()
 {
 	UKzNamedAsset::OnTokenRenamed.Remove(NamedTokenRenamedHandle);
+	FEditorDelegates::BeginPIE.Remove(BeginPIEHandle);
 
 	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
 	{

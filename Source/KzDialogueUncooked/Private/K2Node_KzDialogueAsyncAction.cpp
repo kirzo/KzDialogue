@@ -28,6 +28,13 @@ FText UK2Node_KzDialogueAsyncAction::GetMenuCategory() const
 	return LOCTEXT("MenuCategory", "Dialogue");
 }
 
+FBlueprintNodeSignature UK2Node_KzDialogueAsyncAction::GetSignature() const
+{
+	FBlueprintNodeSignature Signature = Super::GetSignature();
+	Signature.AddKeyValue(ProxyFactoryFunctionName.ToString());
+	return Signature;
+}
+
 void UK2Node_KzDialogueAsyncAction::GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const
 {
 	UClass* ActionKey = GetClass();

@@ -4,15 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Widgets/SCompoundWidget.h"
-#include "UObject/StrongObjectPtr.h"
-#include "Components/AudioComponent.h"
 #include "EditorUndoClient.h"
 #include "StructUtils/InstancedStruct.h"
 
 class UKzDialogueTimeline;
 class USoundWave;
 class USoundBase;
-class UAudioComponent;
 class FScopedTransaction;
 class IStructureDetailsView;
 class FStructOnScope;
@@ -192,11 +189,11 @@ private:
 	/** Frames left to keep requesting a host tree refresh after a size-changing edit; the inner details view rebuilds deferred, so one frame is not enough. */
 	int32 HostInvalidationFramesPending = 0;
 
-	/** Editor-only audio preview: playhead position (seconds), transport state, and the live component. */
+	/** Editor-only audio preview: playhead position (seconds), transport state, and this widget's audition key. */
 	float PlayheadTime = 0.f;
 	bool bPlaying = false;
 	bool bLooping = false;
-	TStrongObjectPtr<UAudioComponent> PreviewAudio;
+	FString PreviewAudioKey;
 
 	/** Playing, but the playhead has not reached the audio's start yet. */
 	bool bPreviewAudioPending = false;

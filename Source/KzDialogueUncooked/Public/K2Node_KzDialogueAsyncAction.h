@@ -23,4 +23,7 @@ public:
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 	virtual FText GetMenuCategory() const override;
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;
+
+	/** One node class serves every factory: the factory tells the palette entries (favorites) apart. */
+	virtual FBlueprintNodeSignature GetSignature() const override;
 };
