@@ -204,7 +204,7 @@ void UKzDialogueFunctionLibrary::SetLineNumberArgument(FKzDialogueLine& Line, FN
 
 FText UKzDialogueFunctionLibrary::GetLineFormattedText(const FKzDialogueLine& Line)
 {
-	return Line.GetFormattedText();
+	return Line.GetDisplayText();
 }
 
 bool UKzDialogueFunctionLibrary::TryResolveNamedText(const UObject* WorldContextObject, const FString& TokenAndModifier, FText& OutText)

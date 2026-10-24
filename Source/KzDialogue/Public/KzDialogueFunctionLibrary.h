@@ -137,7 +137,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Line")
 	static void SetLineNumberArgument(UPARAM(ref) FKzDialogueLine& Line, FName Name, double Value);
 
-	/** Line text with its format arguments applied (Text as-is when it has none). What the subtitle views render. */
+	/** Line text with its format arguments applied (Text as-is when it has none). What the subtitle views render, untranslated lines marked outside shipping (FKzDialogueLine::GetDisplayText). */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Line")
 	static FText GetLineFormattedText(const FKzDialogueLine& Line);
 

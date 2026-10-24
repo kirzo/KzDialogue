@@ -273,6 +273,9 @@ struct KZDIALOGUE_API FKzDialogueLine
 	/** Text with FormatArguments applied; Text as-is when there are none (the common case). */
 	FText GetFormattedText() const;
 
+	/** GetFormattedText for the screen. Outside shipping, a text with no translation for the active culture shows "[!] " in front (Kz.Dialogue.MarkMissingTranslations). */
+	FText GetDisplayText() const;
+
 	/** Seconds the line presents before TimeScale: DurationMode applied to the trimmed audio length, plus AudioStartDelay. LineStartDelay is not included. FullAudioDuration is the whole wave's length, 0 when there is no audio. */
 	float ResolveTotalDuration(float FullAudioDuration) const;
 

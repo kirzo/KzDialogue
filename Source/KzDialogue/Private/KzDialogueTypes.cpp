@@ -6,9 +6,49 @@
 #include "KzSpeakerAsset.h"
 #include "Settings/KzDialogueSettings.h"
 
+#include "HAL/IConsoleManager.h"
+#include "Internationalization/Culture.h"
+#include "Internationalization/TextLocalizationManager.h"
+
+#if !UE_BUILD_SHIPPING
+static TAutoConsoleVariable<bool> CVarMarkMissingTranslations(
+	TEXT("Kz.Dialogue.MarkMissingTranslations"), true,
+	TEXT("Prefix line texts with no translation for the active culture with \"[!] \", so QA spots them. Not in shipping builds."));
+
+/** True when Text is localizable and the active culture has no current translation of it, so it falls back to its source. */
+static bool IsMissingTranslation(const FText& Text)
+{
+	if (Text.IsEmpty() || Text.IsCultureInvariant()) { return false; }
+
+	const TOptional<FString> Namespace = FTextInspector::GetNamespace(Text);
+	const TOptional<FString> Key = FTextInspector::GetKey(Text);
+	const FString* Source = FTextInspector::GetSourceString(Text);
+	if (!Namespace.IsSet() || !Key.IsSet() || !Source) { return false; }
+
+	// The native culture (and its variants: en-US for en) shows its own source by design.
+	FTextLocalizationManager& Manager = FTextLocalizationManager::Get();
+	const FString NativeCulture = Manager.GetNativeCultureName(ELocalizedTextSourceCategory::Game);
+	if (NativeCulture.IsEmpty() || FInternationalization::Get().GetCurrentLanguage()->GetPrioritizedParentCultureNames().Contains(NativeCulture)) { return false; }
+
+	// GetDisplayString strips the editor's package namespace and treats a translation of an older source as missing.
+	return !Manager.GetDisplayString(FTextKey(Namespace.GetValue()), FTextKey(Key.GetValue()), Source).IsValid();
+}
+#endif
+
 FText FKzDialogueLine::GetFormattedText() const
 {
 	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
+}
+
+FText FKzDialogueLine::GetDisplayText() const
+{
+#if !UE_BUILD_SHIPPING
+	if (CVarMarkMissingTranslations.GetValueOnGameThread() && IsMissingTranslation(Text))
+	{
+		return FText::Format(INVTEXT("[!] {0}"), GetFormattedText());
+	}
+#endif
+	return GetFormattedText();
 }
 
 float FKzDialogueLine::ResolveReadingDuration() const

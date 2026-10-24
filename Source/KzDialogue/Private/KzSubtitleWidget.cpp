@@ -570,7 +570,7 @@ void UKzSubtitleWidget::ApplyLineToView(const FKzSubtitleChannelView& View, cons
 	if (View.SubtitlesText)
 	{
 		// Formatted at display time so a culture switch picks up the new translation.
-		View.SubtitlesText->SetText(Line.GetFormattedText());
+		View.SubtitlesText->SetText(Line.GetDisplayText());
 	}
 
 	ApplyProfileToView(View, Line);
