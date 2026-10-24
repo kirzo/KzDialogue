@@ -34,6 +34,22 @@ struct FKzQueuedDialogue
 
 	/** World time it was queued at, for the channel's QueueTimeout. */
 	double QueuedAt = 0.0;
+
+	/** The request's label in the dialogue history. */
+	FString HistoryLabel;
+};
+
+/** A request, queue event or ending the subsystem remembers, so "why didn't this line play" has an answer (Kz.Dialogue.History, Kz.Dialogue.Debug 2). */
+struct FKzDialogueHistoryEntry
+{
+	/** World time. */
+	double Time = 0.0;
+	FGameplayTag Channel;
+	int32 Priority = 0;
+	/** What was asked for or what ended: the asset and its line or alias, an ad-hoc line, a provider class. */
+	FString Request;
+	/** Started, Queued, a rejection with what holds the channel, an ending (Interrupted by ...), Dropped with its cause. */
+	FString Outcome;
 };
 
 /** One channel's waiting requests, in playing order. */
@@ -115,6 +131,10 @@ public:
 	/** A queued request will never play: it expired, Replace displaced it, it was cancelled, or its channel was stopped or interrupted. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
 	FKzOnQueuedDialogueRequest OnQueuedRequestDropped;
+
+	/** The last HistorySize requests, queue events and endings, oldest first. */
+	const TArray<FKzDialogueHistoryEntry>& GetHistory() const { return History; }
+	static constexpr int32 HistorySize = 64;
 
 	/** Drops a waiting request (OnQueuedRequestDropped fires). False when it is not waiting. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
@@ -235,6 +255,16 @@ private:
 	EKzDialoguePlayResult LastPlayResult = EKzDialoguePlayResult::Started;
 	FGuid LastQueuedRequestId;
 
+	/** The request being admitted now, guarded per entry point so a nested one restores it; Record files it, and an interruption meanwhile names it. */
+	FKzDialogueHistoryEntry PendingRequest;
+
+	/** What each channel plays, by history label, for its ending and for the rejections it causes. */
+	TMap<FGameplayTag, FString> PlayingRequests;
+
+	TArray<FKzDialogueHistoryEntry> History;
+
+	void AddHistory(FGameplayTag Channel, int32 Priority, const FString& Request, const FString& Outcome);
+
 	/**
 	 * Resolve the priority to use given:
 	 *   - RequestedPriority (caller's request, possibly InheritPriority sentinel)
@@ -262,8 +292,8 @@ private:
 	void ProcessQueue(FGameplayTag Channel);
 	void ScheduleQueue(FGameplayTag Channel);
 
-	/** Drops the requests waiting for Channel, reporting each one. */
-	void DropQueue(FGameplayTag Channel);
+	/** Drops the requests waiting for Channel, reporting each one; Cause goes to the history. */
+	void DropQueue(FGameplayTag Channel, const TCHAR* Cause);
 
 	/** Ends whatever occupies the admitted player and starts Provider on it. Null when a listener of that ending took the channel first. */
 	UKzDialoguePlayer* StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, EKzDialogueAdvanceMode AdvanceMode);

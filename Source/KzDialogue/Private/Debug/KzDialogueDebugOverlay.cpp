@@ -97,7 +97,7 @@ FKzDialogueDebugOverlay::FKzDialogueDebugOverlay()
 	CVarRef = MakeUnique<FAutoConsoleVariableRef>(
 		TEXT("Kz.Dialogue.Debug"),
 		bDebugEnabled,
-		TEXT("Show the KzDialogue debug overlay. 0 = off, 1 = on."),
+		TEXT("Show the KzDialogue debug overlay. 0 = off, 1 = channels and speakers, 2 = history (requests, queue events and endings)."),
 		ECVF_Cheat);
 
 	DrawHandle = UDebugDrawService::Register(TEXT("Game"),
@@ -152,6 +152,26 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* PC)
 
 	float X = OriginX;
 	float Y = OriginY;
+
+	// --- History page: newest first, refusals and drops in the warning color ----------------
+	if (bDebugEnabled == 2)
+	{
+		const TArray<FKzDialogueHistoryEntry>& History = Sub->GetHistory();
+		DrawLine(Canvas, X, Y, FString::Printf(TEXT("=== KzDialogue History (%d) ==="), History.Num()), TitleColor);
+		Y += SectionGap * 0.5f;
+		if (History.IsEmpty())
+		{
+			DrawLine(Canvas, X, Y, TEXT("(nothing requested yet)"), MutedColor);
+		}
+		for (int32 i = History.Num() - 1; i >= FMath::Max(0, History.Num() - 30); --i)
+		{
+			const FKzDialogueHistoryEntry& Entry = History[i];
+			const bool bProblem = Entry.Outcome.StartsWith(TEXT("Rejected")) || Entry.Outcome.StartsWith(TEXT("Dropped")) || Entry.Outcome.StartsWith(TEXT("Interrupted")) || Entry.Outcome.StartsWith(TEXT("Aborted"));
+			const FLinearColor Color = bProblem ? WarningColor : (Entry.Outcome.StartsWith(TEXT("Started")) ? ActiveColor : MutedColor);
+			DrawLine(Canvas, X, Y, FString::Printf(TEXT("[%7.2f] %s  pri %d  %s -> %s"), Entry.Time, *Entry.Channel.ToString(), Entry.Priority, *Entry.Request, *Entry.Outcome), Color);
+		}
+		return;
+	}
 
 	// --- Header ----------------------------------------------------------------------
 	DrawLine(Canvas, X, Y, TEXT("=== KzDialogue Debug ==="), TitleColor);

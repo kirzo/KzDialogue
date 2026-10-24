@@ -246,6 +246,29 @@ namespace KzDialogueCmd
 		HandleListSpeakers(Args);
 	}
 
+	static void HandleHistory(const TArray<FString>& Args)
+	{
+		UKzDialogueSubsystem* Sub = ResolveSubsystem();
+		if (!Sub) { return; }
+
+		const TArray<FKzDialogueHistoryEntry>& History = Sub->GetHistory();
+		if (History.IsEmpty())
+		{
+			LogToConsole(TEXT("No dialogue history yet."));
+			return;
+		}
+
+		// To the log only: a dump of dozens of lines would flood the screen.
+		const int32 Count = Args.Num() > 0 ? FMath::Clamp(FCString::Atoi(*Args[0]), 1, History.Num()) : History.Num();
+		UE_LOG(LogKzDialogue, Display, TEXT("=== Last %d dialogue events, oldest first ==="), Count);
+		for (int32 i = History.Num() - Count; i < History.Num(); ++i)
+		{
+			const FKzDialogueHistoryEntry& Entry = History[i];
+			UE_LOG(LogKzDialogue, Display, TEXT("[%8.2f] %s  pri %d  %s -> %s"), Entry.Time, *Entry.Channel.ToString(), Entry.Priority, *Entry.Request, *Entry.Outcome);
+		}
+		LogToConsole(FString::Printf(TEXT("Dumped %d dialogue events to the log."), Count));
+	}
+
 	static void HandleResetAliasStates(const TArray<FString>& /*Args*/)
 	{
 		UKzDialogueSubsystem* Sub = ResolveSubsystem();
@@ -311,6 +334,7 @@ FKzDialogueDebugCommands::FKzDialogueDebugCommands()
 	Make(TEXT("Kz.Dialogue.ListChannels"), TEXT("List active channels and their state"), HandleListChannels);
 	Make(TEXT("Kz.Dialogue.ListSpeakers"), TEXT("List registered speaker identities (personas included) in the active world"), HandleListSpeakers);
 	Make(TEXT("Kz.Dialogue.Status"), TEXT("Dump full dialogue state"), HandleStatus);
+	Make(TEXT("Kz.Dialogue.History"), TEXT("History [Count]: dump the last requests, queue events and endings with their outcome (why a line did not play)"), HandleHistory);
 	Make(TEXT("Kz.Dialogue.ResetAliasStates"), TEXT("Reset all cached alias playback states"), HandleResetAliasStates);
 	Make(TEXT("Kz.Dialogue.ResetAliasState"), TEXT("ResetAliasState <AliasGuid>: reset cached state for a single alias"), HandleResetAliasState);
 }

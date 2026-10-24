@@ -280,6 +280,23 @@ EKzDialoguePlayResult UKzDialogueSubsystem::Admit(const UKzDialoguePlayer& Playe
 	return Result;
 }
 
+// History label of a line or alias of Asset: readable in one log line.
+static FString DescribeEntry(const UKzDialogueAsset* Asset, const FGuid& EntryId, int32 Count = 1)
+{
+	FString Label;
+	if (!Asset) { Label = TEXT("(no asset)"); }
+	else if (const FKzDialogueAlias* Alias = Asset->FindAlias(EntryId)) { Label = FString::Printf(TEXT("%s: alias %s"), *Asset->GetName(), *Alias->AliasName.ToString()); }
+	else if (const FKzDialogueLine* Line = Asset->FindLine(EntryId)) { Label = FString::Printf(TEXT("%s: \"%s\""), *Asset->GetName(), *Line->Text.ToString().Left(48)); }
+	else { Label = FString::Printf(TEXT("%s: missing entry %s"), *Asset->GetName(), *EntryId.ToString()); }
+	return Count > 1 ? FString::Printf(TEXT("%s (+%d more)"), *Label, Count - 1) : Label;
+}
+
+void UKzDialogueSubsystem::AddHistory(FGameplayTag Channel, int32 Priority, const FString& Request, const FString& Outcome)
+{
+	if (History.Num() >= HistorySize) { History.RemoveAt(0); }
+	History.Add({ GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0, Channel, Priority, Request.IsEmpty() ? FString(TEXT("(unknown)")) : Request, Outcome });
+}
+
 UKzDialoguePlayer* UKzDialogueSubsystem::Record(EKzDialoguePlayResult Result, UKzDialoguePlayer* Player)
 {
 	// A start that came back empty: a listener of the ending took the channel first.
@@ -288,6 +305,19 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Record(EKzDialoguePlayResult Result, UK
 	LastPlayResult = Result;
 	LastQueuedRequestId.Invalidate();
 	const bool bPlays = Result == EKzDialoguePlayResult::Started || Result == EKzDialoguePlayResult::Joined || Result == EKzDialoguePlayResult::Queued;
+
+	// A busy refusal reads with what holds the channel.
+	FString Outcome = UEnum::GetDisplayValueAsText(Result).ToString();
+	const bool bBusy = Result == EKzDialoguePlayResult::RejectedPriority || Result == EKzDialoguePlayResult::RejectedNotInterruptible || Result == EKzDialoguePlayResult::RejectedQueueFull;
+	const FString* Holder = PlayingRequests.Find(PendingRequest.Channel);
+	const UKzDialoguePlayer* HolderPlayer = FindPlayer(PendingRequest.Channel);
+	if (bBusy && Holder && HolderPlayer)
+	{
+		Outcome += FString::Printf(TEXT(" (busy with %s at priority %d)"), **Holder, HolderPlayer->CurrentPriority);
+	}
+	AddHistory(PendingRequest.Channel, PendingRequest.Priority, PendingRequest.Request, Outcome);
+	if (Result == EKzDialoguePlayResult::Started) { PlayingRequests.Add(Player->Channel, PendingRequest.Request); }
+
 	return bPlays ? Player : nullptr;
 }
 
@@ -296,7 +326,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Enqueue(UKzDialoguePlayer& Player, UKzD
 	// Replace keeps only the newest request; what was waiting is reported dropped before the queue changes again.
 	if (ChannelDef && ChannelDef->BusyPolicy == EKzChannelBusyPolicy::Replace)
 	{
-		DropQueue(Player.Channel);
+		DropQueue(Player.Channel, TEXT("replaced by a newer request"));
 	}
 
 	FKzQueuedDialogue Entry;
@@ -306,6 +336,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Enqueue(UKzDialoguePlayer& Player, UKzD
 	Entry.bInterruptible = bInterruptible;
 	Entry.AdvanceMode = AdvanceMode;
 	Entry.QueuedAt = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	Entry.HistoryLabel = PendingRequest.Request;
 
 	// Higher priority first; equal priorities keep arrival order.
 	TArray<FKzQueuedDialogue>& Entries = Queues.FindOrAdd(Player.Channel).Entries;
@@ -326,6 +357,17 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Enqueue(UKzDialoguePlayer& Player, UKzD
 
 void UKzDialogueSubsystem::HandlePlayerFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason)
 {
+	if (IsValid(Player))
+	{
+		FString Playing;
+		PlayingRequests.RemoveAndCopyValue(Player->Channel, Playing);
+
+		// Interrupted while a request is being admitted: that request took the channel.
+		FString Outcome = UEnum::GetDisplayValueAsText(Reason).ToString();
+		if (Reason == EKzDialogueFinishReason::Interrupted && !PendingRequest.Request.IsEmpty()) { Outcome += TEXT(" by ") + PendingRequest.Request; }
+		AddHistory(Player->Channel, Player->CurrentPriority, Playing, Outcome);
+	}
+
 	if (!bDeinitializing && IsValid(Player) && Queues.Contains(Player->Channel))
 	{
 		ScheduleQueue(Player->Channel);
@@ -365,12 +407,17 @@ void UKzDialogueSubsystem::ProcessQueue(FGameplayTag Channel)
 		const bool bExpired = ChannelDef && ChannelDef->QueueTimeout > 0.0f && Now - Entry.QueuedAt > ChannelDef->QueueTimeout;
 		if (bExpired || !IsValid(Entry.Provider))
 		{
+			AddHistory(Channel, Entry.Priority, Entry.HistoryLabel, bExpired ? TEXT("Dropped: waited longer than the queue timeout") : TEXT("Dropped: its provider is gone"));
 			OnQueuedRequestDropped.Broadcast(Channel, Entry.RequestId);
 			continue;
 		}
 
 		OnQueuedRequestStarted.Broadcast(Channel, Entry.RequestId);
-		StartOnPlayer(*Player, Entry.Provider, Entry.Priority, Entry.bInterruptible, Entry.AdvanceMode);
+		if (StartOnPlayer(*Player, Entry.Provider, Entry.Priority, Entry.bInterruptible, Entry.AdvanceMode))
+		{
+			AddHistory(Channel, Entry.Priority, Entry.HistoryLabel, TEXT("Started from the queue"));
+			PlayingRequests.Add(Channel, Entry.HistoryLabel);
+		}
 		return;
 	}
 }
@@ -383,6 +430,7 @@ bool UKzDialogueSubsystem::CancelQueuedRequest(FGuid RequestId)
 		if (Index != INDEX_NONE)
 		{
 			const FGameplayTag Channel = Pair.Key;
+			AddHistory(Channel, Pair.Value.Entries[Index].Priority, Pair.Value.Entries[Index].HistoryLabel, TEXT("Dropped: cancelled by its caller"));
 			Pair.Value.Entries.RemoveAt(Index);
 			OnQueuedRequestDropped.Broadcast(Channel, RequestId);
 			return true;
@@ -391,7 +439,7 @@ bool UKzDialogueSubsystem::CancelQueuedRequest(FGuid RequestId)
 	return false;
 }
 
-void UKzDialogueSubsystem::DropQueue(FGameplayTag Channel)
+void UKzDialogueSubsystem::DropQueue(FGameplayTag Channel, const TCHAR* Cause)
 {
 	// Out of the map first, so a listener queueing again starts a fresh queue.
 	FKzDialogueChannelQueue Dropped;
@@ -399,6 +447,7 @@ void UKzDialogueSubsystem::DropQueue(FGameplayTag Channel)
 
 	for (const FKzQueuedDialogue& Entry : Dropped.Entries)
 	{
+		AddHistory(Channel, Entry.Priority, Entry.HistoryLabel, FString::Printf(TEXT("Dropped: %s"), Cause));
 		OnQueuedRequestDropped.Broadcast(Channel, Entry.RequestId);
 	}
 }
@@ -437,6 +486,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::StartOrEnqueue(UKzDialoguePlayer& Playe
 
 UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
 {
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, IsValid(Provider) ? Provider->GetClass()->GetName() : FString(TEXT("(no provider)")), FString() });
 	if (!IsValid(Provider))
 	{
 		return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr);
@@ -446,6 +496,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 
 	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
+	PendingRequest.Channel = InChannel;
+	PendingRequest.Priority = ResolvedPriority;
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
@@ -519,6 +571,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLine(const FKzDialogueLine& Line, F
 	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, /*AssetHintPriority=*/InheritPriority, ChannelDef);
 
+	const FString Label = Line.SourceAsset.IsValid() ? DescribeEntry(Line.SourceAsset.Get(), Line.LineId) : FString::Printf(TEXT("line \"%s\""), *Line.Text.ToString().Left(48));
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, ResolvedPriority, Label, FString() });
+
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
 
@@ -541,6 +596,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, c
 	UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
 	if (ManualProv && Player.GetState() != EKzDialogueState::Exiting)
 	{
+		if (const FString* Playing = PlayingRequests.Find(Player.Channel))
+		{
+			AddHistory(Player.Channel, Player.CurrentPriority, *Playing, TEXT("Replaced by ") + PendingRequest.Request);
+		}
 		Player.CurrentPriority = Priority;
 		Player.bCurrentInterruptible = bInterruptible;
 		ManualProv->SetLine(Line);
@@ -571,6 +630,7 @@ bool UKzDialogueSubsystem::ResolveAssetEntry(UKzDialogueAsset* Asset, const FGui
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority)
 {
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, DescribeEntry(Asset, LineId), FString() });
 	if (!IsValid(Asset) || !LineId.IsValid()) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
 
 	// The authored entry, not the alias pick, so callers resolving ahead (async actions) land on the same player.
@@ -578,6 +638,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 
 	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
+	PendingRequest.Channel = InChannel;
+	PendingRequest.Priority = ResolvedPriority;
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
@@ -600,6 +662,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLine(UKzDialogueAsset* Asset, 
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
 {
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, DescribeEntry(Asset, LineIds.IsEmpty() ? FGuid() : LineIds[0], LineIds.Num()), FString() });
 	if (!IsValid(Asset) || LineIds.IsEmpty()) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
 
 	// First-entry rule: the channel resolves from the first AUTHORED entry, so callers resolving
@@ -608,6 +671,8 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, Asset->Priority, ChannelDef);
+	PendingRequest.Channel = InChannel;
+	PendingRequest.Priority = ResolvedPriority;
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
@@ -638,6 +703,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayAssetLineList(UKzDialogueAsset* Ass
 
 UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority)
 {
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, FString(TEXT("(no refs)")), FString() });
 	if (Refs.IsEmpty()) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
 
 	// First-entry rule, on the first AUTHORED ref (see PlayAssetLineList).
@@ -646,6 +712,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::PlayLineRefs(const TArray<FKzDialogueLi
 
 	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InChannel);
 	const int32 ResolvedPriority = ResolvePriority(Priority, FirstAsset ? FirstAsset->Priority : InheritPriority, ChannelDef);
+	PendingRequest = { 0.0, InChannel, ResolvedPriority, DescribeEntry(FirstAsset, Refs[0].LineId, Refs.Num()), FString() };
 
 	UKzDialoguePlayer* Player = GetOrCreatePlayer(InChannel);
 	if (!IsValid(Player)) { return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr); }
@@ -685,7 +752,7 @@ void UKzDialogueSubsystem::StopChannel(FGameplayTag InChannel)
 	for (UKzDialoguePlayer* Player : Matching)
 	{
 		// Silencing a channel covers what was waiting for it too; dropped first, so the finish starts nothing.
-		DropQueue(Player->Channel);
+		DropQueue(Player->Channel, TEXT("the channel was stopped"));
 		Player->Stop();
 	}
 }
@@ -699,7 +766,7 @@ void UKzDialogueSubsystem::StopAll()
 	GetAllPlayers(Snapshot);
 	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		DropQueue(Player->Channel);
+		DropQueue(Player->Channel, TEXT("the channel was stopped"));
 		Player->Stop();
 	}
 }
@@ -710,7 +777,7 @@ void UKzDialogueSubsystem::InterruptChannel(FGameplayTag InChannel)
 	GetPlayersInScope(InChannel, Matching);
 	for (UKzDialoguePlayer* Player : Matching)
 	{
-		DropQueue(Player->Channel);
+		DropQueue(Player->Channel, TEXT("the channel was interrupted"));
 		Player->Interrupt();
 	}
 }
@@ -722,7 +789,7 @@ void UKzDialogueSubsystem::InterruptAll()
 	GetAllPlayers(Snapshot);
 	for (UKzDialoguePlayer* Player : Snapshot)
 	{
-		DropQueue(Player->Channel);
+		DropQueue(Player->Channel, TEXT("the channel was interrupted"));
 		Player->Interrupt();
 	}
 }

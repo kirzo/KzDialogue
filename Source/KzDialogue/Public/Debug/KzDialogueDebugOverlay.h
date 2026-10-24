@@ -15,9 +15,10 @@ class APlayerController;
  *
  * Driven by the console variable Kz.Dialogue.Debug:
  *   0 -> hidden
- *   1 -> shown (top-left of the active viewport)
+ *   1 -> channels and speakers (top-left of the active viewport)
+ *   2 -> history: the subsystem's latest requests, queue events and endings, newest first
  *
- * Renders the state of every active channel (player state, priority, time scale,
+ * Page 1 renders the state of every active channel (player state, priority, time scale,
  * current line) plus the list of speakers registered in the world. Hooked via
  * UDebugDrawService so it works in PIE, standalone game, and the editor's "Play in
  * Viewport" mode without any extra setup.
