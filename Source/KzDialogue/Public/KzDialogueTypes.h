@@ -583,8 +583,8 @@ enum class EKzDialoguePlayResult : uint8
 
 /**
  * Per-channel configuration. Lives in UKzDialogueSettings and is consulted by the
- * subsystem on every Play() call to decide default priorities, interruption rules,
- * busy policy and (eventually) cross-channel ducking.
+ * subsystem on every Play() call to decide default priorities, interruption rules
+ * and busy policy.
  */
 USTRUCT(BlueprintType)
 struct FKzDialogueChannelDefinition
@@ -634,22 +634,6 @@ struct FKzDialogueChannelDefinition
 	/** Default audio spatialization for lines on this channel. Lines may override per-line. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	EKzLineAudioSpatialization DefaultAudioSpatialization = EKzLineAudioSpatialization::Inherit;
-
-	/**
-	 * When this channel is active, other channels' audio is reduced by DuckedVolume.
-	 * Implementation pending: the flag is honored by the API but does not yet affect
-	 * audio mixing.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking")
-	bool bDuckOtherChannels = false;
-
-	/** Volume multiplier applied to other channels while this one is playing. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking", meta = (ClampMin = 0.0, ClampMax = 1.0))
-	float DuckedVolume = 0.3f;
-
-	/** Fade time used when entering and leaving the ducked state. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel|Ducking", meta = (ClampMin = 0.0))
-	float DuckFadeTime = 0.2f;
 };
 
 /** High-level state of a dialogue player. */
