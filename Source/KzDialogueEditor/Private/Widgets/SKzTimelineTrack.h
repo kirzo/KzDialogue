@@ -43,6 +43,16 @@ struct FKzTimelineView
 	}
 };
 
+/** A cue point of the line's wave at its timeline second. */
+struct FKzTimelineCue
+{
+	FString Label;
+	float Seconds = 0.f;
+};
+
+/** The wave's cue points on the timeline, AudioOffset (FKzDialogueLine::GetAudioTimelineOffset) applied; empty unless Audio is a USoundWave. */
+TArray<FKzTimelineCue> KzGetTimelineCues(const USoundBase* Audio, float AudioOffset);
+
 /**
  * One lane's interactive notify track, mirroring the AnimMontage notify track. Paints point/state
  * markers along [0, duration], hit-tests them, and supports drag-to-retime (drag a state's edges to
@@ -95,6 +105,10 @@ public:
 	virtual FVector2D ComputeDesiredSize(float) const override { return FVector2D(100.f, 28.f); }
 
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
+
+	/** Lights the markers the moving playhead crossed this frame. */
+	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
@@ -168,6 +182,13 @@ private:
 	FVector2f DragStartLocal = FVector2f::ZeroVector;
 	float DragCursorX = 0.f;
 	bool bDragStarted = false;
+
+	/** Playhead at the previous tick, to tell which markers it crossed. */
+	float LastPlayhead = -1.f;
+
+	/** Application time each crossed marker lit up, by event index; fades over FlashSeconds. */
+	TMap<int32, double> FlashStarts;
+	static constexpr float FlashSeconds = 0.35f;
 };
 
 /** The time ruler: ticks and second labels on the track grid's spacing; left-drag scrubs the playhead, middle-drag pans. */

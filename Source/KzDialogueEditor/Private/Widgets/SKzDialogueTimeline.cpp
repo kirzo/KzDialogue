@@ -900,12 +900,15 @@ void SKzDialogueTimeline::CreateNewNotify(int32 TrackIndex, UClass* ParentClass,
 
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
 	UObject* NewAsset = AssetTools.CreateAssetWithDialog(UBlueprint::StaticClass(), Factory);
-	if (const UBlueprint* Blueprint = Cast<UBlueprint>(NewAsset))
+	if (UBlueprint* Blueprint = Cast<UBlueprint>(NewAsset))
 	{
 		if (UClass* GeneratedClass = Blueprint->GeneratedClass)
 		{
 			AddEventAt(TrackIndex, GeneratedClass, TimeSeconds);
 		}
+
+		// A new notify is created to be written: straight into its graph.
+		GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Blueprint);
 	}
 }
 
@@ -937,9 +940,58 @@ TSharedRef<SWidget> SKzDialogueTimeline::MakeEventMenuForTrack(int32 TrackIndex,
 			LOCTEXT("DeleteNotifyTip", "Remove this notify from the track."),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, EventIndex]() { RemoveEvent(TrackIndex, EventIndex); })));
+
+		// Relative events can follow a labelled cue point of the line's wave instead.
+		const FKzDialogueNotifyEvent* Event = FindEvent(TrackIndex, EventIndex);
+		TArray<FKzTimelineCue> Cues = KzGetTimelineCues(ResolveLineAudio(), GetAudioTimeOffset());
+		Cues.RemoveAll([](const FKzTimelineCue& Cue) { return Cue.Label.IsEmpty(); });
+		if (Event && Event->TimeSource.GetPtr<FKzDialogueTimeSource_Relative>() && Cues.Num() > 0)
+		{
+			Menu.AddSubMenu(
+				LOCTEXT("AnchorToMarker", "Anchor to Marker"),
+				LOCTEXT("AnchorToMarkerTip", "Time this notify by a cue point of the line's audio, so it follows that moment in every culture's take."),
+				FNewMenuDelegate::CreateLambda([this, TrackIndex, EventIndex, Cues](FMenuBuilder& SubMenu)
+				{
+					// The resolve takes the first cue with a label, so each label is offered once.
+					TSet<FString> Offered;
+					for (const FKzTimelineCue& Cue : Cues)
+					{
+						if (Offered.Contains(Cue.Label)) { continue; }
+						Offered.Add(Cue.Label);
+						SubMenu.AddMenuEntry(
+							FText::FromString(Cue.Label),
+							FText::Format(LOCTEXT("AnchorToCueTip", "At {0} s on this line."), FText::AsNumber(Cue.Seconds)),
+							FSlateIcon(),
+							FUIAction(FExecuteAction::CreateLambda([this, TrackIndex, EventIndex, Label = Cue.Label]() { AnchorEventToMarker(TrackIndex, EventIndex, FName(*Label)); })));
+					}
+				}));
+		}
 	}
 	Menu.EndSection();
 	return Menu.MakeWidget();
+}
+
+void SKzDialogueTimeline::AnchorEventToMarker(int32 TrackIndex, int32 EventIndex, FName MarkerName)
+{
+	const FKzDialogueNotifyEvent* Event = FindEvent(TrackIndex, EventIndex);
+	const FKzDialogueTimeSource* Source = Event ? Event->TimeSource.GetPtr<FKzDialogueTimeSource>() : nullptr;
+	if (!Source) { return; }
+
+	FKzDialogueTimeResolveContext Context;
+	Context.LineDuration = Duration();
+	float StartSeconds = 0.f;
+	float EndSeconds = 0.f;
+	Source->Resolve(Context, StartSeconds, EndSeconds);
+
+	FKzDialogueTimeSource_AudioMarker Marker;
+	Marker.MarkerName = MarkerName;
+	Marker.Duration = EndSeconds - StartSeconds;
+	Marker.FallbackTime = StartSeconds;
+
+	EditTimeline(LOCTEXT("AnchorToMarkerTransaction", "Anchor Dialogue Notify to Marker"), [TrackIndex, EventIndex, &Marker](UKzDialogueTimeline& Edited)
+	{
+		Edited.Tracks[TrackIndex].Events[EventIndex].TimeSource.InitializeAs<FKzDialogueTimeSource_AudioMarker>(Marker);
+	});
 }
 
 void SKzDialogueTimeline::SyncEventDetails()

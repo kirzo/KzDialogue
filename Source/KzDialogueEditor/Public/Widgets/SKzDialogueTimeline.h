@@ -82,6 +82,9 @@ private:
 	void RemoveSelected();
 	void RemoveEvent(int32 TrackIndex, int32 EventIndex);
 	void ToggleEventEnabled(int32 TrackIndex, int32 EventIndex);
+
+	/** Times a relative event by a cue point of the line's audio; its current time becomes the fallback and a state keeps its length. */
+	void AnchorEventToMarker(int32 TrackIndex, int32 EventIndex, FName MarkerName);
 	void DuplicateEvent(int32 TrackIndex, int32 EventIndex);
 	void CopyEvent(int32 TrackIndex, int32 EventIndex);
 	void PasteEvent(int32 TrackIndex, float TimeSeconds);

@@ -12,6 +12,7 @@
 #include "Layout/WidgetPath.h"
 #include "Rendering/DrawElements.h"
 #include "Sound/SoundBase.h"
+#include "Sound/SoundWave.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/SNullWidget.h"
@@ -28,6 +29,37 @@ namespace
 		}
 		return 0.5f * FMath::Pow(10.f, 0.5f * static_cast<float>(CurrentStep) + 1.f);
 	}
+
+	/** Shift-drag target: a cue point within a few pixels wins over the grid. */
+	float SnapToCueOrGrid(const FKzTimelineView& View, const TArray<FKzTimelineCue>& Cues, float Seconds)
+	{
+		float Best = View.SecondsPerPixel() * 8.f;
+		float Result = View.Snap(Seconds);
+		for (const FKzTimelineCue& Cue : Cues)
+		{
+			const float Distance = FMath::Abs(Cue.Seconds - Seconds);
+			if (Distance <= Best)
+			{
+				Best = Distance;
+				Result = Cue.Seconds;
+			}
+		}
+		return Result;
+	}
+}
+
+TArray<FKzTimelineCue> KzGetTimelineCues(const USoundBase* Audio, float AudioOffset)
+{
+	TArray<FKzTimelineCue> Cues;
+	const USoundWave* Wave = Cast<USoundWave>(Audio);
+	const float SampleRate = Wave ? Wave->GetSampleRateForCurrentPlatform() : 0.f;
+	if (SampleRate <= 0.f) { return Cues; }
+
+	for (const FSoundWaveCuePoint& Cue : Wave->GetCuePoints())
+	{
+		Cues.Add({ Cue.Label, AudioOffset + static_cast<float>(Cue.FramePosition) / SampleRate });
+	}
+	return Cues;
 }
 
 float FKzTimelineView::TickSpacing(float PixelsPerSecond)
@@ -134,6 +166,20 @@ int32 SKzTimelineTrack::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 
 	FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(FVector2f(W, 1.f), FSlateLayoutTransform(FVector2f(0.f, H - 1.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.08f));
 
+	// The wave's cue points, where audio markers anchor and Shift-drags snap: labelled on the waveform band, faint on the tracks.
+	const bool bWaveformBand = Waveform.Get().IsValid();
+	const FSlateFontInfo CueFont = FCoreStyle::GetDefaultFontStyle("Regular", 7);
+	for (const FKzTimelineCue& Cue : KzGetTimelineCues(LineAudio.Get(nullptr), AudioTimeOffset.Get()))
+	{
+		if (!View.Contains(Cue.Seconds)) { continue; }
+		const float X = View.TimeToX(Cue.Seconds);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(FVector2f(1.f, H), FSlateLayoutTransform(FVector2f(X, 0.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 0.65f, 0.15f, bWaveformBand ? 0.8f : 0.2f));
+		if (bWaveformBand && !Cue.Label.IsEmpty())
+		{
+			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(W, H), FSlateLayoutTransform(FVector2f(X + 3.f, 1.f))), Cue.Label, CueFont, ESlateDrawEffect::None, FLinearColor(1.f, 0.75f, 0.35f));
+		}
+	}
+
 	// Line bounds: a green line at the start (0) and a red one at the end, when in view.
 	if (View.Contains(0.f))
 	{
@@ -201,12 +247,15 @@ int32 SKzTimelineTrack::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(6.f, 6.f), FSlateLayoutTransform(FVector2f(L - 3.f, H - 7.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 0.55f, 0.10f));
 		}
 
+		float MarkerLeft = L;
+		float MarkerWidth = 0.f;
 		if (bState)
 		{
 			// Ranged notify: a solid bar spanning [start, end].
 			const float BarWidth = FMath::Max(R - L, 3.f);
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(FVector2f(BarWidth, H - 4.f), FSlateLayoutTransform(FVector2f(L, 2.f))), Box, ESlateDrawEffect::None, Color);
 			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(FMath::Max(BarWidth - 6.f, 8.f), static_cast<float>(LabelExtent.Y)), FSlateLayoutTransform(FVector2f(L + 4.f, 3.f))), Label, Font, ESlateDrawEffect::None, TextColor);
+			MarkerWidth = BarWidth;
 		}
 		else
 		{
@@ -217,6 +266,18 @@ int32 SKzTimelineTrack::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1, AllottedGeometry.ToPaintGeometry(FVector2f(2.f, H), FSlateLayoutTransform(FVector2f(L - 1.f, 0.f))), Box, ESlateDrawEffect::None, Color);
 			FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 2, AllottedGeometry.ToPaintGeometry(FVector2f(BoxW, BoxH), FSlateLayoutTransform(FVector2f(L, 1.f))), Box, ESlateDrawEffect::None, Color);
 			FSlateDrawElement::MakeText(OutDrawElements, LayerId + 3, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(LabelExtent.X), static_cast<float>(LabelExtent.Y)), FSlateLayoutTransform(FVector2f(L + 4.f, 3.f))), Label, Font, ESlateDrawEffect::None, TextColor);
+			MarkerLeft = L - 1.f;
+			MarkerWidth = BoxW + 1.f;
+		}
+
+		// Lit for a moment after the preview playhead crossed it.
+		if (const double* FlashStart = FlashStarts.Find(e))
+		{
+			const float Alpha = 1.f - static_cast<float>(FSlateApplication::Get().GetCurrentTime() - *FlashStart) / FlashSeconds;
+			if (Alpha > 0.f)
+			{
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 4, AllottedGeometry.ToPaintGeometry(FVector2f(MarkerWidth, H), FSlateLayoutTransform(FVector2f(MarkerLeft, 0.f))), Box, ESlateDrawEffect::None, FLinearColor(1.f, 1.f, 1.f, 0.6f * Alpha));
+			}
 		}
 	}
 
@@ -232,6 +293,33 @@ int32 SKzTimelineTrack::OnPaint(const FPaintArgs& Args, const FGeometry& Allotte
 		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 5, AllottedGeometry.ToPaintGeometry(FVector2f(static_cast<float>(Extent.X), static_cast<float>(Extent.Y)), FSlateLayoutTransform(Pos)), TimeText, Font, ESlateDrawEffect::None, FLinearColor::White);
 	}
 	return LayerId + 6;
+}
+
+void SKzTimelineTrack::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+	SLeafWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+	for (auto It = FlashStarts.CreateIterator(); It; ++It)
+	{
+		if (InCurrentTime - It.Value() > FlashSeconds) { It.RemoveCurrent(); }
+	}
+
+	const float Prev = LastPlayhead;
+	const float Now = Playhead.Get(-1.f);
+	LastPlayhead = Now;
+
+	// Only what a frame of playback or scrubbing covers: a jump (stop, loop, click on the ruler) crosses nothing.
+	UKzDialogueTimeline* T = Timeline.Get();
+	if (!T || !T->Tracks.IsValidIndex(TrackIndex) || Prev < 0.f || Now <= Prev || Now - Prev > 0.25f) { return; }
+
+	const float Dur = FMath::Max(Duration.Get(1.f), UE_KINDA_SMALL_NUMBER);
+	const TArray<FKzDialogueNotifyEvent>& Events = T->Tracks[TrackIndex].Events;
+	for (int32 e = 0; e < Events.Num(); ++e)
+	{
+		float StartSec, EndSec; bool bState;
+		GetDrawnBounds(Events[e], Dur, StartSec, EndSec, bState);
+		if (StartSec > Prev && StartSec <= Now) { FlashStarts.Add(e, InCurrentTime); }
+	}
 }
 
 FReply SKzTimelineTrack::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -348,14 +436,15 @@ FReply SKzTimelineTrack::OnMouseMove(const FGeometry& MyGeometry, const FPointer
 		break;
 	}
 
-	// Hold Shift to snap the dragged edge (or the whole marker) to the grid.
+	// Hold Shift to snap the dragged edge (or the whole marker) to a nearby cue point, else the grid.
 	if (MouseEvent.IsShiftDown())
 	{
-		if (DragMode == EDragMode::ResizeStart) { NewStart = View.Snap(NewStart); }
-		else if (DragMode == EDragMode::ResizeEnd) { NewEnd = View.Snap(NewEnd); }
+		const TArray<FKzTimelineCue> Cues = KzGetTimelineCues(LineAudio.Get(nullptr), AudioTimeOffset.Get());
+		if (DragMode == EDragMode::ResizeStart) { NewStart = SnapToCueOrGrid(View, Cues, NewStart); }
+		else if (DragMode == EDragMode::ResizeEnd) { NewEnd = SnapToCueOrGrid(View, Cues, NewEnd); }
 		else
 		{
-			const float Snapped = View.Snap(NewStart);
+			const float Snapped = SnapToCueOrGrid(View, Cues, NewStart);
 			NewEnd += Snapped - NewStart;
 			NewStart = Snapped;
 		}
@@ -559,7 +648,7 @@ FText SKzTimelineTrack::GetHoverToolTip() const
 	const int32 Hit = (T && T->Tracks.IsValidIndex(TrackIndex)) ? HitTest(HoverX, HoverWidth, Dur, Mode) : INDEX_NONE;
 	if (Hit == INDEX_NONE)
 	{
-		return LOCTEXT("TrackGestures", "Right-click: add a notify here, or open a marker's menu.\nDrag a marker to retime it (a state's edges resize it); hold Shift to snap to the grid.\nDrag it onto another row to move it to that track; Esc cancels the drag.\nDouble-click a Blueprint notify to open it.\nWheel zooms; Shift+wheel or middle-drag pans.\nCtrl+C copies, Ctrl+V pastes at the playhead, Ctrl+D duplicates, Delete removes.");
+		return LOCTEXT("TrackGestures", "Right-click: add a notify here, or open a marker's menu.\nDrag a marker to retime it (a state's edges resize it); hold Shift to snap to a cue point or the grid.\nDrag it onto another row to move it to that track; Esc cancels the drag.\nDouble-click a Blueprint notify to open it.\nWheel zooms; Shift+wheel or middle-drag pans.\nCtrl+C copies, Ctrl+V pastes at the playhead, Ctrl+D duplicates, Delete removes.");
 	}
 
 	const FKzDialogueNotifyEvent& Event = T->Tracks[TrackIndex].Events[Hit];
