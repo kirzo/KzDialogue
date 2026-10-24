@@ -2,8 +2,13 @@
 
 #include "Widgets/SKzTokenTextEditor.h"
 #include "Widgets/SKzTokenPicker.h"
+#include "KzDialogueFunctionLibrary.h"
+#include "Localization/KzL10N.h"
 
 #include "Framework/Application/SlateApplication.h"
+#include "Framework/Text/PlainTextLayoutMarshaller.h"
+#include "Framework/Text/SlateTextLayout.h"
+#include "Framework/Text/SlateTextRun.h"
 #include "InputCoreTypes.h"
 #include "Internationalization/TextNamespaceUtil.h"
 #include "PropertyHandle.h"
@@ -47,22 +52,81 @@ namespace KzTokenTextEditorInternal
 		OutNamespace = ProposedNamespace;
 		OutKey = ProposedKey.IsEmpty() ? FGuid::NewGuid().ToString() : ProposedKey;
 	}
+
+	/** Plain text with each "{token}" styled: claimed by a named asset, or not (a typo, or an ambient resolver registered in code). */
+	class FTokenHighlightMarshaller : public FPlainTextLayoutMarshaller
+	{
+	public:
+		FTokenHighlightMarshaller() : KnownTokens(KzDialogueL10N::CollectNamedTokens()) {}
+
+		// Restyles on every edit.
+		virtual bool RequiresLiveUpdate() const override { return true; }
+
+		virtual void SetText(const FString& SourceString, FTextLayout& TargetTextLayout) override
+		{
+			// The editor's own style for plain text, recolored for tokens.
+			const FTextBlockStyle& NormalStyle = static_cast<FSlateTextLayout&>(TargetTextLayout).GetDefaultTextStyle();
+			const FTextBlockStyle KnownStyle = FTextBlockStyle(NormalStyle).SetColorAndOpacity(FLinearColor(0.35f, 0.65f, 1.0f));
+			const FTextBlockStyle UnknownStyle = FTextBlockStyle(NormalStyle).SetColorAndOpacity(FLinearColor(0.95f, 0.45f, 0.2f));
+
+			TArray<FTextRange> LineRanges;
+			FTextRange::CalculateLineRangesFromString(SourceString, LineRanges);
+
+			TArray<FTextLayout::FNewLineData> Lines;
+			for (const FTextRange& LineRange : LineRanges)
+			{
+				TSharedRef<FString> Line = MakeShared<FString>(SourceString.Mid(LineRange.BeginIndex, LineRange.Len()));
+				TArray<TSharedRef<IRun>> Runs;
+				int32 Cursor = 0;
+				auto AddRun = [&Runs, &Cursor, &Line](int32 End, const FTextBlockStyle& Style)
+				{
+					if (End > Cursor) { Runs.Add(FSlateTextRun::Create(FRunInfo(), Line, Style, FTextRange(Cursor, End))); }
+					Cursor = End;
+				};
+
+				for (int32 Open = Line->Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, 0); Open != INDEX_NONE; Open = Line->Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Cursor))
+				{
+					const int32 Close = Line->Find(TEXT("}"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open + 1);
+					if (Close == INDEX_NONE) { break; }
+
+					FString Token = Line->Mid(Open + 1, Close - Open - 1);
+					FString TokenName = Token;
+					Token.Split(TEXT(":"), &TokenName, nullptr);
+					AddRun(Open, NormalStyle);
+					AddRun(Close + 1, KnownTokens.Contains(FName(*TokenName)) ? KnownStyle : UnknownStyle);
+				}
+				AddRun(Line->Len(), NormalStyle);
+
+				// An empty line still needs a run for the caret.
+				if (Runs.IsEmpty()) { Runs.Add(FSlateTextRun::Create(FRunInfo(), Line, NormalStyle)); }
+				Lines.Emplace(MoveTemp(Line), MoveTemp(Runs));
+			}
+			TargetTextLayout.AddLines(Lines);
+		}
+
+	private:
+		/** Read once per editor: a token created while it is open highlights after the next rebuild. */
+		TSet<FName> KnownTokens;
+	};
 }
 
 void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropertyHandle> InTextHandle)
 {
 	TextHandle = InTextHandle;
 	bManagedLocalizationKeys = InArgs._bManagedLocalizationKeys;
+	MaxCharacters = InArgs._MaxCharacters;
 
 	FText InitialText;
 	InTextHandle->GetValue(InitialText);
 	TextSnapshot = InitialText.ToString();
+	RefreshPreview();
 
 	// Commits on focus loss, like the stock multiline editor; Enter inside the text inserts
 	// a newline.
 	TextEditor = SNew(SMultiLineEditableTextBox)
 		.Text(InitialText)
 		.AutoWrapText(true)
+		.Marshaller(MakeShared<KzTokenTextEditorInternal::FTokenHighlightMarshaller>())
 		.OnTextChanged_Lambda([this](const FText& NewText) { OnTextChangedInternal(NewText); })
 		// The commit must NOT cancel the autocomplete session: clicking a popup row moves the
 		// focus (committing) BEFORE the click lands; the session ends via OnMenuOpenChanged.
@@ -132,18 +196,44 @@ void SKzTokenTextEditor::Construct(const FArguments& InArgs, TSharedRef<IPropert
 
 	ChildSlot
 	[
-		SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot().FillWidth(1.0f)
+		SNew(SVerticalBox)
+		+ SVerticalBox::Slot().AutoHeight()
 		[
-			TokenMenuAnchor.ToSharedRef()
+			SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				TokenMenuAnchor.ToSharedRef()
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				Combo
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+			[
+				MakeLocalizationControl()
+			]
 		]
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 0.0f)
 		[
-			Combo
-		]
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top).Padding(4.0f, 0.0f, 0.0f, 0.0f)
-		[
-			MakeLocalizationControl()
+			SNew(SHorizontalBox)
+			.Visibility_Lambda([this]() { return bHasTokens || MaxCharacters.Get(0) > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+			+ SHorizontalBox::Slot().FillWidth(1.0f)
+			[
+				SNew(STextBlock)
+					.Text_Lambda([this]() { return ResolvedPreview; })
+					.ToolTipText(LOCTEXT("PreviewTip", "How the text displays, named tokens resolved. Placeholders no named asset claims stay as typed: ambient resolvers only run in game."))
+					.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+					.AutoWrapText(true)
+					.Visibility_Lambda([this]() { return bHasTokens ? EVisibility::Visible : EVisibility::Hidden; })
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(8.0f, 0.0f, 0.0f, 0.0f)
+			[
+				SNew(STextBlock)
+					.Text_Lambda([this]() { return FText::Format(LOCTEXT("CharacterCounter", "{0} / {1}"), ResolvedPreview.ToString().Len(), MaxCharacters.Get(0)); })
+					.ToolTipText(LOCTEXT("CharacterCounterTip", "Characters of the displayed text, named tokens resolved, against the line's MaxCharacters."))
+					.ColorAndOpacity_Lambda([this]() { return ResolvedPreview.ToString().Len() > MaxCharacters.Get(0) ? FSlateColor(FLinearColor(0.95f, 0.3f, 0.25f)) : FSlateColor::UseSubduedForeground(); })
+					.Visibility_Lambda([this]() { return MaxCharacters.Get(0) > 0 ? EVisibility::Visible : EVisibility::Collapsed; })
+			]
 		]
 	];
 }
@@ -157,8 +247,15 @@ void SKzTokenTextEditor::SyncFromHandle()
 	if (!ValueString.Equals(TextEditor->GetText().ToString(), ESearchCase::CaseSensitive))
 	{
 		TextSnapshot = ValueString;
+		RefreshPreview();
 		TextEditor->SetText(Value);
 	}
+}
+
+void SKzTokenTextEditor::RefreshPreview()
+{
+	bHasTokens = TextSnapshot.Contains(TEXT("{"));
+	ResolvedPreview = bHasTokens ? UKzDialogueFunctionLibrary::ResolveTextTokens(nullptr, FText::FromString(TextSnapshot)) : FText::FromString(TextSnapshot);
 }
 
 TSharedRef<SWidget> SKzTokenTextEditor::MakeLocalizationControl()
@@ -340,6 +437,7 @@ void SKzTokenTextEditor::OnTextChangedInternal(const FText& NewText)
 	const FString New = NewText.ToString();
 	const FString Old = TextSnapshot;
 	TextSnapshot = New;
+	RefreshPreview();
 
 	if (AutocompleteBraceIndex == INDEX_NONE)
 	{
@@ -466,6 +564,7 @@ void SKzTokenTextEditor::AcceptTokenAutocomplete(const FString& TokenText)
 	CancelTokenAutocomplete();
 
 	TextSnapshot = Result;
+	RefreshPreview();
 	TextEditor->SetText(FText::FromString(Result));
 
 	int32 LineIndex = 0;

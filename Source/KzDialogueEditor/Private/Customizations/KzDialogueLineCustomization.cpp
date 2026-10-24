@@ -147,6 +147,8 @@ void FKzDialogueLineCustomization::CustomizeChildren(TSharedRef<IPropertyHandle>
 
 void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuilder& StructBuilder, TSharedRef<IPropertyHandle> TextHandle)
 {
+	const TSharedPtr<IPropertyHandle> MaxCharactersHandle = StructHandle.IsValid() ? StructHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FKzDialogueLine, MaxCharacters)) : nullptr;
+
 	StructBuilder.AddProperty(TextHandle).CustomWidget()
 		.NameContent()
 		[
@@ -158,6 +160,12 @@ void FKzDialogueLineCustomization::AddTextRowWithTokenPicker(IDetailChildrenBuil
 		[
 			SNew(SKzTokenTextEditor, TextHandle)
 				.bManagedLocalizationKeys(true)
+				.MaxCharacters_Lambda([MaxCharactersHandle]()
+				{
+					int32 Value = 0;
+					if (MaxCharactersHandle.IsValid()) { MaxCharactersHandle->GetValue(Value); }
+					return Value;
+				})
 		];
 }
 
