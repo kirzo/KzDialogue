@@ -67,10 +67,16 @@ public:
 	/** True when the source audio package has a localized variant for Culture. */
 	bool IsAudioLocalized(const FString& SourcePackageName, const FString& Culture) const;
 
+	/** A current Culture translation of any gathered text whose source is exactly Source, to fill a missing one. False when none. */
+	bool FindIdenticalSourceTranslation(const FString& Source, const FString& Culture, FString& OutTranslation) const;
+
 private:
 	FKzLocTargetInfo Target;
 	TSharedPtr<FLocTextHelper> LocHelper;
 	TSet<FString> LoadedCultures;
+
+	/** Gathered identities (namespace, key) by source string, built by the first FindIdenticalSourceTranslation. */
+	mutable TMap<FString, TArray<TPair<FString, FString>>> IdentitiesBySource;
 };
 
 /**
@@ -136,6 +142,12 @@ struct FKzTranslationImportStats
 
 	/** Rows whose Translation cell still holds what the export pre-filled: skipped, so archive edits made meanwhile survive. */
 	int32 Unchanged = 0;
+
+	/** Rows whose placeholders do not match the source's: skipped, they would break the line at runtime. */
+	int32 Rejected = 0;
+
+	/** Imported rows over their line's MaxCharacters: written, and flagged in the log. */
+	int32 TooLong = 0;
 };
 
 /** One localizable text of the dialogue set: a line, a speaker name field or a shared word form. */
@@ -176,6 +188,12 @@ namespace KzDialogueL10N
 
 	/** "Spanish (es)" style label for a culture code, falling back to the bare code when the engine has no display name for it. */
 	FText GetCultureDisplayLabel(const FString& Culture);
+
+	/** The tokens the project's named assets claim, read from the asset registry. */
+	TSet<FName> CollectNamedTokens();
+
+	/** The placeholders that break Translation against Source: a source one it lost, or one it added that no named asset claims. A named token may change its part ("{Kirzo}" as "{Kirzo:given}") and may be added (the "{player:gender}|gender(...)" mechanism lives only in translations). */
+	TSet<FString> FindPlaceholderProblems(const FString& Source, const FString& Translation, const TSet<FName>& NamedTokens);
 
 	/** The texts of Assets' lines passing LineFilter, of their speakers (and the aliases' when unfiltered) and of those speakers' words, each identity once. bAllSpeakers / bAllWords add every speaker / word asset of the project. */
 	void CollectLocTexts(const TArray<UKzDialogueAsset*>& Assets, const FKzExportLineFilter& LineFilter, bool bAllSpeakers, bool bAllWords, TArray<FKzLocText>& Out);
@@ -307,6 +325,12 @@ namespace KzDialogueL10N::Detail
 
 	/** A row an import skipped, with its asset as a clickable token when it has one. */
 	void LogRow(FMessageLog& Log, const FString& AssetPath, const FString& Message);
+
+	/** The checks on a translation an import is about to write. False (Rejected, logged) when its placeholders break the source's; over MaxCharacters it is still written, logged and counted TooLong. What names the row in the log. */
+	bool CheckImportedTranslation(const FString& Source, const FString& Translation, int32 MaxCharacters, const TSet<FName>& NamedTokens, FKzTranslationImportStats& Stats, FMessageLog& Log, const FString& AssetPath, const FString& What);
+
+	/** Wrong-file guard of the interactive imports: asks before importing a file that declares another culture (DeclaredCulture, from its content) or, when it declares none, whose name mentions another one. */
+	bool ConfirmImportCulture(const FString& FilePath, const FString& DeclaredCulture, const FString& Culture);
 
 	/** The toast closing an interactive flow; bWithLogLink adds a "Show log" link to the message log. */
 	void ShowNotification(const FText& Message, bool bSuccess, bool bWithLogLink = false);

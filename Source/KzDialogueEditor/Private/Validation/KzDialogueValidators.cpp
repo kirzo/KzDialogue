@@ -626,6 +626,9 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 		return FText::FromString(FString::Join(Sorted, TEXT(", ")));
 	};
 
+	TSet<FName> TokenNames;
+	NamedTokens.GetKeys(TokenNames);
+
 	for (int32 i = 0; i < Dialogue->Lines.Num(); ++i)
 	{
 		const FKzDialogueLine& Line = Dialogue->Lines[i];
@@ -664,37 +667,10 @@ void UKzDialogueValidator_Localization::Validate_Implementation(const UObject* A
 					Line.LineId, i);
 			}
 
-			// Every source placeholder must survive into the translation. A named-asset token may
-			// change its part ("{Kirzo}" as "{Kirzo:given}"): how to name someone is the translator's
-			// call. EXTRA named-token placeholders are fine too: the gender mechanism
-			// ("{player:gender}|gender(...)") exists only in translations by design.
-			auto TokenOf = [](const FString& Arg)
-			{
-				FString Token = Arg;
-				FString Modifier;
-				Arg.Split(TEXT(":"), &Token, &Modifier);
-				return Token;
-			};
-			const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
-			TSet<FString> TranslationTokens;
-			for (const FString& Arg : TranslationArgs) { TranslationTokens.Add(TokenOf(Arg)); }
-
-			TSet<FString> Problems;
-			for (const FString& Arg : SourceArgs)
-			{
-				if (TranslationArgs.Contains(Arg)) { continue; }
-
-				const FString Token = TokenOf(Arg);
-				if (!NamedTokens.Contains(FName(*Token)) || !TranslationTokens.Contains(Token)) { Problems.Add(Arg); }
-			}
-			for (const FString& Arg : TranslationArgs)
-			{
-				if (!SourceArgs.Contains(Arg) && !NamedTokens.Contains(FName(*TokenOf(Arg)))) { Problems.Add(Arg); }
-			}
-			if (Problems.Num() > 0)
+			if (KzDialogueL10N::FindPlaceholderProblems(*SourceString, Translation, TokenNames).Num() > 0)
 			{
 				AddIssue(EKzValidationSeverity::Error,
-					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), DescribeLine(i, Line), FText::FromString(Culture), JoinSorted(TranslationArgs), JoinSorted(SourceArgs)),
+					FText::Format(LOCTEXT("PlaceholderMismatch", "Line {0}: the '{1}' translation's placeholders ({2}) do not match the source's ({3})."), DescribeLine(i, Line), FText::FromString(Culture), JoinSorted(GetFormatArgs(Translation)), JoinSorted(SourceArgs)),
 					Line.LineId, i);
 			}
 		}

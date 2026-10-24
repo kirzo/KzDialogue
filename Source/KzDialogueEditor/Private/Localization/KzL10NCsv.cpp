@@ -88,6 +88,49 @@ namespace KzDialogueL10N::Detail
 		}
 		return Found;
 	}
+
+	bool ConfirmImportCulture(const FString& FilePath, const FString& DeclaredCulture, const FString& Culture)
+	{
+		FText Message;
+		if (!DeclaredCulture.IsEmpty())
+		{
+			if (DeclaredCulture.Equals(Culture, ESearchCase::IgnoreCase)) { return true; }
+			Message = FText::Format(LOCTEXT("ImportDeclaredCultureMismatch", "'{0}' was exported for culture '{1}', but you are importing into '{2}'. Continue anyway?"),
+				FText::FromString(FPaths::GetCleanFilename(FilePath)), FText::FromString(DeclaredCulture), FText::FromString(Culture));
+		}
+		else
+		{
+			// No declared culture: fall back to a culture token in the file name.
+			FKzLocTargetInfo Target;
+			FText TargetError;
+			if (!KzDialogueL10N::ReadLocTargetInfo(Target, TargetError)) { return true; }
+
+			TArray<FString> Cultures = Target.ForeignCultures;
+			if (!Target.NativeCulture.IsEmpty()) { Cultures.Add(Target.NativeCulture); }
+
+			// Split on '_', ' ' and '.' only, so multi-part codes like "es-MX" survive as one token.
+			const TCHAR* Delims[] = { TEXT("_"), TEXT(" "), TEXT(".") };
+			TArray<FString> Tokens;
+			FPaths::GetBaseFilename(FilePath).ParseIntoArray(Tokens, Delims, UE_ARRAY_COUNT(Delims));
+
+			FString MismatchCulture;
+			for (const FString& Token : Tokens)
+			{
+				for (const FString& Other : Cultures)
+				{
+					if (Token.Equals(Other, ESearchCase::IgnoreCase) && !Other.Equals(Culture, ESearchCase::IgnoreCase))
+					{
+						MismatchCulture = Other;
+					}
+				}
+			}
+			if (MismatchCulture.IsEmpty()) { return true; }
+
+			Message = FText::Format(LOCTEXT("ImportCultureMismatch", "The file name '{0}' mentions culture '{1}', but you are importing into '{2}'. Continue anyway?"),
+				FText::FromString(FPaths::GetCleanFilename(FilePath)), FText::FromString(MismatchCulture), FText::FromString(Culture));
+		}
+		return FMessageDialog::Open(EAppMsgType::YesNo, Message) == EAppReturnType::Yes;
+	}
 }
 
 namespace KzDialogueL10N
@@ -143,42 +186,19 @@ namespace KzDialogueL10N
 		}
 		FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_IMPORT, FPaths::GetPath(OutFiles[0]));
 
-		// Wrong-file guard: warn when the file name carries a culture token that is not the chosen culture.
-		FKzLocTargetInfo Target;
-		FText TargetError;
-		if (KzDialogueL10N::ReadLocTargetInfo(Target, TargetError))
+		// Per-culture exports stamp every row's Culture cell; the first one says what the file is for.
+		FString DeclaredCulture;
 		{
-			TArray<FString> Cultures = Target.ForeignCultures;
-			if (!Target.NativeCulture.IsEmpty()) { Cultures.Add(Target.NativeCulture); }
-
-			// Split on '_', ' ' and '.' only, so multi-part codes like "es-MX" survive as one token.
-			const TCHAR* Delims[] = { TEXT("_"), TEXT(" "), TEXT(".") };
-			TArray<FString> Tokens;
-			FPaths::GetBaseFilename(OutFiles[0]).ParseIntoArray(Tokens, Delims, UE_ARRAY_COUNT(Delims));
-
-			FString MismatchCulture;
-			for (const FString& Token : Tokens)
+			FKzCsvTable Table;
+			FText ParseError;
+			const int32* CultureCol = ParseTranslationCsv(OutFiles[0], {}, Table, ParseError) ? Table.Columns.Find(TEXT("Culture")) : nullptr;
+			const FCsvParser::FRows* Rows = CultureCol ? &Table.Parser->GetRows() : nullptr;
+			for (int32 RowIdx = 1; Rows && RowIdx < Rows->Num() && DeclaredCulture.IsEmpty(); ++RowIdx)
 			{
-				for (const FString& Other : Cultures)
-				{
-					if (Token.Equals(Other, ESearchCase::IgnoreCase) && !Other.Equals(Culture, ESearchCase::IgnoreCase))
-					{
-						MismatchCulture = Other;
-					}
-				}
-			}
-
-			if (!MismatchCulture.IsEmpty())
-			{
-				const FText Message = FText::Format(
-					LOCTEXT("ImportCultureMismatch", "The file name '{0}' mentions culture '{1}', but you are importing into '{2}'. Continue anyway?"),
-					FText::FromString(FPaths::GetCleanFilename(OutFiles[0])), FText::FromString(MismatchCulture), FText::FromString(Culture));
-				if (FMessageDialog::Open(EAppMsgType::YesNo, Message) != EAppReturnType::Yes)
-				{
-					return;
-				}
+				if ((*Rows)[RowIdx].IsValidIndex(*CultureCol)) { DeclaredCulture = FString((*Rows)[RowIdx][*CultureCol]).TrimStartAndEnd(); }
 			}
 		}
+		if (!ConfirmImportCulture(OutFiles[0], DeclaredCulture, Culture)) { return; }
 
 		FKzTranslationImportStats Stats;
 		FText Error;
@@ -188,10 +208,19 @@ namespace KzDialogueL10N
 			return;
 		}
 
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Culture"), FText::FromString(Culture));
+		Args.Add(TEXT("Imported"), Stats.Imported);
+		Args.Add(TEXT("TooLong"), Stats.TooLong);
+		Args.Add(TEXT("Unchanged"), Stats.Unchanged);
+		Args.Add(TEXT("Drifted"), Stats.Drifted);
+		Args.Add(TEXT("Rejected"), Stats.Rejected);
+		Args.Add(TEXT("Untranslated"), Stats.Untranslated);
+		Args.Add(TEXT("Unresolved"), Stats.Unresolved);
 		const FText Summary = FText::Format(
-			LOCTEXT("ImportSummary", "{0}: {1} imported, {2} unchanged, {3} drifted (skipped), {4} untranslated, {5} unresolved. Run Compile Text in the Localization Dashboard to apply."),
-			FText::FromString(Culture), Stats.Imported, Stats.Unchanged, Stats.Drifted, Stats.Untranslated, Stats.Unresolved);
-		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
+			LOCTEXT("ImportSummary", "{Culture}: {Imported} imported ({TooLong} too long), {Unchanged} unchanged, {Drifted} drifted and {Rejected} with broken placeholders (skipped), {Untranslated} untranslated, {Unresolved} unresolved. Run Compile Text in the Localization Dashboard to apply."),
+			Args);
+		ShowNotification(Summary, Stats.Drifted == 0 && Stats.Rejected == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 	}
 }
 
@@ -248,7 +277,7 @@ void KzDialogueL10N::RegisterMenus()
 
 bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const FString& CsvPath, FText& OutError, const FKzExportLineFilter& LineFilter, const TSet<FString>* OtherIdentities, const FString& TranslationCulture)
 {
-	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation,TranslationHash");
+	FString Csv = TEXT("Asset,Namespace,Key,Speaker,SourceText,Translation,TranslatorNotes,MaxCharacters,Audio,LocalizeAudio,SourceHash,StaleTranslation,TranslationHash,Culture");
 	Csv += LINE_TERMINATOR;
 
 	// Archives feed the per-culture translation columns and the project-text rows.
@@ -306,7 +335,9 @@ bool KzDialogueL10N::ExportAssets(const TArray<UKzDialogueAsset*>& Assets, const
 		Csv += FString::Printf(TEXT("%u"), SourceHash) + TEXT(",");
 		Csv += CsvEscape(StaleTranslation) + TEXT(",");
 		// Fingerprints the pre-filled translation, so a re-import leaves untouched cells alone.
-		Csv += Translation.IsEmpty() ? FString() : FString::Printf(TEXT("%u"), ExportHash(Translation));
+		Csv += (Translation.IsEmpty() ? FString() : FString::Printf(TEXT("%u"), ExportHash(Translation))) + TEXT(",");
+		// The culture a per-culture file is for, so its import can tell a wrong file by content.
+		Csv += TranslationCulture;
 		Csv += LINE_TERMINATOR;
 		++NumRows;
 	};
@@ -374,6 +405,8 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 	const int32* TranslationCol = Table.Columns.Find(TEXT("Translation"));
 	const int32* HashCol = Table.Columns.Find(TEXT("SourceHash"));
 	const int32* TranslationHashCol = Table.Columns.Find(TEXT("TranslationHash"));
+	const int32* MaxCharactersCol = Table.Columns.Find(TEXT("MaxCharacters"));
+	const TSet<FName> NamedTokens = CollectNamedTokens();
 
 	FKzLocTargetInfo Target;
 	if (!ReadLocTargetInfo(Target, OutError))
@@ -443,6 +476,10 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 				LogRow(Log, FString(), FString::Printf(TEXT("Drifted row %d: project text '%s,%s' changed after this CSV was exported; needs retranslation."), RowIdx + 1, *Namespace, *Key));
 				continue;
 			}
+			if (!CheckImportedTranslation(ManifestEntry->Source.Text, Translation, 0, NamedTokens, OutStats, Log, FString(), FString::Printf(TEXT("Row %d, project text '%s,%s'"), RowIdx + 1, *Namespace, *Key)))
+			{
+				continue;
+			}
 
 			if (Writer.Write(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Translation)))
 			{
@@ -490,6 +527,11 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 		const TOptional<FString> CurrentNamespace = FTextInspector::GetNamespace(*SourceText);
 		const TOptional<FString> CurrentKey = FTextInspector::GetKey(*SourceText);
 		const FString* SourceString = FTextInspector::GetSourceString(*SourceText);
+		const int32 MaxCharacters = MaxCharactersCol ? FCString::Atoi(*Cell(MaxCharactersCol)) : 0;
+		if (SourceString && !CheckImportedTranslation(*SourceString, Translation, MaxCharacters, NamedTokens, OutStats, Log, AssetPath, FString::Printf(TEXT("Row %d, key '%s'"), RowIdx + 1, *Key)))
+		{
+			continue;
+		}
 		if (CurrentNamespace.IsSet() && CurrentKey.IsSet() && SourceString
 			&& Writer.Write(Culture, FLocKey(CurrentNamespace.GetValue()), FLocKey(CurrentKey.GetValue()), nullptr, FLocItem(*SourceString), FLocItem(Translation)))
 		{
@@ -504,7 +546,7 @@ bool KzDialogueL10N::ImportCsv(const FString& CsvPath, const FString& Culture, F
 
 	if (!Writer.Save(OutError)) { return false; }
 
-	Log.Info(FText::Format(LOCTEXT("CsvImportLogSummary", "{0} imported, {1} unchanged, {2} drifted, {3} untranslated, {4} unresolved."), OutStats.Imported, OutStats.Unchanged, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
+	Log.Info(FText::Format(LOCTEXT("CsvImportLogSummary", "{0} imported ({1} too long), {2} unchanged, {3} drifted, {4} rejected, {5} untranslated, {6} unresolved."), OutStats.Imported, OutStats.TooLong, OutStats.Unchanged, OutStats.Drifted, OutStats.Rejected, OutStats.Untranslated, OutStats.Unresolved));
 	return true;
 }
 

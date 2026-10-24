@@ -95,6 +95,10 @@ private:
 		FString TranslationCulture;
 		TArray<TPair<FString, FString>> TranslationIdentities;
 		FString TranslationSource;
+		/** Stale translation (foreign cards): offers to accept it for the current text as is. */
+		bool bStaleTranslation = false;
+		/** Missing translation that a text with the same source already has in this culture: offered to fill the row. */
+		FString IdenticalSourceTranslation;
 		bool bPending = false;
 		/** The pending work involves audio; the Missing voice filter keeps only these. */
 		bool bAudioWork = false;

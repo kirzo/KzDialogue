@@ -63,6 +63,21 @@ namespace
 		return Out;
 	}
 
+	/** The culture a .po header declares ("Language: es"); empty when it declares none. */
+	FString ReadPoLanguage(const TArray<FString>& FileLines)
+	{
+		for (const FString& RawLine : FileLines)
+		{
+			const FString Line = RawLine.TrimStartAndEnd();
+			if (Line.StartsWith(TEXT("msgctxt "))) { break; }   // past the header
+			if (Line.StartsWith(TEXT("\"Language:")))
+			{
+				return Line.Mid(10).Replace(TEXT("\\n"), TEXT("")).Replace(TEXT("\""), TEXT("")).TrimStartAndEnd();
+			}
+		}
+		return FString();
+	}
+
 	/** One .po per foreign culture (<Directory>/<Culture>/<Target><FileNameSuffix>.po): existing translations fill msgstr, stale ones get the standard fuzzy flag. OnlyCulture narrows the set to that culture. */
 	bool WriteKzPoFiles(const TArray<FKzPoEntry>& Entries, const FKzLocQuery& Query, const FString& Directory, const FString& FileNameSuffix, const FString& OnlyCulture, FText& OutError)
 	{
@@ -97,7 +112,9 @@ namespace
 				Query.GetArchiveEntry(Entry.Namespace, Entry.Key, Culture, ArchiveSource, Translation);
 				if (Query.GetTextState(Entry.Namespace, Entry.Key, Entry.Source, Culture) == EKzTranslationState::Stale)
 				{
+					// The source it was translated against, so Poedit and Weblate show the diff.
 					Po += TEXT("#, fuzzy") LINE_TERMINATOR;
+					Po += FString::Printf(TEXT("#| msgid \"%s\"") LINE_TERMINATOR, *PoEscape(ArchiveSource));
 				}
 
 				Po += FString::Printf(TEXT("msgctxt \"%s,%s\"") LINE_TERMINATOR, *PoEscape(Entry.Namespace), *PoEscape(Entry.Key));
@@ -253,8 +270,10 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 	FMessageLog Log(MessageLogName);
 	BeginLogPage(Log, FText::Format(LOCTEXT("PoImportPage", "Import {0} ({1})"), FText::FromString(FPaths::GetCleanFilename(PoPath)), FText::FromString(Culture)));
 
+	const TSet<FName> NamedTokens = CollectNamedTokens();
+
 	// A msgid that no longer matches the manifest source is drifted. Fuzzy entries are unconfirmed work: translators clear the flag when they revise them.
-	auto ProcessEntry = [&Writer, &LocHelper, &OutStats, &Log, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy)
+	auto ProcessEntry = [&Writer, &LocHelper, &OutStats, &Log, &NamedTokens, Culture](const FString& RawCtxt, const FString& RawId, const FString& RawStr, bool bFuzzy, int32 MaxCharacters)
 	{
 		const FString Ctxt = PoUnescape(RawCtxt);
 		const FString Id = PoUnescape(RawId);
@@ -290,6 +309,10 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 			LogRow(Log, FString(), FString::Printf(TEXT("Drifted PO entry '%s,%s': the source text changed after this file was exported; needs retranslation."), *Namespace, *Key));
 			return;
 		}
+		if (!CheckImportedTranslation(ManifestEntry->Source.Text, Str, MaxCharacters, NamedTokens, OutStats, Log, FString(), FString::Printf(TEXT("PO entry '%s,%s'"), *Namespace, *Key)))
+		{
+			return;
+		}
 
 		if (Writer.Write(Culture, FLocKey(Namespace), FLocKey(Key), nullptr, FLocItem(ManifestEntry->Source.Text), FLocItem(Str)))
 		{
@@ -309,6 +332,7 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 	FString* Continuation = nullptr;
 	bool bSeenStr = false;
 	bool bFuzzy = false;
+	int32 MaxCharacters = 0;
 
 	auto Quoted = [](const FString& In) -> FString
 	{
@@ -319,10 +343,11 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 	auto FlushEntry = [&]()
 	{
 		if (!bSeenStr) { return; }
-		ProcessEntry(Ctxt, Id, Str, bFuzzy);
+		ProcessEntry(Ctxt, Id, Str, bFuzzy, MaxCharacters);
 		Ctxt.Reset(); Id.Reset(); Str.Reset();
 		bSeenStr = false;
 		bFuzzy = false;
+		MaxCharacters = 0;
 	};
 
 	for (const FString& RawLine : FileLines)
@@ -355,11 +380,15 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 		}
 		else
 		{
-			// A blank or comment line closes the previous entry, so a flag comment belongs to the next one.
+			// A blank or comment line closes the previous entry, so a flag or context comment belongs to the next one.
 			FlushEntry();
 			if (Line.StartsWith(TEXT("#,")) && Line.Contains(TEXT("fuzzy")))
 			{
 				bFuzzy = true;
+			}
+			else if (Line.StartsWith(TEXT("#. MaxCharacters:")))
+			{
+				MaxCharacters = FCString::Atoi(*Line.Mid(17));
 			}
 			Continuation = nullptr;
 		}
@@ -368,7 +397,7 @@ bool KzDialogueL10N::ImportPoFile(const FString& PoPath, const FString& Culture,
 
 	if (!Writer.Save(OutError)) { return false; }
 
-	Log.Info(FText::Format(LOCTEXT("ImportLogSummary", "{0} imported, {1} drifted, {2} untranslated, {3} unresolved."), OutStats.Imported, OutStats.Drifted, OutStats.Untranslated, OutStats.Unresolved));
+	Log.Info(FText::Format(LOCTEXT("ImportLogSummary", "{0} imported ({1} too long), {2} drifted, {3} rejected, {4} untranslated, {5} unresolved."), OutStats.Imported, OutStats.TooLong, OutStats.Drifted, OutStats.Rejected, OutStats.Untranslated, OutStats.Unresolved));
 	return true;
 }
 
@@ -384,12 +413,24 @@ void KzDialogueL10N::ImportPoInteractive(const FString& Culture)
 	}
 	FEditorDirectories::Get().SetLastDirectory(ELastDirectory::GENERIC_IMPORT, FPaths::GetPath(OutFiles[0]));
 
+	TArray<FString> FileLines;
+	FFileHelper::LoadFileToStringArray(FileLines, *OutFiles[0]);
+	if (!ConfirmImportCulture(OutFiles[0], ReadPoLanguage(FileLines), Culture)) { return; }
+
 	FKzTranslationImportStats Stats;
 	FText Error;
 	if (ImportPoFile(OutFiles[0], Culture, Stats, Error))
 	{
-		ShowNotification(FText::Format(LOCTEXT("PoImportDone", "PO import ({0}): {1} imported, {2} drifted (skipped), {3} untranslated, {4} unresolved. Run Compile Text to apply."),
-			FText::FromString(Culture), Stats.Imported, Stats.Drifted, Stats.Untranslated, Stats.Unresolved), Stats.Drifted == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
+		FFormatNamedArguments Args;
+		Args.Add(TEXT("Culture"), FText::FromString(Culture));
+		Args.Add(TEXT("Imported"), Stats.Imported);
+		Args.Add(TEXT("TooLong"), Stats.TooLong);
+		Args.Add(TEXT("Drifted"), Stats.Drifted);
+		Args.Add(TEXT("Rejected"), Stats.Rejected);
+		Args.Add(TEXT("Untranslated"), Stats.Untranslated);
+		Args.Add(TEXT("Unresolved"), Stats.Unresolved);
+		ShowNotification(FText::Format(LOCTEXT("PoImportDone", "PO import ({Culture}): {Imported} imported ({TooLong} too long), {Drifted} drifted and {Rejected} with broken placeholders (skipped), {Untranslated} untranslated, {Unresolved} unresolved. Run Compile Text to apply."), Args),
+			Stats.Drifted == 0 && Stats.Rejected == 0 && Stats.Unresolved == 0, /*bWithLogLink=*/true);
 	}
 	else
 	{

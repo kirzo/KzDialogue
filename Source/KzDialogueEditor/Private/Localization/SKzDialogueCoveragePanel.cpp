@@ -339,6 +339,7 @@ void SKzDialogueCoveragePanel::FillTextState(FLineRow& Row, EKzTranslationState 
 		break;
 	case EKzTranslationState::Stale:
 		Row.bPending = true;
+		Row.bStaleTranslation = true;
 		Row.State = LOCTEXT("PendingStale", "stale");
 		Row.StateColor = KzStaleColor;
 		break;
@@ -551,6 +552,15 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 		int32 PendingCount = 0;
 		TArray<FAssetLines> Groups;
 
+		// A missing translation that another text with the same source already has here, offered on the row.
+		auto OfferIdenticalSource = [&Query, &Culture](FLineRow& Row)
+		{
+			if (!Row.TranslationCulture.IsEmpty() && Row.Translation.IsEmpty() && !Row.TranslationSource.IsEmpty())
+			{
+				Query.FindIdenticalSourceTranslation(Row.TranslationSource, Culture, Row.IdenticalSourceTranslation);
+			}
+		};
+
 		for (UKzDialogueAsset* AssetPtr : LiveAssets)
 		{
 			if (!bShowDialogueLines) { break; }
@@ -645,6 +655,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 
 				// One chip per line saying what exactly is pending: the text part, then the audio.
 				FillTextState(Row, TextState);
+				OfferIdenticalSource(Row);
 				if (bTextTooLong)
 				{
 					Row.bPending = true;
@@ -687,6 +698,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 
 			const EKzTranslationState State = Query.GetTextState(Text.Namespace, Text.Key, Text.Source, Culture);
 			FillTextState(Row, State);
+			OfferIdenticalSource(Row);
 			if (State == EKzTranslationState::Translated)
 			{
 				++TextDone;
@@ -857,6 +869,7 @@ TArray<SKzDialogueCoveragePanel::FCultureCard> SKzDialogueCoveragePanel::BuildCa
 
 				// The group is as far along as its least done member.
 				FillTextState(Row, GroupMissing > 0 ? EKzTranslationState::Missing : GroupStale > 0 ? EKzTranslationState::Stale : EKzTranslationState::Translated);
+				OfferIdenticalSource(Row);
 				if (Row.bPending)
 				{
 					++PendingCount;
@@ -1391,6 +1404,32 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 		: FString();
 	TSharedPtr<SMultiLineEditableText> TranslationEditor;
 
+	// Beside the editor, a one-click translation: accept a stale one as is, or take the one an identical source already has.
+	TSharedRef<SWidget> TranslationAction = SNullWidget::NullWidget;
+	const bool bAcceptStale = Entry.bStaleTranslation && !Entry.Translation.IsEmpty();
+	if (bAcceptStale || !Entry.IdenticalSourceTranslation.IsEmpty())
+	{
+		TranslationAction = SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "SimpleButton")
+			.ContentPadding(FMargin(1.0f))
+			.ToolTipText(bAcceptStale
+				? LOCTEXT("AcceptStaleTranslationTip", "Accept this translation for the current text: it still holds, so the stale state clears without retyping it.")
+				: FText::Format(LOCTEXT("FillIdenticalSourceTip", "Fill from an identical source already translated in this culture:\n{0}"), FText::FromString(Entry.IdenticalSourceTranslation)))
+			.OnClicked_Lambda([this, Culture = Entry.TranslationCulture, Identities = Entry.TranslationIdentities, Source = Entry.TranslationSource, Value = bAcceptStale ? Entry.Translation.ToString() : Entry.IdenticalSourceTranslation]()
+			{
+				CommitTranslation(Culture, Identities, Source, Value);
+				return FReply::Handled();
+			})
+			[
+				SNew(SBox).WidthOverride(13.0f).HeightOverride(13.0f)
+				[
+					bAcceptStale
+						? SNew(SImage).Image(FAppStyle::GetBrush("Icons.SuccessWithColor"))
+						: SNew(SImage).Image(FAppStyle::GetBrush("GenericCommands.Paste")).ColorAndOpacity(FSlateColor::UseForeground())
+				]
+			];
+	}
+
 	TSharedRef<SWidget> RowWidget = SNew(SBorder)
 		.BorderImage(FKzLibEditorStyle::Get().GetBrush("Kz.ListRowBorder"))
 		.Padding(FMargin(4.0f, 2.0f))
@@ -1436,6 +1475,14 @@ TSharedRef<SWidget> SKzDialogueCoveragePanel::MakeLineRowWidget(const FLineRow& 
 					.Orientation(Orient_Vertical)
 					.Thickness(1.0f)
 					.Visibility(Entry.TranslationCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+			]
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+			[
+				SNew(SBox).WidthOverride(18.0f).HAlign(HAlign_Center).VAlign(VAlign_Center)
+					.Visibility(Entry.TranslationCulture.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				[
+					TranslationAction
+				]
 			]
 			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(2.0f, 0.0f, 4.0f, 0.0f)
 			[

@@ -202,6 +202,23 @@ namespace KzDialogueL10N::Detail
 		Entry->AddToken(FTextToken::Create(FText::FromString(Message)));
 	}
 
+	bool CheckImportedTranslation(const FString& Source, const FString& Translation, int32 MaxCharacters, const TSet<FName>& NamedTokens, FKzTranslationImportStats& Stats, FMessageLog& Log, const FString& AssetPath, const FString& What)
+	{
+		const TSet<FString> Problems = KzDialogueL10N::FindPlaceholderProblems(Source, Translation, NamedTokens);
+		if (Problems.Num() > 0)
+		{
+			++Stats.Rejected;
+			LogRow(Log, AssetPath, FString::Printf(TEXT("%s: rejected, its placeholders {%s} do not match the source's; fix them and import again."), *What, *FString::Join(Problems.Array(), TEXT("}, {"))));
+			return false;
+		}
+		if (MaxCharacters > 0 && Translation.Len() > MaxCharacters)
+		{
+			++Stats.TooLong;
+			LogRow(Log, AssetPath, FString::Printf(TEXT("%s: imported, but its %d characters are over the line's MaxCharacters (%d)."), *What, Translation.Len(), MaxCharacters));
+		}
+		return true;
+	}
+
 	void ShowNotification(const FText& Message, bool bSuccess, bool bWithLogLink)
 	{
 		FNotificationInfo Info(Message);
@@ -323,6 +340,37 @@ bool FKzLocQuery::IsAudioLocalized(const FString& SourcePackageName, const FStri
 	FString LocalizedPackage;
 	// The registry's package list, not the disk: the coverage asks per line and culture on every refresh.
 	return FPackageLocalizationUtil::ConvertSourceToLocalized(SourcePackageName, Culture, LocalizedPackage) && IAssetRegistry::GetChecked().DoesPackageExistOnDisk(FName(*LocalizedPackage));
+}
+
+bool FKzLocQuery::FindIdenticalSourceTranslation(const FString& Source, const FString& Culture, FString& OutTranslation) const
+{
+	if (!LocHelper.IsValid() || !LoadedCultures.Contains(Culture)) { return false; }
+
+	if (IdentitiesBySource.IsEmpty())
+	{
+		LocHelper->EnumerateSourceTexts([this](TSharedRef<FManifestEntry> Entry) -> bool
+		{
+			for (const FManifestContext& Context : Entry->Contexts)
+			{
+				IdentitiesBySource.FindOrAdd(Entry->Source.Text).Emplace(Entry->Namespace.GetString(), Context.Key.GetString());
+			}
+			return true;   // continue enumeration
+		}, true);
+	}
+
+	const TArray<TPair<FString, FString>>* Identities = IdentitiesBySource.Find(Source);
+	if (!Identities) { return false; }
+
+	for (const TPair<FString, FString>& Identity : *Identities)
+	{
+		const TSharedPtr<FArchiveEntry> Entry = LocHelper->FindTranslation(Culture, FLocKey(Identity.Key), FLocKey(Identity.Value), nullptr);
+		if (Entry.IsValid() && !Entry->Translation.Text.IsEmpty() && Entry->Source.Text == Source)
+		{
+			OutTranslation = Entry->Translation.Text;
+			return true;
+		}
+	}
+	return false;
 }
 
 void FKzLocQuery::EnumerateOtherTexts(TFunctionRef<void(const FString& Namespace, const FString& Key, const FString& Source)> Callback) const
@@ -549,6 +597,55 @@ FText KzDialogueL10N::GetCultureDisplayLabel(const FString& Culture)
 		return FText::FromString(Culture);
 	}
 	return FText::FromString(FString::Printf(TEXT("%s (%s)"), *DisplayName, *Culture));
+}
+
+TSet<FName> KzDialogueL10N::CollectNamedTokens()
+{
+	TSet<FName> Tokens;
+	TArray<FAssetData> NamedAssets;
+	IAssetRegistry::GetChecked().GetAssetsByClass(UKzNamedAsset::StaticClass()->GetClassPathName(), NamedAssets, /*bSearchSubClasses=*/true);
+	for (const FAssetData& Data : NamedAssets)
+	{
+		FName Token;
+		if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), Token) && !Token.IsNone()) { Tokens.Add(Token); }
+	}
+	return Tokens;
+}
+
+TSet<FString> KzDialogueL10N::FindPlaceholderProblems(const FString& Source, const FString& Translation, const TSet<FName>& NamedTokens)
+{
+	auto GetFormatArgs = [](const FString& Pattern)
+	{
+		TArray<FString> Args;
+		FTextFormat::FromString(Pattern).GetFormatArgumentNames(Args);
+		return TSet<FString>(Args);
+	};
+	auto TokenOf = [](const FString& Arg)
+	{
+		FString Token = Arg;
+		FString Modifier;
+		Arg.Split(TEXT(":"), &Token, &Modifier);
+		return Token;
+	};
+
+	const TSet<FString> SourceArgs = GetFormatArgs(Source);
+	const TSet<FString> TranslationArgs = GetFormatArgs(Translation);
+	TSet<FString> TranslationTokens;
+	for (const FString& Arg : TranslationArgs) { TranslationTokens.Add(TokenOf(Arg)); }
+
+	TSet<FString> Problems;
+	for (const FString& Arg : SourceArgs)
+	{
+		if (TranslationArgs.Contains(Arg)) { continue; }
+
+		const FString Token = TokenOf(Arg);
+		if (!NamedTokens.Contains(FName(*Token)) || !TranslationTokens.Contains(Token)) { Problems.Add(Arg); }
+	}
+	for (const FString& Arg : TranslationArgs)
+	{
+		if (!SourceArgs.Contains(Arg) && !NamedTokens.Contains(FName(*TokenOf(Arg)))) { Problems.Add(Arg); }
+	}
+	return Problems;
 }
 
 bool KzDialogueL10N::GeneratePseudoTranslations(int32& OutCount, FText& OutError)
