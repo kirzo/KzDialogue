@@ -33,7 +33,7 @@ const UScriptStruct* UKzDialogueGraph::GetNodeStruct() const
 
 void UKzDialogueGraph::GetDefaultNodes(TArray<const UScriptStruct*>& OutNodes) const
 {
-	OutNodes.Add(FKzDialogueGraphNode_Entry::StaticStruct());
+	OutNodes.Add(FKzDialogueGraphNode_Start::StaticStruct());
 }
 
 void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValidationIssue>& OutIssues) const

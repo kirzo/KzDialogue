@@ -24,8 +24,12 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Entry : public FKzDialogueGraphNode
 
 	static const FName DefaultName;
 
-	UPROPERTY(EditAnywhere, Category = "Entry")
-	FName Name = DefaultName;
+	UPROPERTY(EditAnywhere, Category = "Entry", meta = (EditCondition = "bRenamable", EditConditionHides, HideEditConditionToggle))
+	FName Name;
+
+	/** False for the graph's Start. */
+	UPROPERTY()
+	bool bRenamable = true;
 
 	virtual FName GetEntryName() const override { return Name; }
 
@@ -34,6 +38,25 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Entry : public FKzDialogueGraphNode
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
+#endif
+};
+
+/** The entry every graph begins with, and plays start from by default. It is neither deleted nor renamed. */
+USTRUCT(meta = (DisplayName = "Start", Hidden))
+struct KZDIALOGUE_API FKzDialogueGraphNode_Start : public FKzDialogueGraphNode_Entry
+{
+	GENERATED_BODY()
+
+	FKzDialogueGraphNode_Start()
+	{
+		Name = DefaultName;
+		bRenamable = false;
+	}
+
+#if WITH_EDITOR
+	virtual FText GetSubtitle() const override { return FText::GetEmpty(); }
+	virtual bool CanUserDelete() const override { return false; }
+	virtual bool CanDuplicate() const override { return false; }
 #endif
 };
 
