@@ -92,11 +92,11 @@ class KZDIALOGUE_API UKzDialogueGraphInstance : public UObject
 
 public:
 	/** A play of Graph, not started yet, so its events can be bound before anything happens. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", AutoCreateRefTerm = "Context", AdvancedDisplay = "Context"))
 	static UKzDialogueGraphInstance* CreateDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context);
 
 	/** Creates a play of Graph and starts it. Events of the nodes before its first line fire before this returns: bind them with Create Dialogue Graph and Start. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", AutoCreateRefTerm = "Context", AdvancedDisplay = "Context,Entry"))
 	static UKzDialogueGraphInstance* StartDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context, FName Entry = TEXT("Start"));
 
 	/** Starts from the entry with that name. False when there is no such entry or the channel refused the dialogue; a queued play starts later. */

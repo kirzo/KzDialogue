@@ -19,7 +19,7 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueGraph : public UBlueprintAsyncActionBas
 	GENERATED_BODY()
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Graph", AdvancedDisplay = "Context,Entry"))
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Graph", AutoCreateRefTerm = "Context", AdvancedDisplay = "Context,Entry"))
 	static UKzAsyncPlayDialogueGraph* PlayDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context, FName Entry = TEXT("Start"));
 
 	/** Fired before anything plays, with the instance to keep. */
