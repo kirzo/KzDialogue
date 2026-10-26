@@ -54,10 +54,15 @@ bool UKzDialogueGraphInstance::Start(FName Entry)
 		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s' has no entry named '%s'."), *Graph->GetName(), *Entry.ToString());
 		return false;
 	}
+	const FGameplayTag Channel = Context.Channel.IsValid() ? Context.Channel : (Graph->Channel.IsValid() ? Graph->Channel : Subsystem->DefaultChannel);
+	Player = Subsystem->GetOrCreatePlayer(Channel);
+	if (!Player)
+	{
+		return false;
+	}
 	bStarted = true;
 	Visit(Graph->GetData().GetNodeGuid(Node));
 
-	const FGameplayTag Channel = Context.Channel.IsValid() ? Context.Channel : (Graph->Channel.IsValid() ? Graph->Channel : Subsystem->DefaultChannel);
 	const int32 Priority = Context.Priority != UKzDialogueSubsystem::InheritPriority ? Context.Priority : Graph->Priority;
 	const EKzDialogueAdvanceMode AdvanceMode = Context.AdvanceMode != EKzDialogueAdvanceMode::Inherit ? Context.AdvanceMode : Graph->AdvanceMode;
 
@@ -66,11 +71,6 @@ bool UKzDialogueGraphInstance::Start(FName Entry)
 	Provider = GraphProvider;
 
 	// Bound before playing: the play may start, and even end, inside the call; the guard tells this play's dialogue from the one it replaces.
-	Player = Subsystem->GetOrCreatePlayer(Channel);
-	if (!Player)
-	{
-		return false;
-	}
 	Player->OnDialogueStarted.AddDynamic(this, &UKzDialogueGraphInstance::HandleDialogueStarted);
 	Player->OnDialogueFinished.AddDynamic(this, &UKzDialogueGraphInstance::HandleDialogueFinished);
 	Subsystem->AddGraphInstance(this);
