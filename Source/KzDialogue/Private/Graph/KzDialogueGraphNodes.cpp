@@ -12,12 +12,14 @@ const FName FKzDialogueGraphNode_Branch::ElseOutput(TEXT("Else"));
 #if WITH_EDITOR
 namespace
 {
-	const FLinearColor FlowColor(0.4f, 0.06f, 0.06f);
-	const FLinearColor LineColor(0.08f, 0.2f, 0.36f);
-	const FLinearColor ChoiceColor(0.3f, 0.1f, 0.38f);
-	const FLinearColor BranchColor(0.38f, 0.3f, 0.06f);
-	const FLinearColor GameplayColor(0.08f, 0.3f, 0.12f);
-	const FLinearColor WaitColor(0.2f, 0.22f, 0.26f);
+	// Dark enough for a white title. Branch takes the engine's bool color: it is a condition.
+	FLinearColor FlowColor() { return FLinearColor(FColor(0x3E, 0x46, 0x54)); }
+	FLinearColor LineColor() { return FLinearColor(FColor(0x24, 0x52, 0x7A)); }
+	FLinearColor ChoiceColor() { return FLinearColor(FColor(0x5B, 0x2F, 0x7A)); }
+	FLinearColor BranchColor() { return FLinearColor(0.3f, 0.0f, 0.0f); }
+	FLinearColor RandomColor() { return FLinearColor(FColor(0x8A, 0x5A, 0x0F)); }
+	FLinearColor GameplayColor() { return FLinearColor(FColor(0x2D, 0x6A, 0x3E)); }
+	FLinearColor WaitColor() { return FLinearColor(FColor(0x4A, 0x52, 0x5E)); }
 
 	/** Gives every entry a valid id of its own, so a new or duplicated entry gets its own output. */
 	template<typename T>
@@ -72,7 +74,7 @@ FText FKzDialogueGraphNode_Entry::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_Entry::GetColor() const
 {
-	return FlowColor;
+	return FlowColor();
 }
 
 void FKzDialogueGraphNode_Entry::Validate(TArray<FKzValidationIssue>& OutIssues) const
@@ -85,7 +87,7 @@ void FKzDialogueGraphNode_Entry::Validate(TArray<FKzValidationIssue>& OutIssues)
 
 FLinearColor FKzDialogueGraphNode_Line::GetColor() const
 {
-	return LineColor;
+	return LineColor();
 }
 
 void FKzDialogueGraphNode_Line::GetSearchTexts(TArray<FText>& OutTexts) const
@@ -112,7 +114,7 @@ void FKzDialogueGraphNode_Choice::GetOutputPins(const UKzGraph& Graph, TArray<FK
 
 FLinearColor FKzDialogueGraphNode_Choice::GetColor() const
 {
-	return ChoiceColor;
+	return ChoiceColor();
 }
 
 void FKzDialogueGraphNode_Choice::GetSearchTexts(TArray<FText>& OutTexts) const
@@ -152,7 +154,7 @@ void FKzDialogueGraphNode_Branch::GetOutputPins(const UKzGraph& Graph, TArray<FK
 
 FLinearColor FKzDialogueGraphNode_Branch::GetColor() const
 {
-	return BranchColor;
+	return BranchColor();
 }
 
 void FKzDialogueGraphNode_Branch::Validate(TArray<FKzValidationIssue>& OutIssues) const
@@ -178,7 +180,7 @@ void FKzDialogueGraphNode_Random::GetOutputPins(const UKzGraph& Graph, TArray<FK
 
 FLinearColor FKzDialogueGraphNode_Random::GetColor() const
 {
-	return BranchColor;
+	return RandomColor();
 }
 
 void FKzDialogueGraphNode_Random::Validate(TArray<FKzValidationIssue>& OutIssues) const
@@ -206,7 +208,7 @@ FText FKzDialogueGraphNode_Event::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_Event::GetColor() const
 {
-	return GameplayColor;
+	return GameplayColor();
 }
 
 void FKzDialogueGraphNode_Event::Validate(TArray<FKzValidationIssue>& OutIssues) const
@@ -219,7 +221,7 @@ void FKzDialogueGraphNode_Event::Validate(TArray<FKzValidationIssue>& OutIssues)
 
 FLinearColor FKzDialogueGraphNode_Action::GetColor() const
 {
-	return GameplayColor;
+	return GameplayColor();
 }
 
 FText FKzDialogueGraphNode_Wait::GetSubtitle() const
@@ -233,7 +235,7 @@ FText FKzDialogueGraphNode_Wait::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 {
-	return WaitColor;
+	return WaitColor();
 }
 
 FText FKzDialogueGraphNode_GoTo::GetSubtitle() const
@@ -243,7 +245,7 @@ FText FKzDialogueGraphNode_GoTo::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_GoTo::GetColor() const
 {
-	return FlowColor;
+	return FlowColor();
 }
 
 FText FKzDialogueGraphNode_Exit::GetSubtitle() const
@@ -253,7 +255,7 @@ FText FKzDialogueGraphNode_Exit::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_Exit::GetColor() const
 {
-	return FlowColor;
+	return FlowColor();
 }
 #endif
 
