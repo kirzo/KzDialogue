@@ -6,6 +6,7 @@
 #include "KzGraphFactory.h"
 #include "KzDialogueGraphFactory.generated.h"
 
+/** New dialogue graphs come with their own lines asset next to them. */
 UCLASS()
 class UKzDialogueGraphFactory : public UKzGraphFactory
 {
@@ -13,4 +14,6 @@ class UKzDialogueGraphFactory : public UKzGraphFactory
 
 public:
 	UKzDialogueGraphFactory();
+
+	virtual UObject* FactoryCreateNew(UClass* Class, UObject* InParent, FName Name, EObjectFlags Flags, UObject* Context, FFeedbackContext* Warn) override;
 };
