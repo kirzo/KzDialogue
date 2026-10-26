@@ -17,6 +17,16 @@ struct FKzDialogueConditionContext
 	int32 Node = INDEX_NONE;
 };
 
+/** A node or a Choice option of the graph, picked from a list in the editor. */
+USTRUCT()
+struct KZDIALOGUE_API FKzDialogueGraphTarget
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Target")
+	FGuid Id;
+};
+
 /** Base of what dialogue graph nodes check, such as a fact or a line already seen. Asset data shared by every play: it keeps no state. */
 USTRUCT(meta = (Hidden))
 struct KZDIALOGUE_API FKzDialogueCondition
@@ -110,9 +120,9 @@ struct KZDIALOGUE_API FKzDialogueCondition_Visited : public FKzDialogueCondition
 {
 	GENERATED_BODY()
 
-	/** The node's or the option's id; none checks the node holding the condition. */
+	/** The node or the option; none checks the node holding the condition. */
 	UPROPERTY(EditAnywhere, Category = "Condition")
-	FGuid Target;
+	FKzDialogueGraphTarget Target;
 
 	/** Counts every play of the graph, not only this one. */
 	UPROPERTY(EditAnywhere, Category = "Condition")

@@ -36,7 +36,7 @@ bool FKzDialogueCondition_LineSeen::IsMet(const FKzDialogueConditionContext& Con
 bool FKzDialogueCondition_Visited::IsMet(const FKzDialogueConditionContext& Context) const
 {
 	const UKzDialogueGraph* Graph = Context.Instance.GetGraph();
-	const FGuid Id = Target.IsValid() || !Graph || Context.Node == INDEX_NONE ? Target : Graph->GetData().GetNodeGuid(Context.Node);
+	const FGuid Id = Target.Id.IsValid() || !Graph || Context.Node == INDEX_NONE ? Target.Id : Graph->GetData().GetNodeGuid(Context.Node);
 	return bEver ? Context.Instance.GetVisitCount(Id) >= AtLeast : Context.Instance.WasVisited(Id, false);
 }
 
