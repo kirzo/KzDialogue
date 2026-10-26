@@ -109,28 +109,9 @@ namespace
 	}
 }
 
-FText FKzDialogueCondition::Describe() const
-{
-	const FText Text = GetDescription();
-	return bInvert ? FText::Format(LOCTEXT("Not", "not {0}"), Text) : Text;
-}
-
 FText FKzDialogueCondition::GetDescription() const
 {
 	return LOCTEXT("Condition", "condition");
-}
-
-FText FKzDialogueConditions::GetDescription() const
-{
-	TArray<FText> Parts;
-	for (const TInstancedStruct<FKzDialogueCondition>& Condition : Conditions)
-	{
-		if (Condition.IsValid())
-		{
-			Parts.Add(Condition.Get().Describe());
-		}
-	}
-	return FText::Join(Match == EKzDialogueConditionMatch::Any ? LOCTEXT("Or", " or ") : LOCTEXT("And", " and "), Parts);
 }
 
 FText FKzDialogueCondition_Fact::GetDescription() const
@@ -166,7 +147,7 @@ FText FKzDialogueCondition_Chance::GetDescription() const
 
 FText FKzDialogueCondition_Group::GetDescription() const
 {
-	return FText::Format(LOCTEXT("Group", "({0})"), Conditions.GetDescription());
+	return LOCTEXT("Group", "group");
 }
 
 FText FKzDialogueCondition_Blueprint::GetDescription() const

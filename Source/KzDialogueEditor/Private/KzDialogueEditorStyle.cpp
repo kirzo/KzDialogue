@@ -54,4 +54,5 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 
 	Set("Kz.Dialogue.Icon", new FSlateVectorImageBrush(Icon(TEXT("DialogueAsset")), IconSize));
 	Set("Kz.Dialogue.SpeakerIcon", new FSlateVectorImageBrush(Icon(TEXT("SpeakerAsset")), IconSize));
+	Set("Kz.Dialogue.Condition.Chance", new FSlateVectorImageBrush(Icon(TEXT("ConditionChance")), IconSize));
 }

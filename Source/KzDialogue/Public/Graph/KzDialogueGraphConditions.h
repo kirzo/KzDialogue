@@ -42,16 +42,12 @@ struct KZDIALOGUE_API FKzDialogueCondition
 	bool Evaluate(const FKzDialogueConditionContext& Context) const { return IsMet(Context) != bInvert; }
 
 #if WITH_EDITOR
-	/** What the editor shows of it, Invert included. */
-	FText Describe() const;
+	/** What the editor shows of it, Invert aside. */
+	virtual FText GetDescription() const;
 #endif
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const { return true; }
-
-#if WITH_EDITOR
-	virtual FText GetDescription() const;
-#endif
 };
 
 UENUM()
@@ -78,11 +74,6 @@ struct KZDIALOGUE_API FKzDialogueConditions
 
 	bool IsEmpty() const { return Conditions.IsEmpty(); }
 	bool Evaluate(const FKzDialogueConditionContext& Context) const;
-
-#if WITH_EDITOR
-	/** The conditions joined by "and" or "or", for the editor. */
-	FText GetDescription() const;
-#endif
 };
 
 /** Base of what Action nodes do, such as noting a fact. Asset data shared by every play: it keeps no state. */
