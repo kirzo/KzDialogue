@@ -42,6 +42,10 @@ void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValid
 	{
 		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, LOCTEXT("NoEntry", "The graph has no Entry to start from."), NAME_None));
 	}
+	if (Lines.IsNull())
+	{
+		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning, LOCTEXT("NoLines", "The graph has no lines asset for its nodes to pick and add lines from."), NAME_None));
+	}
 
 	TSet<FName> Entries;
 	for (const FKzGraphEntry& Entry : InData.GetEntries())
