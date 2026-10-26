@@ -55,5 +55,8 @@ public:
 	virtual EKzGraphFlow GetFlow() const override { return EKzGraphFlow::Vertical; }
 	virtual void GetDefaultNodes(TArray<const UScriptStruct*>& OutNodes) const override;
 	virtual void ValidateGraph(const FKzGraphData& InData, TArray<FKzValidationIssue>& OutIssues) const override;
+
+	/** Another dialogue graph dropped on this one makes a Sub Graph of it. */
+	virtual bool MakeNodeForAsset(UObject& Asset, TInstancedStruct<FKzGraphNode>& OutNode) const override;
 #endif
 };

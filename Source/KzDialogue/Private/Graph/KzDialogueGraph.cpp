@@ -36,6 +36,19 @@ void UKzDialogueGraph::GetDefaultNodes(TArray<const UScriptStruct*>& OutNodes) c
 	OutNodes.Add(FKzDialogueGraphNode_Start::StaticStruct());
 }
 
+bool UKzDialogueGraph::MakeNodeForAsset(UObject& Asset, TInstancedStruct<FKzGraphNode>& OutNode) const
+{
+	UKzDialogueGraph* Called = Cast<UKzDialogueGraph>(&Asset);
+	if (!Called || Called == this)
+	{
+		return false;
+	}
+
+	OutNode.InitializeAs<FKzDialogueGraphNode_SubGraph>();
+	OutNode.GetMutable<FKzDialogueGraphNode_SubGraph>().Graph = Called;
+	return true;
+}
+
 void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValidationIssue>& OutIssues) const
 {
 	if (InData.GetEntries().IsEmpty())
