@@ -168,6 +168,7 @@ public:
 	/** Keeps a running dialogue graph alive, or lets a finished one go. Called by the instances. */
 	void AddGraphInstance(UKzDialogueGraphInstance* Instance);
 	void RemoveGraphInstance(UKzDialogueGraphInstance* Instance);
+	const TArray<TObjectPtr<UKzDialogueGraphInstance>>& GetGraphInstances() const { return GraphInstances; }
 
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 
