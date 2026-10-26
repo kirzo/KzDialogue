@@ -21,6 +21,7 @@ namespace
 	constexpr float BodyWidth = 260.0f;
 	const FLinearColor SpeakerColor(0.75f, 0.75f, 0.75f);
 	const FLinearColor MissingColor(0.95f, 0.45f, 0.2f);
+	const FLinearColor ConditionColor(FColor(230, 120, 120));
 
 	/** What a line reference points to: a line, an alias, or nothing. */
 	struct FRefView
@@ -98,6 +99,74 @@ namespace
 		return View.Alias ? View.Alias->GetDisplayLabel() : FText::GetEmpty();
 	}
 
+	TSharedRef<SWidget> MakeConditionText(const FText& Text)
+	{
+		return SNew(STextBlock)
+			.Text(Text)
+			.ColorAndOpacity(ConditionColor)
+			.WrapTextAt(BodyWidth - 16.0f);
+	}
+
+	/** The node's own body under its Only If; texts are built once, as the node's widget is rebuilt on every edit. */
+	TSharedPtr<SWidget> MakeStepBody(const UKzEdGraphNode& EdNode, TSharedPtr<SWidget> Content)
+	{
+		const FKzDialogueGraphStep* Step = EdNode.Node.GetPtr<FKzDialogueGraphStep>();
+		if (!Step || Step->OnlyIf.IsEmpty())
+		{
+			return Content;
+		}
+
+		const TSharedRef<SVerticalBox> Box = SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding(8.0f, 4.0f, 8.0f, 0.0f)
+			[
+				MakeConditionText(FText::Format(LOCTEXT("OnlyIf", "Only if {0}"), Step->OnlyIf.GetDescription()))
+			];
+		if (Content.IsValid())
+		{
+			Box->AddSlot().AutoHeight()[Content.ToSharedRef()];
+		}
+		return SNew(SBox).MaxDesiredWidth(BodyWidth)[Box];
+	}
+
+	TSharedPtr<SWidget> MakeOnlyIfBody(const UKzEdGraphNode& EdNode)
+	{
+		return MakeStepBody(EdNode, nullptr);
+	}
+
+	TSharedPtr<SWidget> MakeBranchBody(const UKzEdGraphNode& EdNode)
+	{
+		const FKzDialogueGraphNode_Branch* Branch = EdNode.Node.GetPtr<FKzDialogueGraphNode_Branch>();
+		if (!Branch || Branch->Branches.IsEmpty())
+		{
+			return MakeStepBody(EdNode, nullptr);
+		}
+
+		const TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
+		for (int32 Index = 0; Index < Branch->Branches.Num(); ++Index)
+		{
+			const FKzDialogueBranch& Each = Branch->Branches[Index];
+			const FText Condition = Each.Condition.IsEmpty() ? LOCTEXT("Always", "always") : Each.Condition.GetDescription();
+			const FText Text = Each.Label.IsNone()
+				? FText::Format(INVTEXT("{0}. {1}"), Index + 1, Condition)
+				: FText::Format(INVTEXT("{0}. {1}: {2}"), Index + 1, FText::FromName(Each.Label), Condition);
+			Rows->AddSlot()
+			.AutoHeight()
+			.Padding(0.0f, 1.0f)
+			[
+				MakeConditionText(Text)
+			];
+		}
+
+		return MakeStepBody(EdNode, SNew(SBox)
+			.MaxDesiredWidth(BodyWidth)
+			.Padding(FMargin(8.0f, 4.0f))
+			[
+				Rows
+			]);
+	}
+
 	TSharedPtr<SWidget> MakeLineBody(const UKzEdGraphNode& EdNode)
 	{
 		const TWeakObjectPtr<const UKzEdGraphNode> WeakNode(&EdNode);
@@ -109,7 +178,7 @@ namespace
 			return Line ? Cache->Resolve(Line->Line) : FRefView();
 		};
 
-		return SNew(SBox)
+		return MakeStepBody(EdNode, SNew(SBox)
 			.MaxDesiredWidth(BodyWidth)
 			.Padding(FMargin(8.0f, 4.0f))
 			[
@@ -150,7 +219,7 @@ namespace
 					.Text_Lambda([Resolve]() { return GetBodyText(Resolve()); })
 					.WrapTextAt(BodyWidth - 16.0f)
 				]
-			];
+			]);
 	}
 
 	TSharedPtr<SWidget> MakeChoiceBody(const UKzEdGraphNode& EdNode)
@@ -158,7 +227,7 @@ namespace
 		const FKzDialogueGraphNode_Choice* Choice = EdNode.Node.GetPtr<FKzDialogueGraphNode_Choice>();
 		if (!Choice || Choice->Options.IsEmpty())
 		{
-			return nullptr;
+			return MakeStepBody(EdNode, nullptr);
 		}
 
 		// Rebuilt with the node whenever its options change, so one row per option is enough.
@@ -187,12 +256,12 @@ namespace
 			];
 		}
 
-		return SNew(SBox)
+		return MakeStepBody(EdNode, SNew(SBox)
 			.MaxDesiredWidth(BodyWidth)
 			.Padding(FMargin(8.0f, 4.0f))
 			[
 				Options
-			];
+			]);
 	}
 
 	void OpenLine(const UKzEdGraphNode& Node)
@@ -209,6 +278,8 @@ void KzDialogueGraphNodeBodies::Register()
 {
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeLineBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeChoiceBody));
+	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeBranchBody));
+	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphStep::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeOnlyIfBody));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
 }
 
@@ -216,6 +287,8 @@ void KzDialogueGraphNodeBodies::Unregister()
 {
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct());
+	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct());
+	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphStep::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct());
 }
 

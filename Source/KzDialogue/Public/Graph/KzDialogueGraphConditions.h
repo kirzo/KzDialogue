@@ -41,8 +41,17 @@ struct KZDIALOGUE_API FKzDialogueCondition
 
 	bool Evaluate(const FKzDialogueConditionContext& Context) const { return IsMet(Context) != bInvert; }
 
+#if WITH_EDITOR
+	/** What the editor shows of it, Invert included. */
+	FText Describe() const;
+#endif
+
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const { return true; }
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const;
+#endif
 };
 
 UENUM()
@@ -69,6 +78,11 @@ struct KZDIALOGUE_API FKzDialogueConditions
 
 	bool IsEmpty() const { return Conditions.IsEmpty(); }
 	bool Evaluate(const FKzDialogueConditionContext& Context) const;
+
+#if WITH_EDITOR
+	/** The conditions joined by "and" or "or", for the editor. */
+	FText GetDescription() const;
+#endif
 };
 
 /** Base of what Action nodes do, such as noting a fact. Asset data shared by every play: it keeps no state. */
@@ -96,6 +110,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_Fact : public FKzDialogueCondition
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** A line, or any line of an alias, presented at least AtLeast times in this game. */
@@ -112,6 +130,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_LineSeen : public FKzDialogueConditio
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** A node of this graph, or an option of one of its Choices, gone through in this play, or in any play. */
@@ -133,6 +155,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_Visited : public FKzDialogueCondition
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** The instigator's gameplay tags match, when it is an actor that exposes them (IGameplayTagAssetInterface). */
@@ -146,6 +172,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_InstigatorTags : public FKzDialogueCo
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** Holds by chance, each time it is checked. */
@@ -159,6 +189,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_Chance : public FKzDialogueCondition
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** Conditions with their own All or Any, to nest one inside another. */
@@ -172,6 +206,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_Group : public FKzDialogueCondition
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override { return Conditions.Evaluate(Context); }
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** Base of conditions written in Blueprint, used through the Blueprint condition. */
@@ -197,6 +235,10 @@ struct KZDIALOGUE_API FKzDialogueCondition_Blueprint : public FKzDialogueConditi
 
 protected:
 	virtual bool IsMet(const FKzDialogueConditionContext& Context) const override;
+
+#if WITH_EDITOR
+	virtual FText GetDescription() const override;
+#endif
 };
 
 /** Notes a fact, adding Count to how many times it was noted. */

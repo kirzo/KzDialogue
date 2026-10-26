@@ -5,7 +5,10 @@
 #include "Graph/KzDialogueGraphInstance.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagAssetInterface.h"
+#include "KzDialogueAsset.h"
 #include "KzDialogueMemorySubsystem.h"
+
+#define LOCTEXT_NAMESPACE "KzDialogueGraphConditions"
 
 bool FKzDialogueConditions::Evaluate(const FKzDialogueConditionContext& Context) const
 {
@@ -95,3 +98,81 @@ void FKzDialogueAction_Blueprint::Execute(UKzDialogueGraphInstance& Instance) co
 		Action->Execute(&Instance);
 	}
 }
+
+#if WITH_EDITOR
+namespace
+{
+	/** "x3" after what needs more than once. */
+	FText WithCount(const FText& Text, int32 AtLeast)
+	{
+		return AtLeast > 1 ? FText::Format(LOCTEXT("WithCount", "{0} x{1}"), Text, AtLeast) : Text;
+	}
+}
+
+FText FKzDialogueCondition::Describe() const
+{
+	const FText Text = GetDescription();
+	return bInvert ? FText::Format(LOCTEXT("Not", "not {0}"), Text) : Text;
+}
+
+FText FKzDialogueCondition::GetDescription() const
+{
+	return LOCTEXT("Condition", "condition");
+}
+
+FText FKzDialogueConditions::GetDescription() const
+{
+	TArray<FText> Parts;
+	for (const TInstancedStruct<FKzDialogueCondition>& Condition : Conditions)
+	{
+		if (Condition.IsValid())
+		{
+			Parts.Add(Condition.Get().Describe());
+		}
+	}
+	return FText::Join(Match == EKzDialogueConditionMatch::Any ? LOCTEXT("Or", " or ") : LOCTEXT("And", " and "), Parts);
+}
+
+FText FKzDialogueCondition_Fact::GetDescription() const
+{
+	return WithCount(Fact.IsValid() ? FText::FromName(Fact.GetTagLeafName()) : LOCTEXT("NoFact", "(no fact)"), AtLeast);
+}
+
+FText FKzDialogueCondition_LineSeen::GetDescription() const
+{
+	const UKzDialogueAsset* Asset = Line.Asset.LoadSynchronous();
+	const FKzDialogueLine* Found = Asset ? Asset->FindLine(Line.LineId) : nullptr;
+	const FKzDialogueAlias* Alias = Asset && !Found ? Asset->FindAlias(Line.LineId) : nullptr;
+	const FText Label = Found ? Found->GetDisplayLabel(32) : (Alias ? Alias->GetDisplayLabel() : LOCTEXT("NoLine", "(no line)"));
+	return WithCount(FText::Format(LOCTEXT("Seen", "seen {0}"), Label), AtLeast);
+}
+
+FText FKzDialogueCondition_Visited::GetDescription() const
+{
+	const FText Text = Target.Id.IsValid() ? LOCTEXT("VisitedOther", "another node visited") : LOCTEXT("VisitedThis", "this node visited");
+	return bEver ? WithCount(FText::Format(LOCTEXT("VisitedEver", "{0} in any play"), Text), AtLeast) : Text;
+}
+
+FText FKzDialogueCondition_InstigatorTags::GetDescription() const
+{
+	const FString& Description = Query.GetDescription();
+	return Description.IsEmpty() ? LOCTEXT("NoQuery", "instigator tags") : FText::FromString(Description);
+}
+
+FText FKzDialogueCondition_Chance::GetDescription() const
+{
+	return FText::Format(LOCTEXT("Chance", "chance {0}"), FText::AsPercent(Probability));
+}
+
+FText FKzDialogueCondition_Group::GetDescription() const
+{
+	return FText::Format(LOCTEXT("Group", "({0})"), Conditions.GetDescription());
+}
+
+FText FKzDialogueCondition_Blueprint::GetDescription() const
+{
+	return Condition ? Condition->GetClass()->GetDisplayNameText() : LOCTEXT("NoBlueprint", "(no Blueprint)");
+}
+#endif
+
+#undef LOCTEXT_NAMESPACE
