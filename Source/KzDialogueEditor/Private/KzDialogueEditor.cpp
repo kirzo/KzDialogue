@@ -23,6 +23,9 @@
 
 #include "Dashboard/SKzDialogueDashboard.h"
 #include "Editors/KzArrayAssetEditor.h"
+#include "Graph/KzDialogueGraph.h"
+#include "Graph/KzDialogueGraphNodeBodies.h"
+#include "KzGraphEditor.h"
 #include "Localization/KzL10N.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
 #include "KzDialogueK2Nodes.h"
@@ -88,6 +91,13 @@ void FKzDialogueEditorModule::OnStartupModule()
 		DialogueTabs,
 		DialogueCustomTabs);
 
+	RegisterAssetTypeAction<UKzDialogueGraph, FKzGraphEditor>(
+		KzAssetCategoryBit,
+		INVTEXT("Dialogue Graph"),
+		FKzDialogueEditorStyle::BrandColor.ToFColor(true),
+		{ INVTEXT("Dialogues") });
+	KzDialogueGraphNodeBodies::Register();
+
 	RegisterAssetTypeAction<UKzSpeakerAsset>(
 		KzAssetCategoryBit,
 		INVTEXT("Dialogue Speaker"),
@@ -149,6 +159,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 
 void FKzDialogueEditorModule::OnShutdownModule()
 {
+	KzDialogueGraphNodeBodies::Unregister();
 	UKzNamedAsset::OnTokenRenamed.Remove(NamedTokenRenamedHandle);
 	FEditorDelegates::BeginPIE.Remove(BeginPIEHandle);
 	KzDialogueK2Nodes::OpenAssetAtEntry = nullptr;

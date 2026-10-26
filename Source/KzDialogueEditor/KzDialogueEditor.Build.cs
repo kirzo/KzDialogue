@@ -17,6 +17,8 @@ public class KzDialogueEditor : ModuleRules
 		PrivateDependencyModuleNames.AddRange(
 			new string[] {
 				"KzDialogueUncooked",
+				"KzGraph",
+				"KzGraphEditor",
 				"Core",
 				"CoreUObject",
 				"Engine",
