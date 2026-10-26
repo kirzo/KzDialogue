@@ -17,7 +17,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode : public FKzGraphNode
 };
 
 /** Where a play starts, by name. A graph can have several, such as Start and SecondVisit. */
-USTRUCT(meta = (DisplayName = "Entry", Keywords = "start begin"))
+USTRUCT(meta = (DisplayName = "Entry", Category = "Flow", Keywords = "start begin"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Entry : public FKzDialogueGraphNode
 {
 	GENERATED_BODY()
@@ -49,7 +49,7 @@ struct KZDIALOGUE_API FKzDialogueGraphStep : public FKzDialogueGraphNode
 };
 
 /** Presents a line, or one variant of an alias. */
-USTRUCT(meta = (DisplayName = "Line", Shortcut = "L", Keywords = "say text speech"))
+USTRUCT(meta = (DisplayName = "Line", Category = "Dialogue", Shortcut = "L", Keywords = "say text speech"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Line : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -88,7 +88,7 @@ struct KZDIALOGUE_API FKzDialogueChoiceOption
 };
 
 /** Offers options to the player and goes on through the one chosen. */
-USTRUCT(meta = (DisplayName = "Choice", Shortcut = "O", Keywords = "option question answer"))
+USTRUCT(meta = (DisplayName = "Choice", Category = "Dialogue", Shortcut = "O", Keywords = "option question answer"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Choice : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -132,7 +132,7 @@ struct KZDIALOGUE_API FKzDialogueBranch
 };
 
 /** Goes on through the first branch whose condition holds, else through Else. */
-USTRUCT(meta = (DisplayName = "Branch", Shortcut = "B", Keywords = "if condition switch"))
+USTRUCT(meta = (DisplayName = "Branch", Category = "Logic", Shortcut = "B", Keywords = "if condition switch"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Branch : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -168,7 +168,7 @@ struct KZDIALOGUE_API FKzDialogueRandomOutput
 };
 
 /** Goes on through one of its outputs, picked by weight. */
-USTRUCT(meta = (DisplayName = "Random", Shortcut = "R", Keywords = "chance weight"))
+USTRUCT(meta = (DisplayName = "Random", Category = "Logic", Shortcut = "R", Keywords = "chance weight"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Random : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -187,7 +187,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Random : public FKzDialogueGraphStep
 };
 
 /** Tells gameplay something happened, by tag, and goes on at once. */
-USTRUCT(meta = (DisplayName = "Event", Shortcut = "E", Keywords = "notify signal gameplay"))
+USTRUCT(meta = (DisplayName = "Event", Category = "Gameplay", Shortcut = "E", Keywords = "notify signal gameplay"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Event : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -203,7 +203,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Event : public FKzDialogueGraphStep
 };
 
 /** Runs its actions, such as noting a fact, and goes on at once. */
-USTRUCT(meta = (DisplayName = "Action", Shortcut = "A", Keywords = "fact set do"))
+USTRUCT(meta = (DisplayName = "Action", Category = "Gameplay", Shortcut = "A", Keywords = "fact set do"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Action : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -217,7 +217,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Action : public FKzDialogueGraphStep
 };
 
 /** Holds the dialogue open, with no line, for a while or until gameplay calls Continue. */
-USTRUCT(meta = (DisplayName = "Wait", Shortcut = "W", Keywords = "delay pause continue"))
+USTRUCT(meta = (DisplayName = "Wait", Category = "Flow", Shortcut = "W", Keywords = "delay pause continue"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Wait : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -237,7 +237,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Wait : public FKzDialogueGraphStep
 };
 
 /** Jumps to an Entry of this graph, for loops and menus that come back without wires across the graph. */
-USTRUCT(meta = (DisplayName = "Go To", Shortcut = "G", Keywords = "jump loop back"))
+USTRUCT(meta = (DisplayName = "Go To", Category = "Flow", Shortcut = "G", Keywords = "jump loop back"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
@@ -253,7 +253,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
 };
 
 /** Ends the play with a name gameplay receives, such as Accepted or Refused. */
-USTRUCT(meta = (DisplayName = "Exit", Shortcut = "X", Keywords = "end finish stop"))
+USTRUCT(meta = (DisplayName = "Exit", Category = "Flow", Shortcut = "X", Keywords = "end finish stop"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Exit : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()

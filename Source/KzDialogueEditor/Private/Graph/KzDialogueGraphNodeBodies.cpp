@@ -48,7 +48,7 @@ namespace
 		FSlateRoundedBoxBrush Group{ FLinearColor(FColor(0x30, 0x35, 0x3C)), 8.0f, FLinearColor::Transparent, 0.0f };
 		FSlateRoundedBoxBrush Chip{ FLinearColor::Transparent, FLinearColor(FColor(0x59, 0x60, 0x6A)), 1.0f };
 		FSlateRoundedBoxBrush Badge{ FLinearColor(FColor(0x3A, 0x40, 0x48)), FLinearColor::Transparent, 0.0f };
-		FSlateRoundedBoxBrush Subtitle{ FLinearColor(FColor(0x0F, 0x10, 0x11)), 4.0f };
+		FSlateRoundedBoxBrush Subtitle{ FLinearColor(FColor(0x18, 0x3A, 0x57)), 4.0f, FLinearColor(FColor(0x2E, 0x63, 0x91)), 1.0f };
 	};
 
 	const FBrushes& Brushes()

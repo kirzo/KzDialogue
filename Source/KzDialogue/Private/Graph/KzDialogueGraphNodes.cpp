@@ -13,13 +13,12 @@ const FName FKzDialogueGraphNode_Branch::ElseOutput(TEXT("Else"));
 namespace
 {
 	// Dark enough for a white title. Branch takes the engine's bool color: it is a condition.
-	FLinearColor FlowColor() { return FLinearColor(FColor(0x3E, 0x46, 0x54)); }
+	FLinearColor FlowColor() { return FLinearColor(FColor(0x1E, 0x66, 0x70)); }
 	FLinearColor LineColor() { return FLinearColor(FColor(0x24, 0x52, 0x7A)); }
 	FLinearColor ChoiceColor() { return FLinearColor(FColor(0x5B, 0x2F, 0x7A)); }
 	FLinearColor BranchColor() { return FLinearColor(0.3f, 0.0f, 0.0f); }
 	FLinearColor RandomColor() { return FLinearColor(FColor(0x8A, 0x5A, 0x0F)); }
 	FLinearColor GameplayColor() { return FLinearColor(FColor(0x2D, 0x6A, 0x3E)); }
-	FLinearColor WaitColor() { return FLinearColor(FColor(0x4A, 0x52, 0x5E)); }
 
 	/** Gives every entry a valid id of its own, so a new or duplicated entry gets its own output. */
 	template<typename T>
@@ -235,7 +234,7 @@ FText FKzDialogueGraphNode_Wait::GetSubtitle() const
 
 FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 {
-	return WaitColor();
+	return FlowColor();
 }
 
 FText FKzDialogueGraphNode_GoTo::GetSubtitle() const
