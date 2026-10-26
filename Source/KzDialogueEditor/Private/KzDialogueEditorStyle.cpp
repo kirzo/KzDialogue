@@ -15,7 +15,7 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 	auto Icon = [this](const TCHAR* File) { return RootToContentDir(FString(TEXT("Icons/")) + File, TEXT(".svg")); };
 
 	// White line icon for lists, tabs and menus, colour figure for the Content Browser; SVG, which the base's PNG helpers do not load
-	for (const TCHAR* const Asset : { TEXT("DialogueAsset"), TEXT("SpeakerAsset"), TEXT("WordAsset"), TEXT("NamedAsset") })
+	for (const TCHAR* const Asset : { TEXT("DialogueAsset"), TEXT("DialogueGraph"), TEXT("SpeakerAsset"), TEXT("WordAsset"), TEXT("NamedAsset") })
 	{
 		Set(*FString::Printf(TEXT("ClassIcon.Kz%s"), Asset), new FSlateVectorImageBrush(Icon(Asset), IconSize));
 		Set(*FString::Printf(TEXT("ClassThumbnail.Kz%s"), Asset), new FSlateVectorImageBrush(Icon(*(FString(Asset) + TEXT("Color"))), ThumbnailSize));
