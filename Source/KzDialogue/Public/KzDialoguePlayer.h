@@ -203,6 +203,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Next();
 
+	/** Lets go of a line the provider held on screen (HoldsLine), which then leaves as if its time had run out. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
+	void ReleaseHeldLine();
+
+	/** Goes on from Waiting, once the provider has the next line or nothing more to play. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
+	void ResumeWaiting();
+
 	// -------------------------------------------------------------------------------
 	// Specific line bindings
 	// -------------------------------------------------------------------------------
@@ -264,6 +272,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	bool IsPlaying() const { return State != EKzDialogueState::Idle; }
 
+	/** The line shown stays on screen because its provider holds it, such as during a choice. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	bool IsHoldingLine() const { return bHoldingLine; }
+
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
 	UKzDialogueProvider* GetProvider() const { return Provider; }
 
@@ -307,7 +319,11 @@ private:
 	void Enter_LineEntering();
 	void Enter_LinePlaying();
 	void Enter_LineExiting();
+	void Enter_Waiting();
 	void Enter_Exiting();
+
+	/** The line's time is up: it leaves, unless the provider holds it on screen until ReleaseHeldLine. */
+	void EndLine();
 
 	/** Presentation half of Enter_LineEntering, deferred by LineStartDelay: line-started events, audio kick-off, view enter requests. */
 	void PresentLine();
@@ -414,6 +430,9 @@ private:
 
 	/** The current line got past its LineStartDelay gap (OnLineStarted fired). */
 	bool bLinePresented = false;
+
+	/** The provider holds the current line on screen until ReleaseHeldLine. */
+	bool bHoldingLine = false;
 
 	FTimerHandle LineTimerHandle;
 

@@ -524,7 +524,7 @@ void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 	if (!bViewEnabled) { return; }
 
 	const EKzDialogueState CurrentState = InPlayer->GetState();
-	if (CurrentState == EKzDialogueState::Entering)
+	if (CurrentState == EKzDialogueState::Entering || CurrentState == EKzDialogueState::Waiting)
 	{
 		ReceiveShow(InPlayer->Channel);
 	}

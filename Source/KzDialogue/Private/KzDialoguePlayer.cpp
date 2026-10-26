@@ -144,6 +144,9 @@ void UKzDialoguePlayer::Stop()
 		if (bLinePresented) { Enter_LineExiting(); }
 		else { Enter_Exiting(); }
 		break;
+	case EKzDialogueState::Waiting:
+		Enter_Exiting();
+		break;
 	default:
 		// Exiting phases: the flag ends the dialogue at the next step.
 		break;
@@ -199,7 +202,8 @@ void UKzDialoguePlayer::StopAllAudio(float FadeTime)
 
 void UKzDialoguePlayer::Next()
 {
-	if (bPaused)
+	// A held line waits for its provider, such as a choice being made.
+	if (bPaused || bHoldingLine)
 	{
 		return;
 	}
@@ -223,9 +227,57 @@ void UKzDialoguePlayer::Next()
 	}
 	else if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{
+		EndLine();
+	}
+}
+
+void UKzDialoguePlayer::EndLine()
+{
+	ClearTimer(LineTimerHandle);
+
+	// Asking may run the provider on (a dialogue graph walks to its next step), which can end the dialogue.
+	const uint32 Serial = StateSerial;
+	const bool bHold = IsValid(Provider) && Provider->HoldsLine();
+	if (Serial != StateSerial)
+	{
+		return;
+	}
+
+	if (bHold)
+	{
+		bHoldingLine = true;
+		return;
+	}
+	Enter_LineExiting();
+}
+
+void UKzDialoguePlayer::ReleaseHeldLine()
+{
+	if (!bHoldingLine)
+	{
+		return;
+	}
+
+	bHoldingLine = false;
+	if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
+	{
 		ClearTimer(LineTimerHandle);
 		Enter_LineExiting();
 	}
+}
+
+void UKzDialoguePlayer::ResumeWaiting()
+{
+	if (State != EKzDialogueState::Waiting)
+	{
+		return;
+	}
+	if (bPaused)
+	{
+		bAdvanceOnResume = true;
+		return;
+	}
+	AdvanceToNextLine();
 }
 
 // ---------------------------------------------------------------------------------------
@@ -298,6 +350,9 @@ void UKzDialoguePlayer::OnPhaseAcksDone()
 	case EKzDialogueState::LineExiting:
 		AdvanceAfterLineExit();
 		break;
+	case EKzDialogueState::Waiting:
+		AdvanceToNextLine();
+		break;
 	case EKzDialogueState::Exiting:
 		FinishWithReason(bStopRequested ? EKzDialogueFinishReason::Stopped : EKzDialogueFinishReason::Completed);
 		break;
@@ -321,6 +376,10 @@ void UKzDialoguePlayer::AdvanceToNextLine()
 	if (!bStopRequested && IsValid(Provider) && Provider->HasNext())
 	{
 		Enter_LineEntering();
+	}
+	else if (!bStopRequested && IsValid(Provider) && Provider->IsWaiting())
+	{
+		Enter_Waiting();
 	}
 	else
 	{
@@ -362,12 +421,14 @@ void UKzDialoguePlayer::Enter_LineEntering()
 {
 	if (!IsValid(Provider) || !Provider->HasNext())
 	{
-		Enter_Exiting();
+		if (IsValid(Provider) && Provider->IsWaiting()) { Enter_Waiting(); }
+		else { Enter_Exiting(); }
 		return;
 	}
 
 	SetState(EKzDialogueState::LineEntering);
 	bLinePresented = false;
+	bHoldingLine = false;
 
 	const FKzDialogueLine PreviousLine = MoveTemp(CurrentLine);
 	CurrentLine = Provider->Advance();
@@ -437,8 +498,8 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		BakeTimeline();
 	}
 
-	// Manual mode holds the line on screen until Next(); no auto-advance timer.
-	if (AdvanceMode == EKzDialogueAdvanceMode::Manual)
+	// Manual mode holds the line on screen until Next(), and a held line until its provider lets go: no auto-advance timer.
+	if (AdvanceMode == EKzDialogueAdvanceMode::Manual || bHoldingLine)
 	{
 		return;
 	}
@@ -454,6 +515,7 @@ void UKzDialoguePlayer::Enter_LineExiting()
 {
 	SetState(EKzDialogueState::LineExiting);
 	const uint32 Serial = StateSerial;
+	bHoldingLine = false;
 
 	// Audio still waiting on its AudioStartDelay must never start now.
 	ClearTimer(AudioDelayTimerHandle);
@@ -471,6 +533,11 @@ void UKzDialoguePlayer::Enter_LineExiting()
 	{
 		OnPhaseAcksDone();
 	}
+}
+
+void UKzDialoguePlayer::Enter_Waiting()
+{
+	SetState(EKzDialogueState::Waiting);
 }
 
 void UKzDialoguePlayer::Enter_Exiting()
@@ -549,7 +616,7 @@ void UKzDialoguePlayer::HandleLineTimerElapsed()
 	}
 
 	bLineTimeElapsed = true;
-	Enter_LineExiting();
+	EndLine();
 }
 
 void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
@@ -568,6 +635,7 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 	bPaused = false;
 	bStopRequested = false;
 	bLinePresented = false;
+	bHoldingLine = false;
 	PendingViewAcks = 0;
 	Provider = nullptr;
 	CurrentLine = FKzDialogueLine{};

@@ -653,6 +653,8 @@ enum class EKzDialogueState : uint8
 	LinePlaying,
 	/** Per-line exit animation. */
 	LineExiting,
+	/** Between lines with none to show yet, the dialogue held open until its provider has one, such as a dialogue graph waiting for a choice. */
+	Waiting,
 	/** Global exit. */
 	Exiting,
 	/** Externally paused. Holds the previous state for resume. */

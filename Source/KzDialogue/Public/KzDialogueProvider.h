@@ -33,6 +33,19 @@ public:
 	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
 	void Reset();
 	virtual void Reset_Implementation() {}
+
+	/** Asked when the line shown is done (its time ran out, or Next): true keeps it on screen, as before a choice, until the player's ReleaseHeldLine. */
+	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Provider")
+	bool HoldsLine();
+	virtual bool HoldsLine_Implementation() { return false; }
+
+	/** With no next line yet, true holds the dialogue open with none shown (Waiting) until the player's ResumeWaiting. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Provider")
+	bool IsWaiting() const;
+	virtual bool IsWaiting_Implementation() const { return false; }
+
+	/** What the dialogue history calls this provider's dialogue. */
+	virtual FString GetHistoryLabel() const { return GetClass()->GetName(); }
 };
 
 // ---------------------------------------------------------------------------------------
