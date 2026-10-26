@@ -7,6 +7,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
+#include "Graph/KzDialogueGraphInstance.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueMemorySubsystem.h"
 #include "KzSpeakerAsset.h"
@@ -53,6 +54,7 @@ void UKzDialogueSubsystem::Deinitialize()
 	// Hard stop: no exit animations, and Admit refuses whatever the finish handlers request now.
 	InterruptAll();
 	Players.Reset();
+	GraphInstances.Reset();
 	Super::Deinitialize();
 }
 
@@ -484,9 +486,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::StartOrEnqueue(UKzDialoguePlayer& Playe
 	return Record(EKzDialoguePlayResult::Started, StartOnPlayer(Player, Provider, Priority, bInterruptible, AdvanceMode));
 }
 
-UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority, EKzDialogueAdvanceMode AdvanceMode, bool bInterruptible)
 {
-	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, IsValid(Provider) ? Provider->GetClass()->GetName() : FString(TEXT("(no provider)")), FString() });
+	TGuardValue<FKzDialogueHistoryEntry> RequestGuard(PendingRequest, { 0.0, InChannel, Priority, IsValid(Provider) ? Provider->GetHistoryLabel() : FString(TEXT("(no provider)")), FString() });
 	if (!IsValid(Provider))
 	{
 		return Record(EKzDialoguePlayResult::RejectedNothingToPlay, nullptr);
@@ -504,7 +506,7 @@ UKzDialoguePlayer* UKzDialogueSubsystem::Play(UKzDialogueProvider* Provider, FGa
 
 	const EKzDialoguePlayResult Admission = Admit(*Player, ResolvedPriority, ChannelDef);
 	if (Admission != EKzDialoguePlayResult::Started && Admission != EKzDialoguePlayResult::Queued) { return Record(Admission, nullptr); }
-	return StartOrEnqueue(*Player, Admission, Provider, ResolvedPriority, /*bInterruptible=*/true, AdvanceMode, ChannelDef);
+	return StartOrEnqueue(*Player, Admission, Provider, ResolvedPriority, bInterruptible, AdvanceMode, ChannelDef);
 }
 
 UKzDialogueAssetSession* UKzDialogueSubsystem::PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, EKzDialogueAdvanceMode AdvanceMode)
@@ -534,6 +536,21 @@ UKzDialogueAssetSession* UKzDialogueSubsystem::PlayLineList(UKzDialogueAsset* As
 	AssetSessions.Add(Session);
 	Session->StartEntries(this, Asset, LineIds, InChannel, Priority, AdvanceMode);
 	return Session;
+}
+
+void UKzDialogueSubsystem::AddGraphInstance(UKzDialogueGraphInstance* Instance)
+{
+	GraphInstances.AddUnique(Instance);
+}
+
+void UKzDialogueSubsystem::RemoveGraphInstance(UKzDialogueGraphInstance* Instance)
+{
+	GraphInstances.RemoveSingle(Instance);
+}
+
+bool UKzDialogueSubsystem::ResolveLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine)
+{
+	return Ref.IsValid() && ResolveAssetEntry(Ref.Asset.LoadSynchronous(), Ref.LineId, OutLine);
 }
 
 void UKzDialogueSubsystem::ReleaseAssetSession(UKzDialogueAssetSession* Session)

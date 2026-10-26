@@ -13,10 +13,14 @@ class UKzDialoguePlayer;
 class UKzDialogueProvider;
 class UKzDialogueAsset;
 class UKzDialogueAssetSession;
+class UKzDialogueGraphInstance;
 struct FKzDialogueChannelDefinition;
 
 /** A queued request (RequestId) is about to start on its channel, or was dropped: expired, displaced by Replace, or cleared by a stop. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnQueuedDialogueRequest, FGameplayTag, Channel, FGuid, RequestId);
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueGraphStarted, UKzDialogueGraphInstance*, Instance);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphEventSent, UKzDialogueGraphInstance*, Instance, FGameplayTag, Event);
 
 /** A request waiting for its busy channel (FKzDialogueChannelDefinition::BusyPolicy), already resolved to a provider. */
 USTRUCT()
@@ -147,8 +151,23 @@ public:
 	 * there later), or nullptr when rejected; GetLastPlayResult says which.
 	 * @param Priority -1 (InheritPriority) uses the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode"))
-	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode,bInterruptible"))
+	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic, bool bInterruptible = true);
+
+	/** A dialogue graph started playing; views of its options bind to it here. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
+	FKzOnDialogueGraphStarted OnDialogueGraphStarted;
+
+	/** An Event node of any dialogue graph fired, for listeners of every graph (quests, achievements). */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
+	FKzOnDialogueGraphEventSent OnDialogueGraphEvent;
+
+	/** Resolves a line, or one pick of an alias (which counts against its selection and cooldown), with its timeline. False when it resolves to nothing. */
+	bool ResolveLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);
+
+	/** Keeps a running dialogue graph alive, or lets a finished one go. Called by the instances. */
+	void AddGraphInstance(UKzDialogueGraphInstance* Instance);
+	void RemoveGraphInstance(UKzDialogueGraphInstance* Instance);
 
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 
@@ -244,6 +263,10 @@ private:
 	/** Asset sessions kept alive while they run; each removes itself on finish via ReleaseAssetSession. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UKzDialogueAssetSession>> AssetSessions;
+
+	/** Dialogue graphs kept alive while they run; each removes itself when it ends. */
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UKzDialogueGraphInstance>> GraphInstances;
 
 	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
 	bool bDeinitializing = false;
