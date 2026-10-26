@@ -324,7 +324,7 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else if (const FKzDialogueGraphNode_GoTo* GoTo = Data.GetNode<FKzDialogueGraphNode_GoTo>(Node))
 		{
-			Target = Data.FindEntry(GoTo->Entry);
+			Target = Data.FindEntry(GoTo->Entry.Name);
 		}
 		else if (const FKzDialogueGraphNode_Exit* Exit = Data.GetNode<FKzDialogueGraphNode_Exit>(Node))
 		{

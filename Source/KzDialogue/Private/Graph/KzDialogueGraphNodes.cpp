@@ -237,11 +237,6 @@ FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 	return FlowColor();
 }
 
-FText FKzDialogueGraphNode_GoTo::GetSubtitle() const
-{
-	return FText::FromName(Entry);
-}
-
 FLinearColor FKzDialogueGraphNode_GoTo::GetColor() const
 {
 	return FlowColor();

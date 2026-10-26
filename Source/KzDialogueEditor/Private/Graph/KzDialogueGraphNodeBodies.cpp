@@ -3,7 +3,10 @@
 #include "Graph/KzDialogueGraphNodeBodies.h"
 #include "Graph/KzDialogueGraphConditions.h"
 #include "Graph/KzDialogueGraphNodes.h"
+#include "EdGraph/EdGraph.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Text/RichTextLayoutMarshaller.h"
+#include "Graph/KzDialogueGraph.h"
 #include "Framework/Text/SlateTextLayout.h"
 #include "Framework/Text/SlateTextRun.h"
 #include "Input/DragAndDrop.h"
@@ -20,6 +23,7 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateIconFinder.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -193,19 +197,30 @@ namespace
 		}
 	};
 
-	/** Changes a list of conditions as one undoable edit of the node, which rebuilds its widget. */
-	void EditConditions(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, const FText& What, TFunctionRef<void(FKzDialogueConditions&)> Edit)
+	/** Changes the node as one undoable edit, which rebuilds its widget. */
+	void EditNode(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FText& What, TFunctionRef<void(TInstancedStruct<FKzGraphNode>&)> Edit)
 	{
 		UKzEdGraphNode* EdNode = WeakNode.Get();
-		if (!EdNode || !Path.Resolve(EdNode->Node))
+		if (!EdNode || !EdNode->Node.IsValid())
 		{
 			return;
 		}
 
 		const FScopedTransaction Transaction(What);
 		EdNode->Modify();
-		Edit(*Path.Resolve(EdNode->Node));
+		Edit(EdNode->Node);
 		EdNode->PostEditChange();
+	}
+
+	void EditConditions(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, const FText& What, TFunctionRef<void(FKzDialogueConditions&)> Edit)
+	{
+		EditNode(WeakNode, What, [&Path, &Edit](TInstancedStruct<FKzGraphNode>& Node)
+		{
+			if (FKzDialogueConditions* List = Path.Resolve(Node))
+			{
+				Edit(*List);
+			}
+		});
 	}
 
 	/** The icon and its tint for each built-in condition; others take a filter. */
@@ -734,6 +749,63 @@ namespace
 			]);
 	}
 
+	/** A drop-down of entry names on the node itself; picking one is an undoable edit of the node. */
+	template<typename NodeType>
+	TSharedPtr<SWidget> MakeEntryBody(const UKzEdGraphNode& EdNode, FKzDialogueGraphEntryName NodeType::* Member, TFunction<TArray<FName>(const UKzEdGraphNode&)> GetOptions)
+	{
+		const NodeType* Typed = EdNode.Node.GetPtr<NodeType>();
+		if (!Typed)
+		{
+			return MakeStepBody(EdNode, nullptr);
+		}
+
+		const FName Current = (Typed->*Member).Name;
+		const bool bKnown = GetOptions(EdNode).Contains(Current);
+		const TWeakObjectPtr<UKzEdGraphNode> WeakNode = GetWeakNode(EdNode);
+
+		return MakeStepBody(EdNode, SNew(SBox)
+			.HAlign(HAlign_Center)
+			.Padding(FMargin(8.0f, 8.0f, 8.0f, 2.0f))
+			[
+				SNew(SComboButton)
+				.ContentPadding(FMargin(6.0f, 1.0f))
+				.OnGetMenuContent_Lambda([WeakNode, Member, GetOptions]()
+				{
+					FMenuBuilder Menu(true, nullptr);
+					if (const UKzEdGraphNode* Node = WeakNode.Get())
+					{
+						for (const FName Option : GetOptions(*Node))
+						{
+							Menu.AddMenuEntry(FText::FromName(Option), FText::GetEmpty(), FSlateIcon(), FUIAction(FExecuteAction::CreateLambda([WeakNode, Member, Option]()
+							{
+								EditNode(WeakNode, LOCTEXT("PickEntry", "Pick Entry"), [Member, Option](TInstancedStruct<FKzGraphNode>& Node)
+								{
+									if (NodeType* Edited = Node.GetMutablePtr<NodeType>())
+									{
+										(Edited->*Member).Name = Option;
+									}
+								});
+							})));
+						}
+					}
+					return Menu.MakeWidget();
+				})
+				.ButtonContent()
+				[
+					MakeSmallText(Current.IsNone() ? LOCTEXT("NoEntry", "(no entry)") : FText::FromName(Current), bKnown ? PillTextColor : MissingColor)
+				]
+			]);
+	}
+
+	TSharedPtr<SWidget> MakeGoToBody(const UKzEdGraphNode& EdNode)
+	{
+		return MakeEntryBody(EdNode, &FKzDialogueGraphNode_GoTo::Entry, [](const UKzEdGraphNode& Node)
+		{
+			const UEdGraph* Graph = Node.GetGraph();
+			return Graph ? KzDialogueGraphNodeBodies::GatherEntryNames(*Graph) : TArray<FName>();
+		});
+	}
+
 	TSharedPtr<SWidget> MakeChoiceBody(const UKzEdGraphNode& EdNode)
 	{
 		const FKzDialogueGraphNode_Choice* Choice = EdNode.Node.GetPtr<FKzDialogueGraphNode_Choice>();
@@ -786,11 +858,42 @@ namespace
 	}
 }
 
+TArray<FName> KzDialogueGraphNodeBodies::GatherEntryNames(const UEdGraph& Graph)
+{
+	TArray<FName> Names;
+	for (const UEdGraphNode* Each : Graph.Nodes)
+	{
+		const UKzEdGraphNode* Node = Cast<UKzEdGraphNode>(Each);
+		const FName Name = Node && Node->Node.IsValid() ? Node->Node.Get().GetEntryName() : NAME_None;
+		if (!Name.IsNone())
+		{
+			Names.AddUnique(Name);
+		}
+	}
+	return Names;
+}
+
+TArray<FName> KzDialogueGraphNodeBodies::GatherEntryNames(const UKzDialogueGraph& Graph)
+{
+	if (const UEdGraph* EdGraph = Graph.EdGraph)
+	{
+		return GatherEntryNames(*EdGraph);
+	}
+
+	TArray<FName> Names;
+	for (const FKzGraphEntry& Entry : Graph.GetData().GetEntries())
+	{
+		Names.AddUnique(Entry.Name);
+	}
+	return Names;
+}
+
 void KzDialogueGraphNodeBodies::Register()
 {
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeLineBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeChoiceBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeBranchBody));
+	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeGoToBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphStep::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeOnlyIfBody));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
 }
@@ -800,6 +903,7 @@ void KzDialogueGraphNodeBodies::Unregister()
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct());
+	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphStep::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct());
 }

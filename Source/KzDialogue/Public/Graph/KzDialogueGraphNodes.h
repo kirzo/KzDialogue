@@ -16,6 +16,19 @@ struct KZDIALOGUE_API FKzDialogueGraphNode : public FKzGraphNode
 	GENERATED_BODY()
 };
 
+/** The name of an entry, picked from the graph's entries in the editor. EntriesOf names a sibling graph property to list that graph's instead. */
+USTRUCT()
+struct KZDIALOGUE_API FKzDialogueGraphEntryName
+{
+	GENERATED_BODY()
+
+	FKzDialogueGraphEntryName() = default;
+	explicit FKzDialogueGraphEntryName(FName InName) : Name(InName) {}
+
+	UPROPERTY(EditAnywhere, Category = "Entry")
+	FName Name;
+};
+
 /** Where a play starts, by name. A graph can have several, such as Start and SecondVisit. */
 USTRUCT(meta = (DisplayName = "Entry", Category = "Flow", Keywords = "start begin"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Entry : public FKzDialogueGraphNode
@@ -266,11 +279,10 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, Category = "Go To")
-	FName Entry = FKzDialogueGraphNode_Entry::DefaultName;
+	FKzDialogueGraphEntryName Entry = FKzDialogueGraphEntryName(FKzDialogueGraphNode_Entry::DefaultName);
 
 #if WITH_EDITOR
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override {}
-	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
 #endif
 };

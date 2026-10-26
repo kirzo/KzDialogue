@@ -62,9 +62,9 @@ void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValid
 	for (int32 Node = 0; Node < InData.NumNodes(); ++Node)
 	{
 		const FKzDialogueGraphNode_GoTo* GoTo = InData.GetNode<FKzDialogueGraphNode_GoTo>(Node);
-		if (GoTo && !Entries.Contains(GoTo->Entry))
+		if (GoTo && !Entries.Contains(GoTo->Entry.Name))
 		{
-			FKzValidationIssue& Issue = OutIssues.Add_GetRef(FKzValidationIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("GoToMissing", "Go To leads to {0}, but no entry has that name."), FText::FromName(GoTo->Entry)), NAME_None));
+			FKzValidationIssue& Issue = OutIssues.Add_GetRef(FKzValidationIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("GoToMissing", "Go To leads to {0}, but no entry has that name."), FText::FromName(GoTo->Entry.Name)), NAME_None));
 			Issue.ContextId = InData.GetNodeGuid(Node);
 		}
 	}
