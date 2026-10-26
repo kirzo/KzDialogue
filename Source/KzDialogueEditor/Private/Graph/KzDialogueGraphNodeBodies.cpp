@@ -3,6 +3,7 @@
 #include "Graph/KzDialogueGraphNodeBodies.h"
 #include "Graph/KzDialogueGraphNodes.h"
 #include "KzDialogueAsset.h"
+#include "KzDialogueEditor.h"
 #include "KzEdGraphNode.h"
 #include "KzGraphEditorUtils.h"
 #include "KzSpeakerAsset.h"
@@ -193,18 +194,29 @@ namespace
 				Options
 			];
 	}
+
+	void OpenLine(const UKzEdGraphNode& Node)
+	{
+		const FKzDialogueGraphNode_Line* Line = Node.Node.GetPtr<FKzDialogueGraphNode_Line>();
+		if (UKzDialogueAsset* Asset = Line ? Line->Line.Asset.LoadSynchronous() : nullptr)
+		{
+			FKzDialogueEditorModule::OpenAssetAtEntry(Asset, Line->Line.LineId);
+		}
+	}
 }
 
 void KzDialogueGraphNodeBodies::Register()
 {
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeLineBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeChoiceBody));
+	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
 }
 
 void KzDialogueGraphNodeBodies::Unregister()
 {
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct());
+	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct());
 }
 
 #undef LOCTEXT_NAMESPACE

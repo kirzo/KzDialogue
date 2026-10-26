@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-/** The bodies dialogue graph nodes show under their title: a line's speaker and text, a choice's options. */
+/** The bodies dialogue graph nodes show under their title (a line's speaker and text, a choice's options), and a Line's double click opening its line. */
 namespace KzDialogueGraphNodeBodies
 {
 	void Register();
