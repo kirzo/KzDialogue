@@ -54,7 +54,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Line : public FKzDialogueGraphStep
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, Category = "Line")
+	UPROPERTY(EditAnywhere, Category = "Line", meta = (InlineLine))
 	FKzDialogueLineRef Line;
 
 #if WITH_EDITOR
@@ -71,7 +71,7 @@ struct KZDIALOGUE_API FKzDialogueChoiceOption
 	GENERATED_BODY()
 
 	/** What the option reads. When it should also be spoken, the Line after it says it. */
-	UPROPERTY(EditAnywhere, Category = "Option")
+	UPROPERTY(EditAnywhere, Category = "Option", meta = (InlineLine))
 	FKzDialogueLineRef Line;
 
 	/** Offered only while this holds. */

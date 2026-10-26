@@ -240,6 +240,14 @@ FReply FKzDialogueLineCustomization::OnPlayRangeClicked()
 
 UKzDialogueAsset* FKzDialogueLineCustomization::ResolveOwningAsset() const
 {
+	// A line shown away from its asset, such as on a dialogue graph node, is rooted on the asset itself.
+	TArray<UObject*> Outers;
+	if (StructHandle.IsValid()) { StructHandle->GetOuterObjects(Outers); }
+	for (UObject* Outer : Outers)
+	{
+		if (UKzDialogueAsset* Asset = Cast<UKzDialogueAsset>(Outer)) { return Asset; }
+	}
+
 	if (!PropertyUtilities.IsValid()) { return nullptr; }
 	for (const TWeakObjectPtr<UObject>& WeakObj : PropertyUtilities->GetSelectedObjects())
 	{
