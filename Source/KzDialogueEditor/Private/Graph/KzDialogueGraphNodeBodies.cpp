@@ -284,6 +284,17 @@ namespace
 	public:
 		DRAG_DROP_OPERATOR_TYPE(FConditionDragDrop, FDragDropOperation)
 
+		static TSharedRef<FConditionDragDrop> New(const TWeakObjectPtr<UKzEdGraphNode>& InNode, const FConditionsPath& InPath, int32 InIndex, const FText& InLabel)
+		{
+			const TSharedRef<FConditionDragDrop> Operation = MakeShared<FConditionDragDrop>();
+			Operation->Node = InNode;
+			Operation->Path = InPath;
+			Operation->Index = InIndex;
+			Operation->Label = InLabel;
+			Operation->Construct();
+			return Operation;
+		}
+
 		TWeakObjectPtr<UKzEdGraphNode> Node;
 		FConditionsPath Path;
 		int32 Index = INDEX_NONE;
@@ -356,13 +367,7 @@ namespace
 
 		virtual FReply OnDragDetected(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 		{
-			const TSharedRef<FConditionDragDrop> Operation = MakeShared<FConditionDragDrop>();
-			Operation->Node = Node;
-			Operation->Path = Path;
-			Operation->Index = Index;
-			Operation->Label = Label;
-			Operation->Construct();
-			return FReply::Handled().BeginDragDrop(Operation);
+			return FReply::Handled().BeginDragDrop(FConditionDragDrop::New(Node, Path, Index, Label));
 		}
 
 		virtual FReply OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override
