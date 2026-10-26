@@ -5,7 +5,27 @@
 
 #define LOCTEXT_NAMESPACE "KzDialogueGraph"
 
+void UKzDialogueGraph::PostInitProperties()
+{
+	Super::PostInitProperties();
+
+	if (!HasAnyFlags(RF_ClassDefaultObject | RF_NeedLoad) && !GraphId.IsValid())
+	{
+		GraphId = FGuid::NewGuid();
+	}
+}
+
 #if WITH_EDITOR
+void UKzDialogueGraph::PostDuplicate(bool bDuplicateForPIE)
+{
+	Super::PostDuplicate(bDuplicateForPIE);
+
+	if (!bDuplicateForPIE)
+	{
+		GraphId = FGuid::NewGuid();
+	}
+}
+
 const UScriptStruct* UKzDialogueGraph::GetNodeStruct() const
 {
 	return FKzDialogueGraphNode::StaticStruct();

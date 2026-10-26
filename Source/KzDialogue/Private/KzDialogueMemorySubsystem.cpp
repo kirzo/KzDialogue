@@ -50,6 +50,34 @@ void UKzDialogueMemorySubsystem::ForgetLine(const FKzDialogueLineRef& Ref)
 	}
 }
 
+void UKzDialogueMemorySubsystem::AddFact(FGameplayTag Fact, int32 Count)
+{
+	SetFactCount(Fact, GetFactCount(Fact) + Count);
+}
+
+void UKzDialogueMemorySubsystem::SetFactCount(FGameplayTag Fact, int32 Count)
+{
+	if (!Fact.IsValid())
+	{
+		return;
+	}
+	if (Count > 0)
+	{
+		Memory.Facts.Add(Fact, Count);
+	}
+	else
+	{
+		Memory.Facts.Remove(Fact);
+	}
+}
+
+int32 UKzDialogueMemorySubsystem::GetGraphVisitCount(const FGuid& GraphId, const FGuid& Id) const
+{
+	const FKzDialogueGraphVisits* Graph = Memory.Graphs.Find(GraphId);
+	const int32* Count = Graph ? Graph->Visits.Find(Id) : nullptr;
+	return Count ? *Count : 0;
+}
+
 void UKzDialogueMemorySubsystem::RecordLinePresented(const FKzDialogueLine& Line)
 {
 	if (Line.SourceAsset.IsValid() && Line.LineId.IsValid())

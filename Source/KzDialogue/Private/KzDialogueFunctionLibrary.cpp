@@ -114,6 +114,28 @@ float UKzDialogueFunctionLibrary::GetDialogueReadingSpeedScale()
 	return UKzDialogueSettings::GetReadingSpeedScale();
 }
 
+void UKzDialogueFunctionLibrary::AddDialogueFact(const UObject* WorldContextObject, FGameplayTag Fact, int32 Count)
+{
+	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject))
+	{
+		Memory->AddFact(Fact, Count);
+	}
+}
+
+void UKzDialogueFunctionLibrary::RemoveDialogueFact(const UObject* WorldContextObject, FGameplayTag Fact)
+{
+	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject))
+	{
+		Memory->RemoveFact(Fact);
+	}
+}
+
+int32 UKzDialogueFunctionLibrary::GetDialogueFactCount(const UObject* WorldContextObject, FGameplayTag Fact)
+{
+	const UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject);
+	return Memory ? Memory->GetFactCount(Fact) : 0;
+}
+
 bool UKzDialogueFunctionLibrary::HasSeenDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref)
 {
 	const UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(WorldContextObject);

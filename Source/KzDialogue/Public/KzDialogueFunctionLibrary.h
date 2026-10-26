@@ -168,6 +168,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
 	static int32 GetDialogueLineSeenCount(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref);
 
+	/** Notes a fact dialogue graphs can check, adding Count to how many times it was noted. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
+	static void AddDialogueFact(const UObject* WorldContextObject, FGameplayTag Fact, int32 Count = 1);
+
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
+	static void RemoveDialogueFact(const UObject* WorldContextObject, FGameplayTag Fact);
+
+	/** Times a fact was noted; zero when it never was or was removed. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory", meta = (WorldContext = "WorldContextObject"))
+	static int32 GetDialogueFactCount(const UObject* WorldContextObject, FGameplayTag Fact);
+
 	/** Stop the dialogue on a channel. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", Categories = "Dialogue.Channel"))
 	static void StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel);

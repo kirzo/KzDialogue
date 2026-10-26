@@ -35,6 +35,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue Graph")
 	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic;
 
+	/** What the dialogue memory files this graph's visits under. Kept across renames, new for a duplicate. */
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue Graph")
+	FGuid GraphId;
+
+	virtual void PostInitProperties() override;
+#if WITH_EDITOR
+	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+#endif
+
 #if WITH_EDITORONLY_DATA
 	/** The dialogue asset new Line nodes write their lines to. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue Graph")

@@ -34,6 +34,16 @@ struct KZDIALOGUE_API FKzAliasMemory
 	int32 SequentialCursor = 0;
 };
 
+/** What a dialogue graph's plays went through, by node or option id. */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzDialogueGraphVisits
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	TMap<FGuid, int32> Visits;
+};
+
 /** Serializable snapshot of the dialogue memory: store it in the game's save and re-apply on load. */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueMemory
@@ -47,6 +57,14 @@ struct KZDIALOGUE_API FKzDialogueMemory
 	/** Pick state of each alias, by AliasId. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
 	TMap<FGuid, FKzAliasMemory> Aliases;
+
+	/** Facts noted by dialogue graphs or gameplay, with how many times each was noted. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	TMap<FGameplayTag, int32> Facts;
+
+	/** The nodes and options each dialogue graph's plays went through, by graph id. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	TMap<FGuid, FKzDialogueGraphVisits> Graphs;
 };
 
 /**
@@ -75,7 +93,33 @@ public:
 
 	/** Forgets every presented line and every alias pick state. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory")
-	void ForgetAllLines() { Memory = FKzDialogueMemory(); }
+	void ForgetAllLines() { Memory.SeenLines.Reset(); Memory.Aliases.Reset(); }
+
+	/** Notes a fact, adding Count to how many times it was noted. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory|Facts")
+	void AddFact(FGameplayTag Fact, int32 Count = 1);
+
+	/** Sets how many times a fact was noted; zero forgets it. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory|Facts")
+	void SetFactCount(FGameplayTag Fact, int32 Count);
+
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Memory|Facts")
+	void RemoveFact(FGameplayTag Fact) { Memory.Facts.Remove(Fact); }
+
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory|Facts")
+	int32 GetFactCount(FGameplayTag Fact) const { const int32* Count = Memory.Facts.Find(Fact); return Count ? *Count : 0; }
+
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory|Facts")
+	bool HasFact(FGameplayTag Fact) const { return GetFactCount(Fact) > 0; }
+
+	/** Counts a play going through a node or choosing an option of a dialogue graph. Called by the graph instances. */
+	void RecordGraphVisit(const FGuid& GraphId, const FGuid& Id) { ++Memory.Graphs.FindOrAdd(GraphId).Visits.FindOrAdd(Id); }
+
+	/** Times the plays of a dialogue graph went through a node or chose an option. */
+	int32 GetGraphVisitCount(const FGuid& GraphId, const FGuid& Id) const;
+
+	/** Forgets what the plays of a dialogue graph went through, as if it had never played. */
+	void ForgetGraph(const FGuid& GraphId) { Memory.Graphs.Remove(GraphId); }
 
 	/** Snapshot for the game's save data. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Memory")
