@@ -14,6 +14,7 @@ public class KzDialogue : ModuleRules
 				"Core",
 				"GameplayTags",
 				"KzLib",
+				"KzGraph",
 				"UMG",
 				"MovieScene",
 				"MovieSceneTracks",
