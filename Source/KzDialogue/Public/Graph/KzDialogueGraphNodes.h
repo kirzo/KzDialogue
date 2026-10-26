@@ -9,6 +9,8 @@
 #include "KzGraphNode.h"
 #include "KzDialogueGraphNodes.generated.h"
 
+class UKzDialogueGraph;
+
 /** Base of dialogue graph nodes. */
 USTRUCT(meta = (Hidden))
 struct KZDIALOGUE_API FKzDialogueGraphNode : public FKzGraphNode
@@ -287,7 +289,27 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
 #endif
 };
 
-/** Ends the play with a name gameplay receives, such as Accepted or Refused. */
+/** Plays another dialogue graph from one of its entries, then goes on through the output named after the Exit it ended by, or Out. */
+USTRUCT(meta = (DisplayName = "Sub Graph", Category = "Flow", Keywords = "call nested include graph"))
+struct KZDIALOGUE_API FKzDialogueGraphNode_SubGraph : public FKzDialogueGraphStep
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Sub Graph")
+	TObjectPtr<UKzDialogueGraph> Graph;
+
+	UPROPERTY(EditAnywhere, Category = "Sub Graph", meta = (EntriesOf = "Graph"))
+	FKzDialogueGraphEntryName Entry = FKzDialogueGraphEntryName(FKzDialogueGraphNode_Entry::DefaultName);
+
+#if WITH_EDITOR
+	virtual void GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const override;
+	virtual FText GetSubtitle() const override;
+	virtual FLinearColor GetColor() const override;
+	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
+#endif
+};
+
+/** Ends the play with a name gameplay receives, such as Accepted or Refused. In a Sub Graph, goes back to the caller through the output with that name. */
 USTRUCT(meta = (DisplayName = "Exit", Category = "Flow", Shortcut = "X", Keywords = "end finish stop"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_Exit : public FKzDialogueGraphStep
 {

@@ -4,6 +4,8 @@
 #include "Graph/KzDialogueGraphConditions.h"
 #include "Graph/KzDialogueGraphNodes.h"
 #include "EdGraph/EdGraph.h"
+#include "Editor.h"
+#include "Subsystems/AssetEditorSubsystem.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Framework/Text/RichTextLayoutMarshaller.h"
 #include "Graph/KzDialogueGraph.h"
@@ -806,6 +808,15 @@ namespace
 		});
 	}
 
+	TSharedPtr<SWidget> MakeSubGraphBody(const UKzEdGraphNode& EdNode)
+	{
+		return MakeEntryBody(EdNode, &FKzDialogueGraphNode_SubGraph::Entry, [](const UKzEdGraphNode& Node)
+		{
+			const FKzDialogueGraphNode_SubGraph* SubGraph = Node.Node.GetPtr<FKzDialogueGraphNode_SubGraph>();
+			return SubGraph && SubGraph->Graph ? KzDialogueGraphNodeBodies::GatherEntryNames(*SubGraph->Graph) : TArray<FName>();
+		});
+	}
+
 	TSharedPtr<SWidget> MakeChoiceBody(const UKzEdGraphNode& EdNode)
 	{
 		const FKzDialogueGraphNode_Choice* Choice = EdNode.Node.GetPtr<FKzDialogueGraphNode_Choice>();
@@ -856,6 +867,15 @@ namespace
 			FKzDialogueEditorModule::OpenAssetAtEntry(Asset, Line->Line.LineId);
 		}
 	}
+
+	void OpenSubGraph(const UKzEdGraphNode& Node)
+	{
+		const FKzDialogueGraphNode_SubGraph* SubGraph = Node.Node.GetPtr<FKzDialogueGraphNode_SubGraph>();
+		if (SubGraph && SubGraph->Graph && GEditor)
+		{
+			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(SubGraph->Graph);
+		}
+	}
 }
 
 TArray<FName> KzDialogueGraphNodeBodies::GatherEntryNames(const UEdGraph& Graph)
@@ -894,8 +914,10 @@ void KzDialogueGraphNodeBodies::Register()
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeChoiceBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeBranchBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeGoToBody));
+	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_SubGraph::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeSubGraphBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphStep::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeOnlyIfBody));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
+	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_SubGraph::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenSubGraph));
 }
 
 void KzDialogueGraphNodeBodies::Unregister()
@@ -904,6 +926,8 @@ void KzDialogueGraphNodeBodies::Unregister()
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct());
+	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_SubGraph::StaticStruct());
+	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_SubGraph::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphStep::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct());
 }

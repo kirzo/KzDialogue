@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Graph/KzDialogueGraphNodes.h"
+#include "Graph/KzDialogueGraph.h"
 #include "KzDialogueAsset.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueGraphNodes"
@@ -19,6 +20,7 @@ namespace
 	FLinearColor BranchColor() { return FLinearColor(0.3f, 0.0f, 0.0f); }
 	FLinearColor RandomColor() { return FLinearColor(FColor(0x8A, 0x5A, 0x0F)); }
 	FLinearColor GameplayColor() { return FLinearColor(FColor(0x2D, 0x6A, 0x3E)); }
+	FLinearColor SubGraphColor() { return FLinearColor(FColor(0x7A, 0x2E, 0x5C)); }
 
 	/** Gives every entry a valid id of its own, so a new or duplicated entry gets its own output. */
 	template<typename T>
@@ -240,6 +242,48 @@ FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 FLinearColor FKzDialogueGraphNode_GoTo::GetColor() const
 {
 	return FlowColor();
+}
+
+void FKzDialogueGraphNode_SubGraph::GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const
+{
+	FKzDialogueGraphStep::GetOutputPins(Owner, OutPins);
+	if (!Graph)
+	{
+		return;
+	}
+
+	// One output per named Exit the sub graph's last compile has.
+	const FKzGraphData& Data = Graph->GetData();
+	for (int32 Index = 0; Index < Data.NumNodes(); ++Index)
+	{
+		const FKzDialogueGraphNode_Exit* Exit = Data.GetNode<FKzDialogueGraphNode_Exit>(Index);
+		if (Exit && !Exit->Name.IsNone() && !OutPins.ContainsByPredicate([Exit](const FKzGraphPinDesc& Pin) { return Pin.Name == Exit->Name; }))
+		{
+			OutPins.Add({ Exit->Name, FText::FromName(Exit->Name), NAME_None, FText::Format(LOCTEXT("SubExitTip", "Taken when the sub graph ends through its Exit {0}."), FText::FromName(Exit->Name)) });
+		}
+	}
+}
+
+FText FKzDialogueGraphNode_SubGraph::GetSubtitle() const
+{
+	return Graph ? FText::FromString(Graph->GetName()) : FText::GetEmpty();
+}
+
+FLinearColor FKzDialogueGraphNode_SubGraph::GetColor() const
+{
+	return SubGraphColor();
+}
+
+void FKzDialogueGraphNode_SubGraph::Validate(TArray<FKzValidationIssue>& OutIssues) const
+{
+	if (!Graph)
+	{
+		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, LOCTEXT("NoSubGraph", "The sub graph has no graph to play."), NAME_None));
+	}
+	else if (Graph->GetData().FindEntry(Entry.Name) == INDEX_NONE)
+	{
+		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("NoSubEntry", "{0} has no entry named {1}."), FText::FromString(Graph->GetName()), FText::FromName(Entry.Name)), NAME_None));
+	}
 }
 
 FText FKzDialogueGraphNode_Exit::GetSubtitle() const

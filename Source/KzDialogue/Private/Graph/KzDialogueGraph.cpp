@@ -67,6 +67,13 @@ void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValid
 			FKzValidationIssue& Issue = OutIssues.Add_GetRef(FKzValidationIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("GoToMissing", "Go To leads to {0}, but no entry has that name."), FText::FromName(GoTo->Entry.Name)), NAME_None));
 			Issue.ContextId = InData.GetNodeGuid(Node);
 		}
+
+		const FKzDialogueGraphNode_SubGraph* Sub = InData.GetNode<FKzDialogueGraphNode_SubGraph>(Node);
+		if (Sub && Sub->Graph == this)
+		{
+			FKzValidationIssue& Issue = OutIssues.Add_GetRef(FKzValidationIssue(EKzValidationSeverity::Error, LOCTEXT("SubGraphSelf", "A Sub Graph plays this same graph; use Go To to go back to one of its entries."), NAME_None));
+			Issue.ContextId = InData.GetNodeGuid(Node);
+		}
 	}
 }
 #endif

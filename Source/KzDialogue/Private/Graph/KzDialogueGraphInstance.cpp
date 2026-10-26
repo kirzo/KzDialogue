@@ -17,6 +17,9 @@ namespace
 
 	/** Nodes in a row that show nothing before the walk calls it a loop. */
 	constexpr int32 MaxInstantSteps = 256;
+
+	/** Sub Graphs inside Sub Graphs before the walk calls it a loop. */
+	constexpr int32 MaxSubGraphDepth = 16;
 }
 
 UKzDialogueGraphInstance* UKzDialogueGraphInstance::CreateDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context)
@@ -219,11 +222,15 @@ bool UKzDialogueGraphInstance::HoldsLine()
 void UKzDialogueGraphInstance::Leave(FName Output)
 {
 	UKzDialogueSubsystem* Subsystem = GetSubsystem();
-	const FKzGraphData& Data = Graph->GetData();
 	int32 Target = FindTarget(Node, Output);
 
 	for (int32 Steps = 0; ; ++Steps)
 	{
+		// A sub graph that runs out goes back to its caller, as an Exit without a name does.
+		while (Target == INDEX_NONE && !Callers.IsEmpty())
+		{
+			Target = ReturnToCaller(NAME_None);
+		}
 		if (Target == INDEX_NONE)
 		{
 			EndWalk(NAME_None);
@@ -236,6 +243,8 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 			return;
 		}
 
+		// Read again on every step: a Sub Graph changes the graph walked.
+		const FKzGraphData& Data = Graph->GetData();
 		Node = Target;
 		Visit(Data.GetNodeGuid(Node));
 		Target = INDEX_NONE;
@@ -326,10 +335,18 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		{
 			Target = Data.FindEntry(GoTo->Entry.Name);
 		}
+		else if (const FKzDialogueGraphNode_SubGraph* SubGraph = Data.GetNode<FKzDialogueGraphNode_SubGraph>(Node))
+		{
+			Target = EnterSubGraph(*SubGraph);
+		}
 		else if (const FKzDialogueGraphNode_Exit* Exit = Data.GetNode<FKzDialogueGraphNode_Exit>(Node))
 		{
-			EndWalk(Exit->Name);
-			return;
+			if (Callers.IsEmpty())
+			{
+				EndWalk(Exit->Name);
+				return;
+			}
+			Target = ReturnToCaller(Exit->Name);
 		}
 		else
 		{
@@ -357,6 +374,34 @@ int32 UKzDialogueGraphInstance::FindTarget(int32 FromNode, FName Output) const
 		}
 	}
 	return INDEX_NONE;
+}
+
+int32 UKzDialogueGraphInstance::EnterSubGraph(const FKzDialogueGraphNode_SubGraph& SubGraph)
+{
+	UKzDialogueGraph* Called = SubGraph.Graph;
+	const int32 Entry = Called ? Called->GetData().FindEntry(SubGraph.Entry.Name) : INDEX_NONE;
+	if (Entry == INDEX_NONE || Callers.Num() >= MaxSubGraphDepth)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s': a Sub Graph has no graph, no entry named '%s', or goes %d graphs deep; going on past it."), *Graph->GetName(), *SubGraph.Entry.Name.ToString(), MaxSubGraphDepth);
+		return FindTarget(Node, DefaultOutput);
+	}
+
+	Callers.Add({ Graph, Node });
+	Graph = Called;
+	Node = Entry;
+	Visit(Graph->GetData().GetNodeGuid(Node));
+	return FindTarget(Node, DefaultOutput);
+}
+
+int32 UKzDialogueGraphInstance::ReturnToCaller(FName Exit)
+{
+	const FKzDialogueGraphCaller Caller = Callers.Pop();
+	Graph = Caller.Graph;
+	Node = Caller.Node;
+
+	// An Exit the Sub Graph node has no output for leaves through Out.
+	const bool bNamedOutput = !Exit.IsNone() && Graph->GetData().FindOutput(Node, Exit) != INDEX_NONE;
+	return FindTarget(Node, bNamedOutput ? Exit : DefaultOutput);
 }
 
 bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& Choice)

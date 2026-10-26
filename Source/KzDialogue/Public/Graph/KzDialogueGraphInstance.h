@@ -15,6 +15,7 @@ class UKzDialogueMemorySubsystem;
 class UKzDialoguePlayer;
 class UKzDialogueSubsystem;
 struct FKzDialogueGraphNode_Choice;
+struct FKzDialogueGraphNode_SubGraph;
 
 /** Who plays a dialogue graph and how. Empty fields take the graph's settings. */
 USTRUCT(BlueprintType)
@@ -60,6 +61,18 @@ struct KZDIALOGUE_API FKzDialogueGraphOption
 	/** What SelectOption takes for it. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
 	int32 Index = INDEX_NONE;
+};
+
+/** A Sub Graph node a play went in through, to come back to. */
+USTRUCT()
+struct FKzDialogueGraphCaller
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UKzDialogueGraph> Graph;
+
+	int32 Node = INDEX_NONE;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphOptions, UKzDialogueGraphInstance*, Instance, const TArray<FKzDialogueGraphOption>&, Options);
@@ -113,6 +126,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
 	const TArray<FKzDialogueGraphOption>& GetOptions() const { return Options; }
 
+	/** The graph the play is in now: the one it started with, or a Sub Graph it went into. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
 	UKzDialogueGraph* GetGraph() const { return Graph; }
 
@@ -178,6 +192,12 @@ private:
 	/** The first node a link of the output leads to whose Only If holds. */
 	int32 FindTarget(int32 FromNode, FName Output) const;
 
+	/** Goes into the Sub Graph at the current node and returns its entry's target; past the node when it cannot. */
+	int32 EnterSubGraph(const FKzDialogueGraphNode_SubGraph& SubGraph);
+
+	/** Back to the last Sub Graph node, returning the target of its output named Exit, or of Out. */
+	int32 ReturnToCaller(FName Exit);
+
 	/** Offers the Choice's options; false when none is available. */
 	bool OfferOptions(const FKzDialogueGraphNode_Choice& Choice);
 	void WithdrawOptions();
@@ -202,8 +222,12 @@ private:
 
 	void Finish(bool bInterrupted);
 
+	/** The graph walked now; its callers wait in Callers. */
 	UPROPERTY()
 	TObjectPtr<UKzDialogueGraph> Graph;
+
+	UPROPERTY()
+	TArray<FKzDialogueGraphCaller> Callers;
 
 	UPROPERTY()
 	FKzDialogueGraphContext Context;
