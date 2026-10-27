@@ -375,9 +375,17 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	// This player may have been a mute-rule trigger: re-show the views it was silencing.
 	RefreshMuteStates();
 
-	// Beyond mute bookkeeping, only react here to hard cancellations (Abort / Interrupt): the others played their exit.
-	if (Reason == EKzDialogueFinishReason::Completed || Reason == EKzDialogueFinishReason::Stopped || bWasMuted)
+	if (bWasMuted)
 	{
+		return;
+	}
+
+	// A normal end already played its exit, so only the texts are left, for views with no fade to hide them.
+	if (Reason == EKzDialogueFinishReason::Completed || Reason == EKzDialogueFinishReason::Stopped)
+	{
+		const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+		if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
+		if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 		return;
 	}
 
