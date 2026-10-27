@@ -45,6 +45,7 @@ namespace
 	const FLinearColor ChipColor(FColor(0xC9, 0xCE, 0xD4));
 	const FLinearColor MutedColor(FColor(0x7D, 0x84, 0x8C));
 	const FLinearColor DropColor(FColor(0x34, 0xD1, 0xE0));
+	const FLinearColor OptionTextColor(FColor(0xF2, 0xF2, 0xF2));
 
 	struct FBrushes
 	{
@@ -54,6 +55,7 @@ namespace
 		FSlateRoundedBoxBrush Group{ FLinearColor(FColor(0x30, 0x35, 0x3C)), 8.0f, FLinearColor::Transparent, 0.0f };
 		FSlateRoundedBoxBrush Chip{ FLinearColor::Transparent, FLinearColor(FColor(0x59, 0x60, 0x6A)), 1.0f };
 		FSlateRoundedBoxBrush Badge{ FLinearColor(FColor(0x3A, 0x40, 0x48)), FLinearColor::Transparent, 0.0f };
+		FSlateRoundedBoxBrush Option{ FLinearColor(FColor(0x2E, 0x21, 0x40)), 4.0f, FLinearColor(FColor(0x5B, 0x2F, 0x7A)), 1.0f };
 		FSlateRoundedBoxBrush Subtitle{ FLinearColor(FColor(0x18, 0x3A, 0x57)), 4.0f, FLinearColor(FColor(0x2E, 0x63, 0x91)), 1.0f };
 	};
 
@@ -162,13 +164,14 @@ namespace
 		}
 	};
 
-	/** Which conditions of a node: its Only If or one branch's, then down through nested groups. */
+	/** Which conditions of a node: its Only If, one branch's or one option's, then down through nested groups. */
 	struct FConditionsPath
 	{
 		int32 Branch = INDEX_NONE;
+		int32 Option = INDEX_NONE;
 		TArray<int32> Groups;
 
-		bool operator==(const FConditionsPath& Other) const { return Branch == Other.Branch && Groups == Other.Groups; }
+		bool operator==(const FConditionsPath& Other) const { return Branch == Other.Branch && Option == Other.Option && Groups == Other.Groups; }
 
 		FConditionsPath Child(int32 Group) const
 		{
@@ -180,7 +183,12 @@ namespace
 		FKzDialogueConditions* Resolve(TInstancedStruct<FKzGraphNode>& Node) const
 		{
 			FKzDialogueConditions* List = nullptr;
-			if (Branch == INDEX_NONE)
+			if (Option != INDEX_NONE)
+			{
+				FKzDialogueGraphNode_Choice* Choice = Node.GetMutablePtr<FKzDialogueGraphNode_Choice>();
+				List = Choice && Choice->Options.IsValidIndex(Option) ? &Choice->Options[Option].Condition : nullptr;
+			}
+			else if (Branch == INDEX_NONE)
 			{
 				FKzDialogueGraphStep* Step = Node.GetMutablePtr<FKzDialogueGraphStep>();
 				List = Step ? &Step->OnlyIf : nullptr;
@@ -221,6 +229,71 @@ namespace
 			if (FKzDialogueConditions* List = Path.Resolve(Node))
 			{
 				Edit(*List);
+			}
+		});
+	}
+
+	/** A list of a node whose rows are dragged to reorder it: conditions at a path, a Choice's options or a Branch's branches. */
+	struct FReorderList
+	{
+		enum class EKind : uint8 { Conditions, Options, Branches };
+
+		EKind Kind = EKind::Conditions;
+		FConditionsPath Path;
+
+		bool operator==(const FReorderList& Other) const { return Kind == Other.Kind && Path == Other.Path; }
+
+		static FReorderList Conditions(const FConditionsPath& InPath)
+		{
+			FReorderList List;
+			List.Path = InPath;
+			return List;
+		}
+
+		static FReorderList Of(EKind InKind)
+		{
+			FReorderList List;
+			List.Kind = InKind;
+			return List;
+		}
+	};
+
+	template<typename T>
+	void MoveElement(TArray<T>& Array, int32 From, int32 To)
+	{
+		if (Array.IsValidIndex(From) && To >= 0 && To < Array.Num())
+		{
+			T Moved = MoveTemp(Array[From]);
+			Array.RemoveAt(From);
+			Array.Insert(MoveTemp(Moved), To);
+		}
+	}
+
+	/** Options and branches keep their ids, so their pins, and the links on them, follow the move. */
+	void MoveInList(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FReorderList& List, int32 From, int32 To)
+	{
+		EditNode(WeakNode, LOCTEXT("Reorder", "Reorder"), [&List, From, To](TInstancedStruct<FKzGraphNode>& Node)
+		{
+			switch (List.Kind)
+			{
+			case FReorderList::EKind::Conditions:
+				if (FKzDialogueConditions* Conditions = List.Path.Resolve(Node))
+				{
+					MoveElement(Conditions->Conditions, From, To);
+				}
+				break;
+			case FReorderList::EKind::Options:
+				if (FKzDialogueGraphNode_Choice* Choice = Node.GetMutablePtr<FKzDialogueGraphNode_Choice>())
+				{
+					MoveElement(Choice->Options, From, To);
+				}
+				break;
+			case FReorderList::EKind::Branches:
+				if (FKzDialogueGraphNode_Branch* Branch = Node.GetMutablePtr<FKzDialogueGraphNode_Branch>())
+				{
+					MoveElement(Branch->Branches, From, To);
+				}
+				break;
 			}
 		});
 	}
@@ -295,17 +368,17 @@ namespace
 			];
 	}
 
-	/** A condition on its way to another place in the same list. */
-	class FConditionDragDrop : public FDragDropOperation
+	/** A row on its way to another place in the same list. */
+	class FRowDragDrop : public FDragDropOperation
 	{
 	public:
-		DRAG_DROP_OPERATOR_TYPE(FConditionDragDrop, FDragDropOperation)
+		DRAG_DROP_OPERATOR_TYPE(FRowDragDrop, FDragDropOperation)
 
-		static TSharedRef<FConditionDragDrop> New(const TWeakObjectPtr<UKzEdGraphNode>& InNode, const FConditionsPath& InPath, int32 InIndex, const FText& InLabel)
+		static TSharedRef<FRowDragDrop> New(const TWeakObjectPtr<UKzEdGraphNode>& InNode, const FReorderList& InList, int32 InIndex, const FText& InLabel)
 		{
-			const TSharedRef<FConditionDragDrop> Operation = MakeShared<FConditionDragDrop>();
+			const TSharedRef<FRowDragDrop> Operation = MakeShared<FRowDragDrop>();
 			Operation->Node = InNode;
-			Operation->Path = InPath;
+			Operation->List = InList;
 			Operation->Index = InIndex;
 			Operation->Label = InLabel;
 			Operation->Construct();
@@ -313,7 +386,7 @@ namespace
 		}
 
 		TWeakObjectPtr<UKzEdGraphNode> Node;
-		FConditionsPath Path;
+		FReorderList List;
 		int32 Index = INDEX_NONE;
 		FText Label;
 
@@ -328,20 +401,23 @@ namespace
 		}
 	};
 
-	/** One condition: dragged to reorder its list, with a line showing where it would land. */
-	class SConditionPill : public SCompoundWidget
+	/** One row of a list, such as a condition or an option: dragged to reorder its list, with a line showing where it would land. */
+	class SReorderableRow : public SCompoundWidget
 	{
 	public:
-		SLATE_BEGIN_ARGS(SConditionPill) {}
+		SLATE_BEGIN_ARGS(SReorderableRow)
+			: _Padding(FMargin(6.0f, 3.0f, 10.0f, 3.0f))
+		{}
 			SLATE_ARGUMENT(const FSlateBrush*, Brush)
+			SLATE_ARGUMENT(FMargin, Padding)
 			SLATE_ARGUMENT(FText, Label)
 			SLATE_DEFAULT_SLOT(FArguments, Content)
 		SLATE_END_ARGS()
 
-		void Construct(const FArguments& InArgs, const TWeakObjectPtr<UKzEdGraphNode>& InNode, const FConditionsPath& InPath, int32 InIndex)
+		void Construct(const FArguments& InArgs, const TWeakObjectPtr<UKzEdGraphNode>& InNode, const FReorderList& InList, int32 InIndex)
 		{
 			Node = InNode;
-			Path = InPath;
+			List = InList;
 			Index = InIndex;
 			Label = InArgs._Label;
 			SetCursor(EMouseCursor::GrabHand);
@@ -367,7 +443,7 @@ namespace
 				[
 					SNew(SBorder)
 					.BorderImage(InArgs._Brush)
-					.Padding(FMargin(6.0f, 3.0f, 10.0f, 3.0f))
+					.Padding(InArgs._Padding)
 					[
 						InArgs._Content.Widget
 					]
@@ -384,12 +460,12 @@ namespace
 
 		virtual FReply OnDragDetected(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
 		{
-			return FReply::Handled().BeginDragDrop(FConditionDragDrop::New(Node, Path, Index, Label));
+			return FReply::Handled().BeginDragDrop(FRowDragDrop::New(Node, List, Index, Label));
 		}
 
 		virtual FReply OnDragOver(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override
 		{
-			const TSharedPtr<FConditionDragDrop> Operation = DragDropEvent.GetOperationAs<FConditionDragDrop>();
+			const TSharedPtr<FRowDragDrop> Operation = DragDropEvent.GetOperationAs<FRowDragDrop>();
 			if (!Accepts(Operation))
 			{
 				return FReply::Unhandled();
@@ -405,7 +481,7 @@ namespace
 
 		virtual FReply OnDrop(const FGeometry& MyGeometry, const FDragDropEvent& DragDropEvent) override
 		{
-			const TSharedPtr<FConditionDragDrop> Operation = DragDropEvent.GetOperationAs<FConditionDragDrop>();
+			const TSharedPtr<FRowDragDrop> Operation = DragDropEvent.GetOperationAs<FRowDragDrop>();
 			const bool bAbove = DropAbove.Get(true);
 			DropAbove.Reset();
 			if (!Accepts(Operation))
@@ -417,27 +493,19 @@ namespace
 			const int32 To = (bAbove ? Index : Index + 1) - (From < Index ? 1 : 0);
 			if (To != From)
 			{
-				EditConditions(Node, Path, LOCTEXT("ReorderCondition", "Reorder Condition"), [From, To](FKzDialogueConditions& List)
-				{
-					if (List.Conditions.IsValidIndex(From) && To >= 0 && To < List.Conditions.Num())
-					{
-						TInstancedStruct<FKzDialogueCondition> Moved = MoveTemp(List.Conditions[From]);
-						List.Conditions.RemoveAt(From);
-						List.Conditions.Insert(MoveTemp(Moved), To);
-					}
-				});
+				MoveInList(Node, List, From, To);
 			}
 			return FReply::Handled();
 		}
 
 	private:
-		bool Accepts(const TSharedPtr<FConditionDragDrop>& Operation) const
+		bool Accepts(const TSharedPtr<FRowDragDrop>& Operation) const
 		{
-			return Operation.IsValid() && Operation->Node == Node && Operation->Path == Path && Operation->Index != Index;
+			return Operation.IsValid() && Operation->Node == Node && Operation->List == List && Operation->Index != Index;
 		}
 
 		TWeakObjectPtr<UKzEdGraphNode> Node;
-		FConditionsPath Path;
+		FReorderList List;
 		int32 Index = INDEX_NONE;
 		FText Label;
 		TOptional<bool> DropAbove;
@@ -533,7 +601,7 @@ namespace
 			List->AddSlot()
 			.AutoHeight()
 			[
-				SNew(SConditionPill, WeakNode, Path, Index)
+				SNew(SReorderableRow, WeakNode, FReorderList::Conditions(Path), Index)
 				.Brush(Brush)
 				.Label(Each.Get().GetDescription())
 				[
@@ -544,8 +612,8 @@ namespace
 		return List;
 	}
 
-	/** A box of conditions: a header saying what they are for, with their match, then a pill each. */
-	TSharedRef<SWidget> MakeConditionBox(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, const FKzDialogueConditions& Conditions, const TSharedRef<SWidget>& Title)
+	/** What goes in a box of conditions: a header saying what they are for, with their match, then a pill each. */
+	TSharedRef<SWidget> MakeConditionBoxContent(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, const FKzDialogueConditions& Conditions, const TSharedRef<SWidget>& Title)
 	{
 		const TSharedRef<SHorizontalBox> Header = SNew(SHorizontalBox)
 			+ SHorizontalBox::Slot()
@@ -577,13 +645,40 @@ namespace
 				MakeConditionList(WeakNode, Path, Conditions, false)
 			];
 		}
+		return Content;
+	}
 
+	TSharedRef<SWidget> MakeConditionBox(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, const FKzDialogueConditions& Conditions, const TSharedRef<SWidget>& Title)
+	{
 		return SNew(SBorder)
 			.BorderImage(&Brushes().Box)
 			.Padding(6.0f)
 			[
-				Content
+				MakeConditionBoxContent(WeakNode, Path, Conditions, Title)
 			];
+	}
+
+	/** The number of an option or branch, the same as its output pin's. */
+	TSharedRef<SWidget> MakeBadge(int32 Number)
+	{
+		return SNew(SBox)
+			.WidthOverride(16.0f)
+			.HeightOverride(16.0f)
+			[
+				SNew(SBorder)
+				.BorderImage(&Brushes().Badge)
+				.HAlign(HAlign_Center)
+				.VAlign(VAlign_Center)
+				.Padding(0.0f)
+				[
+					MakeSmallText(FText::AsNumber(Number), PillTextColor)
+				]
+			];
+	}
+
+	TSharedRef<SWidget> MakeGrip()
+	{
+		return MakeIcon(FAppStyle::GetBrush("Icons.DragHandle"), MutedColor);
 	}
 
 	TWeakObjectPtr<UKzEdGraphNode> GetWeakNode(const UKzEdGraphNode& EdNode)
@@ -628,30 +723,24 @@ namespace
 			return MakeStepBody(EdNode, nullptr);
 		}
 
+		const TWeakObjectPtr<UKzEdGraphNode> WeakNode = GetWeakNode(EdNode);
 		const TSharedRef<SVerticalBox> Boxes = SNew(SVerticalBox);
 		for (int32 Index = 0; Index < Branch->Branches.Num(); ++Index)
 		{
 			const FKzDialogueBranch& Each = Branch->Branches[Index];
-
-			// The number matches the branch's output pin.
 			const TSharedRef<SHorizontalBox> Title = SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
 				[
-					SNew(SBox)
-					.WidthOverride(16.0f)
-					.HeightOverride(16.0f)
-					[
-						SNew(SBorder)
-						.BorderImage(&Brushes().Badge)
-						.HAlign(HAlign_Center)
-						.VAlign(VAlign_Center)
-						.Padding(0.0f)
-						[
-							MakeSmallText(FText::AsNumber(Index + 1), PillTextColor)
-						]
-					]
+					MakeGrip()
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					MakeBadge(Index + 1)
 				];
 			if (!Each.Label.IsNone())
 			{
@@ -668,9 +757,15 @@ namespace
 			Path.Branch = Index;
 			Boxes->AddSlot()
 			.AutoHeight()
-			.Padding(0.0f, Index > 0 ? 6.0f : 0.0f, 0.0f, 0.0f)
+			.Padding(0.0f, Index > 0 ? 2.0f : 0.0f, 0.0f, 0.0f)
 			[
-				MakeConditionBox(GetWeakNode(EdNode), Path, Each.Condition, Title)
+				SNew(SReorderableRow, WeakNode, FReorderList::Of(FReorderList::EKind::Branches), Index)
+				.Brush(&Brushes().Box)
+				.Padding(FMargin(6.0f))
+				.Label(Each.Label.IsNone() ? FText::AsNumber(Index + 1) : FText::FromName(Each.Label))
+				[
+					MakeConditionBoxContent(WeakNode, Path, Each.Condition, Title)
+				]
 			];
 		}
 
@@ -820,42 +915,158 @@ namespace
 	TSharedPtr<SWidget> MakeChoiceBody(const UKzEdGraphNode& EdNode)
 	{
 		const FKzDialogueGraphNode_Choice* Choice = EdNode.Node.GetPtr<FKzDialogueGraphNode_Choice>();
-		if (!Choice || Choice->Options.IsEmpty())
+		if (!Choice || (Choice->Options.IsEmpty() && Choice->TimeLimit <= 0.0f))
 		{
 			return MakeStepBody(EdNode, nullptr);
 		}
 
 		// Rebuilt with the node whenever its options change, so one row per option is enough.
-		const TWeakObjectPtr<const UKzEdGraphNode> WeakNode(&EdNode);
-		const TSharedRef<SVerticalBox> Options = SNew(SVerticalBox);
+		const TWeakObjectPtr<const UKzEdGraphNode> WeakConstNode(&EdNode);
+		const TWeakObjectPtr<UKzEdGraphNode> WeakNode = GetWeakNode(EdNode);
+		const TSharedRef<SVerticalBox> Rows = SNew(SVerticalBox);
 		for (int32 Index = 0; Index < Choice->Options.Num(); ++Index)
 		{
-			auto Resolve = [WeakNode, Index, Cache = MakeShared<FRefCache>()]()
+			const FKzDialogueChoiceOption& Option = Choice->Options[Index];
+			auto Resolve = [WeakConstNode, Index, Cache = MakeShared<FRefCache>()]()
 			{
-				const UKzEdGraphNode* Node = WeakNode.Get();
+				const UKzEdGraphNode* Node = WeakConstNode.Get();
 				const FKzDialogueGraphNode_Choice* Each = Node ? Node->Node.GetPtr<FKzDialogueGraphNode_Choice>() : nullptr;
 				return Each && Each->Options.IsValidIndex(Index) ? Cache->Resolve(Each->Options[Index].Line) : FRefView();
 			};
 
-			Options->AddSlot()
+			// The option's text in the Choice's colors, numbered as its pin.
+			const TSharedRef<SHorizontalBox> Band = SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					MakeGrip()
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+				[
+					MakeBadge(Index + 1)
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(1.0f)
+				.VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([Resolve]()
+					{
+						const FText Text = GetBodyText(Resolve());
+						return Text.IsEmpty() ? LOCTEXT("NoOptionLine", "(no line)") : Text;
+					})
+					.ColorAndOpacity_Lambda([Resolve]() { return GetBodyText(Resolve()).IsEmpty() ? FSlateColor(MissingColor) : FSlateColor(OptionTextColor); })
+					.WrapTextAt(BodyWidth - 100.0f)
+				];
+
+			// Only an option with a condition can be shown disabled.
+			if (Option.bShowWhenUnavailable && !Option.Condition.IsEmpty())
+			{
+				Band->AddSlot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+				[
+					SNew(SBorder)
+					.BorderImage(&Brushes().Chip)
+					.Padding(FMargin(5.0f, 0.0f))
+					.ToolTipText(LOCTEXT("DisabledTip", "Shown disabled, instead of hidden, while its condition fails."))
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						.Padding(0.0f, 0.0f, 3.0f, 0.0f)
+						[
+							MakeIcon(FAppStyle::GetBrush("Icons.Hidden"), ChipColor)
+						]
+						+ SHorizontalBox::Slot()
+						.AutoWidth()
+						.VAlign(VAlign_Center)
+						[
+							MakeSmallText(LOCTEXT("Disabled", "disabled"), ChipColor)
+						]
+					]
+				];
+			}
+
+			const TSharedRef<SVerticalBox> Content = SNew(SVerticalBox)
+				+ SVerticalBox::Slot()
+				.AutoHeight()
+				[
+					SNew(SBorder)
+					.BorderImage(&Brushes().Option)
+					.Padding(FMargin(6.0f, 4.0f))
+					[
+						Band
+					]
+				];
+			if (!Option.Condition.IsEmpty())
+			{
+				FConditionsPath Path;
+				Path.Option = Index;
+				Content->AddSlot()
+				.AutoHeight()
+				.Padding(0.0f, 6.0f, 0.0f, 0.0f)
+				[
+					MakeConditionBoxContent(WeakNode, Path, Option.Condition, MakeSmallText(LOCTEXT("OnlyIf", "Only if"), HeaderColor))
+				];
+			}
+
+			Rows->AddSlot()
 			.AutoHeight()
-			.Padding(0.0f, 1.0f)
+			.Padding(0.0f, Index > 0 ? 2.0f : 0.0f, 0.0f, 0.0f)
 			[
-				SNew(STextBlock)
-				.Text_Lambda([Resolve, Index]()
-				{
-					const FText Text = GetBodyText(Resolve());
-					return FText::Format(INVTEXT("{0}. {1}"), Index + 1, Text.IsEmpty() ? LOCTEXT("NoOptionLine", "(no line)") : Text);
-				})
-				.WrapTextAt(BodyWidth - 16.0f)
+				SNew(SReorderableRow, WeakNode, FReorderList::Of(FReorderList::EKind::Options), Index)
+				.Brush(&Brushes().Box)
+				.Padding(FMargin(6.0f))
+				.Label(GetBodyText(Resolve()))
+				[
+					Content
+				]
+			];
+		}
+
+		const TSharedRef<SVerticalBox> Body = SNew(SVerticalBox)
+			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				Rows
+			];
+		if (Choice->TimeLimit > 0.0f)
+		{
+			Body->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Center)
+			.Padding(0.0f, Choice->Options.IsEmpty() ? 0.0f : 6.0f, 0.0f, 0.0f)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					MakeIcon(FAppStyle::GetBrush("Icons.Recent"), HeaderColor)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					MakeSmallText(FText::Format(LOCTEXT("TimeLimit", "{0} s, then Timeout"), FText::AsNumber(Choice->TimeLimit)), HeaderColor)
+				]
 			];
 		}
 
 		return MakeStepBody(EdNode, SNew(SBox)
 			.MaxDesiredWidth(BodyWidth)
-			.Padding(FMargin(8.0f, 4.0f))
+			.Padding(FMargin(8.0f, 8.0f, 8.0f, 2.0f))
 			[
-				Options
+				Body
 			]);
 	}
 
