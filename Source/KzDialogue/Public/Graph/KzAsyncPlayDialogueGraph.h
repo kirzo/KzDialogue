@@ -13,7 +13,7 @@ class UKzDialogueGraph;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FKzAsyncDialogueGraphEvent, UKzDialogueGraphInstance*, Instance, FGameplayTag, Event, FName, Exit);
 
 /** Plays a dialogue graph and reports its events and its end. The instance answers choices (Select Option) and stops the play. */
-UCLASS()
+UCLASS(meta = (HasDedicatedAsyncNode))
 class KZDIALOGUE_API UKzAsyncPlayDialogueGraph : public UBlueprintAsyncActionBase
 {
 	GENERATED_BODY()
