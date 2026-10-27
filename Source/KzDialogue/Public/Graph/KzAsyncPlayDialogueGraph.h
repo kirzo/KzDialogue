@@ -22,6 +22,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Graph", AutoCreateRefTerm = "Context", AdvancedDisplay = "Context,Entry"))
 	static UKzAsyncPlayDialogueGraph* PlayDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context, FName Entry = TEXT("Start"));
 
+	/** Resumes a play saved with Get State, in the graph it started with. Apply the dialogue memory first: conditions read it. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Resume Dialogue Graph", AutoCreateRefTerm = "Context", AdvancedDisplay = "Context"))
+	static UKzAsyncPlayDialogueGraph* ResumeDialogueGraph(const UObject* WorldContextObject, const FKzDialogueGraphState& State, const FKzDialogueGraphContext& Context);
+
 	/** Fired before anything plays, with the instance to keep. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueGraphEvent Started;
@@ -38,7 +42,7 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueGraphEvent Finished;
 
-	/** The play was stopped or interrupted, its channel refused it, or the graph has no such entry. */
+	/** The play was stopped or interrupted, its channel refused it, or the graph has no such entry or cannot resume the state. */
 	UPROPERTY(BlueprintAssignable)
 	FKzAsyncDialogueGraphEvent Cancelled;
 
@@ -58,5 +62,6 @@ private:
 	TObjectPtr<UKzDialogueGraphInstance> Instance;
 
 	FName Entry;
+	TOptional<FKzDialogueGraphState> ResumeState;
 	bool bEnded = false;
 };

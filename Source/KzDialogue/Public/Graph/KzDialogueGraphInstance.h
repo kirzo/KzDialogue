@@ -75,6 +75,79 @@ struct FKzDialogueGraphCaller
 	int32 Node = INDEX_NONE;
 };
 
+/** What a saved play was doing. */
+UENUM(BlueprintType)
+enum class EKzDialogueGraphStateStep : uint8
+{
+	/** Nothing to resume. */
+	None,
+	/** Done with its node: a resumed play goes on from the node's output. */
+	Passed,
+	/** On a line: a resumed play shows it again. */
+	Line,
+	/** A Choice waited for an answer. */
+	Choosing,
+	/** A Wait waited for its time or for Continue. */
+	Waiting
+};
+
+/** A node of a dialogue graph, by the id that survives recompiling. */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzDialogueGraphNodeRef
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame)
+	TSoftObjectPtr<UKzDialogueGraph> Graph;
+
+	UPROPERTY(SaveGame)
+	FGuid Node;
+};
+
+/** A play saved halfway, to keep in the game's save: Get State into it, and resume from it after Apply Dialogue Memory. */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzDialogueGraphState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dialogue Graph")
+	EKzDialogueGraphStateStep Step = EKzDialogueGraphStateStep::None;
+
+	/** Where the play was, in the graph it was in. */
+	UPROPERTY(SaveGame)
+	FKzDialogueGraphNodeRef Node;
+
+	/** The Sub Graph nodes it went in through, outermost first. */
+	UPROPERTY(SaveGame)
+	TArray<FKzDialogueGraphNodeRef> Callers;
+
+	/** The line on screen, also a question kept while choosing; for an alias, the line it picked. */
+	UPROPERTY(SaveGame)
+	FKzDialogueLineRef ShownLine;
+
+	/** Seconds left of a Choice's time limit or of a Wait. */
+	UPROPERTY(SaveGame)
+	float TimeLeft = 0.0f;
+
+	/** What this play went through. */
+	UPROPERTY(SaveGame)
+	TArray<FGuid> Visited;
+
+	UPROPERTY(SaveGame)
+	FGameplayTag Channel;
+
+	UPROPERTY(SaveGame)
+	int32 Priority = -1;
+
+	UPROPERTY(SaveGame)
+	EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit;
+
+	bool IsValid() const { return Step != EKzDialogueGraphStateStep::None; }
+
+	/** The graph the play started with. */
+	const TSoftObjectPtr<UKzDialogueGraph>& GetGraph() const { return Callers.IsEmpty() ? Node.Graph : Callers[0].Graph; }
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphOptions, UKzDialogueGraphInstance*, Instance, const TArray<FKzDialogueGraphOption>&, Options);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueGraphOptionsWithdrawn, UKzDialogueGraphInstance*, Instance);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphEvent, UKzDialogueGraphInstance*, Instance, FGameplayTag, Event);
@@ -102,6 +175,17 @@ public:
 	/** Starts from the entry with that name. False when there is no such entry or the channel refused the dialogue; a queued play starts later. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
 	bool Start(FName Entry = TEXT("Start"));
+
+	/**
+	 * Resumes a saved play instead of starting, on an instance created for the graph the play started with. Channel, priority and advance mode come from the state; the context adds the actors.
+	 * False when the state started in another graph, a graph or node of it is gone, or the channel refused the dialogue.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
+	bool Resume(const FKzDialogueGraphState& State);
+
+	/** What the play is doing, for the game's save; empty when it is not running or is closing. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
+	FKzDialogueGraphState GetState() const;
 
 	/** Chooses one of the options offered. False when nothing is offered or that option is not available. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
@@ -198,9 +282,17 @@ private:
 	/** Back to the last Sub Graph node, returning the target of its output named Exit, or of Out. */
 	int32 ReturnToCaller(FName Exit);
 
-	/** Offers the Choice's options; false when none is available. */
-	bool OfferOptions(const FKzDialogueGraphNode_Choice& Choice);
+	/** Gets the player of the play's channel and plays on it. */
+	bool PlayOnChannel(bool bVisitNode);
+
+	/** Takes up again the Choice or Wait a resumed play stopped at. */
+	void TakeUpResumedNode();
+
+	/** Offers the Choice's options with that time limit; false when none is available. */
+	bool OfferOptions(const FKzDialogueGraphNode_Choice& Choice, float TimeLimit);
 	void WithdrawOptions();
+
+	void StartWait(float Seconds);
 
 	void Visit(const FGuid& Id);
 	void EndWalk(FName Exit);
@@ -252,6 +344,9 @@ private:
 	FTimerHandle StepTimer;
 	int32 Node = INDEX_NONE;
 	EStep Step = EStep::Passed;
+
+	/** Set by Resume at a Choice or a Wait: the next walk takes the node up again with this time left, instead of leaving it. */
+	float ResumedTimeLeft = -1.0f;
 
 	/** The player is running this play's dialogue, not one before it on the channel. */
 	bool bPlaying = false;

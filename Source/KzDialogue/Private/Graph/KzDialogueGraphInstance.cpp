@@ -20,6 +20,26 @@ namespace
 
 	/** Sub Graphs inside Sub Graphs before the walk calls it a loop. */
 	constexpr int32 MaxSubGraphDepth = 16;
+
+	FKzDialogueGraphNodeRef MakeNodeRef(UKzDialogueGraph* Graph, int32 Node)
+	{
+		FKzDialogueGraphNodeRef Ref;
+		Ref.Graph = Graph;
+		Ref.Node = Graph->GetData().GetNodeGuid(Node);
+		return Ref;
+	}
+
+	/** The line itself, not the alias it may have come from, so resuming does not pick again. */
+	FKzDialogueLineRef MakeLineRef(const FKzDialogueLine& Line)
+	{
+		FKzDialogueLineRef Ref;
+		if (Line.LineId.IsValid() && Line.SourceAsset.IsValid())
+		{
+			Ref.Asset = TSoftObjectPtr<UKzDialogueAsset>(FSoftObjectPath(Line.SourceAsset.Get()));
+			Ref.LineId = Line.LineId;
+		}
+		return Ref;
+	}
 }
 
 UKzDialogueGraphInstance* UKzDialogueGraphInstance::CreateDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context)
@@ -45,8 +65,7 @@ UKzDialogueGraphInstance* UKzDialogueGraphInstance::StartDialogueGraph(const UOb
 
 bool UKzDialogueGraphInstance::Start(FName Entry)
 {
-	UKzDialogueSubsystem* Subsystem = GetSubsystem();
-	if (bStarted || !Subsystem || !IsValid(Graph))
+	if (bStarted || !GetSubsystem() || !IsValid(Graph))
 	{
 		return false;
 	}
@@ -57,6 +76,119 @@ bool UKzDialogueGraphInstance::Start(FName Entry)
 		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s' has no entry named '%s'."), *Graph->GetName(), *Entry.ToString());
 		return false;
 	}
+	return PlayOnChannel(true);
+}
+
+bool UKzDialogueGraphInstance::Resume(const FKzDialogueGraphState& State)
+{
+	if (bStarted || !GetSubsystem() || !IsValid(Graph) || !State.IsValid())
+	{
+		return false;
+	}
+
+	// Saved by id: node indices change with every compile.
+	auto Find = [](const FKzDialogueGraphNodeRef& Ref, UKzDialogueGraph*& OutGraph)
+	{
+		OutGraph = Ref.Graph.LoadSynchronous();
+		return OutGraph ? OutGraph->GetData().FindNode(Ref.Node) : INDEX_NONE;
+	};
+
+	bool bFound = true;
+	TArray<FKzDialogueGraphCaller> SavedCallers;
+	for (const FKzDialogueGraphNodeRef& Caller : State.Callers)
+	{
+		FKzDialogueGraphCaller& Saved = SavedCallers.AddDefaulted_GetRef();
+		UKzDialogueGraph* CallerGraph = nullptr;
+		Saved.Node = Find(Caller, CallerGraph);
+		Saved.Graph = CallerGraph;
+		bFound &= Saved.Node != INDEX_NONE && CallerGraph->GetData().GetNode<FKzDialogueGraphNode_SubGraph>(Saved.Node);
+	}
+	UKzDialogueGraph* SavedGraph = nullptr;
+	const int32 SavedNode = Find(State.Node, SavedGraph);
+	bFound &= SavedNode != INDEX_NONE;
+
+	const UKzDialogueGraph* Root = SavedCallers.IsEmpty() ? SavedGraph : SavedCallers[0].Graph.Get();
+	if (!bFound || Root != Graph.Get())
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s' cannot resume the saved play: it started in another graph, or a graph or node it was at is gone."), *Graph->GetName());
+		return false;
+	}
+
+	Callers = MoveTemp(SavedCallers);
+	Graph = SavedGraph;
+	Node = SavedNode;
+	Visited.Reset();
+	Visited.Append(State.Visited);
+	Context.Channel = State.Channel;
+	Context.Priority = State.Priority;
+	Context.AdvanceMode = State.AdvanceMode;
+
+	// The line on screen shows again without counting twice; a Choice or a Wait is taken up again after it.
+	Step = EStep::Passed;
+	if (State.Step != EKzDialogueGraphStateStep::Passed && GetSubsystem()->ResolveLineRef(State.ShownLine, PendingLine))
+	{
+		PendingLine.bResumed = true;
+		Step = EStep::Ready;
+	}
+	if (State.Step == EKzDialogueGraphStateStep::Choosing || State.Step == EKzDialogueGraphStateStep::Waiting)
+	{
+		ResumedTimeLeft = FMath::Max(State.TimeLeft, 0.0f);
+	}
+	return PlayOnChannel(false);
+}
+
+FKzDialogueGraphState UKzDialogueGraphInstance::GetState() const
+{
+	FKzDialogueGraphState State;
+	if (!IsRunning() || !IsValid(Graph) || Node == INDEX_NONE || Step == EStep::Ended)
+	{
+		return State;
+	}
+
+	State.Node = MakeNodeRef(Graph, Node);
+	for (const FKzDialogueGraphCaller& Caller : Callers)
+	{
+		State.Callers.Add(MakeNodeRef(Caller.Graph, Caller.Node));
+	}
+	State.Visited = Visited.Array();
+	State.Channel = Context.Channel;
+	State.Priority = Context.Priority;
+	State.AdvanceMode = Context.AdvanceMode;
+
+	// A line ready to be taken is the next one; once taken, it is the player's.
+	const FKzDialogueLine Current = bPlaying && Player ? Player->GetCurrentLine() : FKzDialogueLine();
+	const float TimerLeft = GetWorld() ? GetWorld()->GetTimerManager().GetTimerRemaining(StepTimer) : 0.0f;
+	const float TimeLeft = FMath::Max(ResumedTimeLeft >= 0.0f ? ResumedTimeLeft : TimerLeft, 0.0f);
+
+	const FKzGraphData& Data = Graph->GetData();
+	if (Data.GetNode<FKzDialogueGraphNode_Line>(Node))
+	{
+		State.Step = EKzDialogueGraphStateStep::Line;
+		State.ShownLine = MakeLineRef(Step == EStep::Ready ? PendingLine : Current);
+	}
+	else if (Data.GetNode<FKzDialogueGraphNode_Choice>(Node))
+	{
+		// Passed here is a resumed question still playing, or nothing shown yet.
+		const bool bQuestionShown = Step == EStep::Passed || (Player && Player->IsHoldingLine());
+		State.Step = EKzDialogueGraphStateStep::Choosing;
+		State.ShownLine = MakeLineRef(Step == EStep::Ready ? PendingLine : (bQuestionShown ? Current : FKzDialogueLine()));
+		State.TimeLeft = TimeLeft;
+	}
+	else if (Data.GetNode<FKzDialogueGraphNode_Wait>(Node))
+	{
+		State.Step = EKzDialogueGraphStateStep::Waiting;
+		State.TimeLeft = TimeLeft;
+	}
+	else
+	{
+		State.Step = EKzDialogueGraphStateStep::Passed;
+	}
+	return State;
+}
+
+bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
+{
+	UKzDialogueSubsystem* Subsystem = GetSubsystem();
 	const FGameplayTag Channel = Context.Channel.IsValid() ? Context.Channel : (Graph->Channel.IsValid() ? Graph->Channel : Subsystem->DefaultChannel);
 	Player = Subsystem->GetOrCreatePlayer(Channel);
 	if (!Player)
@@ -64,7 +196,10 @@ bool UKzDialogueGraphInstance::Start(FName Entry)
 		return false;
 	}
 	bStarted = true;
-	Visit(Graph->GetData().GetNodeGuid(Node));
+	if (bVisitNode)
+	{
+		Visit(Graph->GetData().GetNodeGuid(Node));
+	}
 
 	const int32 Priority = Context.Priority != UKzDialogueSubsystem::InheritPriority ? Context.Priority : Graph->Priority;
 	const EKzDialogueAdvanceMode AdvanceMode = Context.AdvanceMode != EKzDialogueAdvanceMode::Inherit ? Context.AdvanceMode : Graph->AdvanceMode;
@@ -175,7 +310,11 @@ UWorld* UKzDialogueGraphInstance::GetWorld() const
 
 bool UKzDialogueGraphInstance::HasLine()
 {
-	if (Step == EStep::Passed)
+	if (Step == EStep::Passed && ResumedTimeLeft >= 0.0f)
+	{
+		TakeUpResumedNode();
+	}
+	else if (Step == EStep::Passed)
 	{
 		Leave(DefaultOutput);
 	}
@@ -261,7 +400,7 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else if (const FKzDialogueGraphNode_Choice* Choice = Data.GetNode<FKzDialogueGraphNode_Choice>(Node))
 		{
-			if (OfferOptions(*Choice))
+			if (OfferOptions(*Choice, Choice->TimeLimit))
 			{
 				return;
 			}
@@ -324,11 +463,7 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else if (const FKzDialogueGraphNode_Wait* Wait = Data.GetNode<FKzDialogueGraphNode_Wait>(Node))
 		{
-			Step = EStep::Waiting;
-			if (Wait->Seconds > 0.0f && GetWorld())
-			{
-				GetWorld()->GetTimerManager().SetTimer(StepTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleWaitElapsed), Wait->Seconds, false);
-			}
+			StartWait(Wait->Seconds);
 			return;
 		}
 		else if (const FKzDialogueGraphNode_GoTo* GoTo = Data.GetNode<FKzDialogueGraphNode_GoTo>(Node))
@@ -404,7 +539,31 @@ int32 UKzDialogueGraphInstance::ReturnToCaller(FName Exit)
 	return FindTarget(Node, bNamedOutput ? Exit : DefaultOutput);
 }
 
-bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& Choice)
+void UKzDialogueGraphInstance::TakeUpResumedNode()
+{
+	// A timer of zero seconds would never fire.
+	const float TimeLeft = FMath::Max(ResumedTimeLeft, UE_KINDA_SMALL_NUMBER);
+	ResumedTimeLeft = -1.0f;
+
+	const FKzGraphData& Data = Graph->GetData();
+	if (const FKzDialogueGraphNode_Choice* Choice = Data.GetNode<FKzDialogueGraphNode_Choice>(Node))
+	{
+		if (!OfferOptions(*Choice, Choice->TimeLimit > 0.0f ? TimeLeft : 0.0f))
+		{
+			Leave(FKzDialogueGraphNode_Choice::TimeoutOutput);
+		}
+	}
+	else if (const FKzDialogueGraphNode_Wait* Wait = Data.GetNode<FKzDialogueGraphNode_Wait>(Node))
+	{
+		StartWait(Wait->Seconds > 0.0f ? TimeLeft : 0.0f);
+	}
+	else
+	{
+		Leave(DefaultOutput);
+	}
+}
+
+bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& Choice, float TimeLimit)
 {
 	UKzDialogueSubsystem* Subsystem = GetSubsystem();
 	Options.Reset();
@@ -436,9 +595,9 @@ bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& C
 	}
 
 	Step = EStep::Choosing;
-	if (Choice.TimeLimit > 0.0f && GetWorld())
+	if (TimeLimit > 0.0f && GetWorld())
 	{
-		GetWorld()->GetTimerManager().SetTimer(StepTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleChoiceTimeout), Choice.TimeLimit, false);
+		GetWorld()->GetTimerManager().SetTimer(StepTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleChoiceTimeout), TimeLimit, false);
 	}
 	OnOptionsOffered.Broadcast(this, Options);
 	return true;
@@ -454,6 +613,15 @@ void UKzDialogueGraphInstance::WithdrawOptions()
 	{
 		Options.Reset();
 		OnOptionsWithdrawn.Broadcast(this);
+	}
+}
+
+void UKzDialogueGraphInstance::StartWait(float Seconds)
+{
+	Step = EStep::Waiting;
+	if (Seconds > 0.0f && GetWorld())
+	{
+		GetWorld()->GetTimerManager().SetTimer(StepTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleWaitElapsed), Seconds, false);
 	}
 }
 

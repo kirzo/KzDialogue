@@ -1,6 +1,7 @@
 // Copyright 2026 kirzo
 
 #include "Graph/KzAsyncPlayDialogueGraph.h"
+#include "Graph/KzDialogueGraph.h"
 
 UKzAsyncPlayDialogueGraph* UKzAsyncPlayDialogueGraph::PlayDialogueGraph(const UObject* WorldContextObject, UKzDialogueGraph* Graph, const FKzDialogueGraphContext& Context, FName Entry)
 {
@@ -8,6 +9,13 @@ UKzAsyncPlayDialogueGraph* UKzAsyncPlayDialogueGraph::PlayDialogueGraph(const UO
 	Action->Instance = UKzDialogueGraphInstance::CreateDialogueGraph(WorldContextObject, Graph, Context);
 	Action->Entry = Entry;
 	Action->RegisterWithGameInstance(WorldContextObject);
+	return Action;
+}
+
+UKzAsyncPlayDialogueGraph* UKzAsyncPlayDialogueGraph::ResumeDialogueGraph(const UObject* WorldContextObject, const FKzDialogueGraphState& State, const FKzDialogueGraphContext& Context)
+{
+	UKzAsyncPlayDialogueGraph* Action = PlayDialogueGraph(WorldContextObject, State.GetGraph().LoadSynchronous(), Context);
+	Action->ResumeState = State;
 	return Action;
 }
 
@@ -22,7 +30,7 @@ void UKzAsyncPlayDialogueGraph::Activate()
 	}
 
 	// A start refused before playing does not end the instance, so it is reported here.
-	if ((!Instance || !Instance->Start(Entry)) && !bEnded)
+	if ((!Instance || !(ResumeState ? Instance->Resume(*ResumeState) : Instance->Start(Entry))) && !bEnded)
 	{
 		bEnded = true;
 		Cancelled.Broadcast(Instance, FGameplayTag(), NAME_None);

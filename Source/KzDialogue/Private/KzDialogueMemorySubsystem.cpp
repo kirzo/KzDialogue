@@ -80,7 +80,7 @@ int32 UKzDialogueMemorySubsystem::GetGraphVisitCount(const FGuid& GraphId, const
 
 void UKzDialogueMemorySubsystem::RecordLinePresented(const FKzDialogueLine& Line)
 {
-	if (Line.SourceAsset.IsValid() && Line.LineId.IsValid())
+	if (Line.SourceAsset.IsValid() && Line.LineId.IsValid() && !Line.bResumed)
 	{
 		++Memory.SeenLines.FindOrAdd(Line.LineId);
 	}

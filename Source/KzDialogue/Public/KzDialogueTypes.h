@@ -229,7 +229,10 @@ struct KZDIALOGUE_API FKzDialogueLine
 
 	/** The asset the line was resolved from (UKzDialogueAsset::FinalizeResolvedLine); unset for a line built by hand, whose LineId is not stable. */
 	TWeakObjectPtr<const UKzDialogueAsset> SourceAsset;
-	
+
+	/** Shown again by a resumed dialogue graph play: the memory already counted it. */
+	bool bResumed = false;
+
 #if WITH_EDITORONLY_DATA
 	/** Director notes for the translator: tone, intent, audience. Not localizable; exported alongside the line in the translation flow, never shipped. */
 	UPROPERTY(EditAnywhere, Category = "Dialogue|Line|Localization", meta = (MultiLine = true))
@@ -486,11 +489,11 @@ struct KZDIALOGUE_API FKzDialogueLineRef
 	 * Asset that owns the line or alias. Soft so referencing this
 	 * struct doesn't pull the asset into memory until it's needed.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Dialogue")
 	TSoftObjectPtr<UKzDialogueAsset> Asset;
 
 	/** GUID of the line or alias inside Asset. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Dialogue")
 	FGuid LineId;
 
 	bool IsValid() const { return !Asset.IsNull() && LineId.IsValid(); }

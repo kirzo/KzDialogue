@@ -14,23 +14,23 @@ struct KZDIALOGUE_API FKzAliasMemory
 	GENERATED_BODY()
 
 	/** Last line picked; RandomNoRepeat avoids it and a new shuffle bag never starts with it. Invalid = nothing picked yet. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	FGuid LastPickedLineId;
 
 	/** ShuffleBag: the current bag in shuffle order, drained as lines play. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TArray<FGuid> ShuffleBag;
 
 	/** ShuffleBag: index of the next line to take from the bag. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	int32 ShuffleCursor = 0;
 
 	/** ShuffleBag: the alias's lines when the bag was built; a change rebuilds it. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TArray<FGuid> ShuffleBagSourceIds;
 
 	/** Sequential: index of the next line to play. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	int32 SequentialCursor = 0;
 };
 
@@ -40,30 +40,30 @@ struct KZDIALOGUE_API FKzDialogueGraphVisits
 {
 	GENERATED_BODY()
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TMap<FGuid, int32> Visits;
 };
 
-/** Serializable snapshot of the dialogue memory: store it in the game's save and re-apply on load. */
+/** Serializable snapshot of the dialogue memory: store it in the game's save and re-apply on load. Its fields are SaveGame, for save archives that keep only those. */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzDialogueMemory
 {
 	GENERATED_BODY()
 
 	/** Times each asset line was presented, by LineId. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TMap<FGuid, int32> SeenLines;
 
 	/** Pick state of each alias, by AliasId. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TMap<FGuid, FKzAliasMemory> Aliases;
 
 	/** Facts noted by dialogue graphs or gameplay, with how many times each was noted. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TMap<FGameplayTag, int32> Facts;
 
 	/** The nodes and options each dialogue graph's plays went through, by graph id. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Memory")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Memory")
 	TMap<FGuid, FKzDialogueGraphVisits> Graphs;
 };
 
