@@ -58,5 +58,8 @@ public:
 
 	/** Another dialogue graph dropped on this one makes a Sub Graph of it. */
 	virtual bool MakeNodeForAsset(UObject& Asset, TInstancedStruct<FKzGraphNode>& OutNode) const override;
+
+	/** Its lines asset, and those its nodes pick lines from: lines are written from the graph. */
+	virtual void GetAssetsSavedWith(TArray<UObject*>& OutAssets) const override;
 #endif
 };

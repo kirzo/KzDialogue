@@ -2,6 +2,7 @@
 
 #include "Graph/KzDialogueGraph.h"
 #include "Graph/KzDialogueGraphNodes.h"
+#include "KzDialogueAsset.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueGraph"
 
@@ -47,6 +48,35 @@ bool UKzDialogueGraph::MakeNodeForAsset(UObject& Asset, TInstancedStruct<FKzGrap
 	OutNode.InitializeAs<FKzDialogueGraphNode_SubGraph>();
 	OutNode.GetMutable<FKzDialogueGraphNode_SubGraph>().Graph = Called;
 	return true;
+}
+
+void UKzDialogueGraph::GetAssetsSavedWith(TArray<UObject*>& OutAssets) const
+{
+	// Not loaded is not changed.
+	auto Add = [&OutAssets](const TSoftObjectPtr<UKzDialogueAsset>& Asset)
+	{
+		if (UKzDialogueAsset* Loaded = Asset.Get())
+		{
+			OutAssets.AddUnique(Loaded);
+		}
+	};
+
+	Add(Lines);
+	const FKzGraphData& Compiled = GetData();
+	for (int32 Node = 0; Node < Compiled.NumNodes(); ++Node)
+	{
+		if (const FKzDialogueGraphNode_Line* Line = Compiled.GetNode<FKzDialogueGraphNode_Line>(Node))
+		{
+			Add(Line->Line.Asset);
+		}
+		else if (const FKzDialogueGraphNode_Choice* Choice = Compiled.GetNode<FKzDialogueGraphNode_Choice>(Node))
+		{
+			for (const FKzDialogueChoiceOption& Option : Choice->Options)
+			{
+				Add(Option.Line.Asset);
+			}
+		}
+	}
 }
 
 void UKzDialogueGraph::ValidateGraph(const FKzGraphData& InData, TArray<FKzValidationIssue>& OutIssues) const
