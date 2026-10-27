@@ -22,6 +22,9 @@ namespace
 	FLinearColor GameplayColor() { return FLinearColor(FColor(0x2D, 0x6A, 0x3E)); }
 	FLinearColor SubGraphColor() { return FLinearColor(FColor(0x7A, 0x2E, 0x5C)); }
 
+	/** Registered by FKzDialogueEditorStyle in the editor module. */
+	FSlateIcon NodeIcon(const TCHAR* Node) { return FSlateIcon(TEXT("KzDialogueEditorStyle"), *FString::Printf(TEXT("Kz.Dialogue.Node.%s"), Node)); }
+
 	/** Gives every entry a valid id of its own, so a new or duplicated entry gets its own output. */
 	template<typename T>
 	void EnsureUniqueIds(TArray<T>& Entries)
@@ -78,6 +81,11 @@ FLinearColor FKzDialogueGraphNode_Entry::GetColor() const
 	return FlowColor();
 }
 
+FSlateIcon FKzDialogueGraphNode_Entry::GetIcon() const
+{
+	return NodeIcon(TEXT("Entry"));
+}
+
 void FKzDialogueGraphNode_Entry::Validate(TArray<FKzValidationIssue>& OutIssues) const
 {
 	if (Name.IsNone())
@@ -89,6 +97,11 @@ void FKzDialogueGraphNode_Entry::Validate(TArray<FKzValidationIssue>& OutIssues)
 FLinearColor FKzDialogueGraphNode_Line::GetColor() const
 {
 	return LineColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Line::GetIcon() const
+{
+	return NodeIcon(TEXT("Line"));
 }
 
 void FKzDialogueGraphNode_Line::GetSearchTexts(TArray<FText>& OutTexts) const
@@ -116,6 +129,11 @@ void FKzDialogueGraphNode_Choice::GetOutputPins(const UKzGraph& Graph, TArray<FK
 FLinearColor FKzDialogueGraphNode_Choice::GetColor() const
 {
 	return ChoiceColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Choice::GetIcon() const
+{
+	return NodeIcon(TEXT("Choice"));
 }
 
 void FKzDialogueGraphNode_Choice::GetSearchTexts(TArray<FText>& OutTexts) const
@@ -158,6 +176,11 @@ FLinearColor FKzDialogueGraphNode_Branch::GetColor() const
 	return BranchColor();
 }
 
+FSlateIcon FKzDialogueGraphNode_Branch::GetIcon() const
+{
+	return NodeIcon(TEXT("Branch"));
+}
+
 void FKzDialogueGraphNode_Branch::Validate(TArray<FKzValidationIssue>& OutIssues) const
 {
 	if (Branches.IsEmpty())
@@ -182,6 +205,11 @@ void FKzDialogueGraphNode_Random::GetOutputPins(const UKzGraph& Graph, TArray<FK
 FLinearColor FKzDialogueGraphNode_Random::GetColor() const
 {
 	return RandomColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Random::GetIcon() const
+{
+	return NodeIcon(TEXT("Random"));
 }
 
 void FKzDialogueGraphNode_Random::Validate(TArray<FKzValidationIssue>& OutIssues) const
@@ -212,6 +240,11 @@ FLinearColor FKzDialogueGraphNode_Event::GetColor() const
 	return GameplayColor();
 }
 
+FSlateIcon FKzDialogueGraphNode_Event::GetIcon() const
+{
+	return NodeIcon(TEXT("Event"));
+}
+
 void FKzDialogueGraphNode_Event::Validate(TArray<FKzValidationIssue>& OutIssues) const
 {
 	if (!Event.IsValid())
@@ -223,6 +256,11 @@ void FKzDialogueGraphNode_Event::Validate(TArray<FKzValidationIssue>& OutIssues)
 FLinearColor FKzDialogueGraphNode_Action::GetColor() const
 {
 	return GameplayColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Action::GetIcon() const
+{
+	return NodeIcon(TEXT("Action"));
 }
 
 FText FKzDialogueGraphNode_Wait::GetSubtitle() const
@@ -239,9 +277,19 @@ FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 	return FlowColor();
 }
 
+FSlateIcon FKzDialogueGraphNode_Wait::GetIcon() const
+{
+	return NodeIcon(TEXT("Wait"));
+}
+
 FLinearColor FKzDialogueGraphNode_GoTo::GetColor() const
 {
 	return FlowColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_GoTo::GetIcon() const
+{
+	return NodeIcon(TEXT("GoTo"));
 }
 
 void FKzDialogueGraphNode_SubGraph::GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const
@@ -274,6 +322,11 @@ FLinearColor FKzDialogueGraphNode_SubGraph::GetColor() const
 	return SubGraphColor();
 }
 
+FSlateIcon FKzDialogueGraphNode_SubGraph::GetIcon() const
+{
+	return NodeIcon(TEXT("SubGraph"));
+}
+
 void FKzDialogueGraphNode_SubGraph::Validate(TArray<FKzValidationIssue>& OutIssues) const
 {
 	if (!Graph)
@@ -294,6 +347,11 @@ FText FKzDialogueGraphNode_Exit::GetSubtitle() const
 FLinearColor FKzDialogueGraphNode_Exit::GetColor() const
 {
 	return FlowColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Exit::GetIcon() const
+{
+	return NodeIcon(TEXT("Exit"));
 }
 #endif
 

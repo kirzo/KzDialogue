@@ -52,6 +52,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Entry : public FKzDialogueGraphNode
 	virtual void GetInputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override {}
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 #endif
 };
@@ -97,6 +98,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Line : public FKzDialogueGraphStep
 
 #if WITH_EDITOR
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void GetSearchTexts(TArray<FText>& OutTexts) const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 #endif
@@ -145,6 +147,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Choice : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void GetSearchTexts(TArray<FText>& OutTexts) const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 	virtual void PostEditChange() override;
@@ -185,6 +188,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Branch : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 	virtual void PostEditChange() override;
 #endif
@@ -219,6 +223,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Random : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 	virtual void PostEditChange() override;
 #endif
@@ -236,6 +241,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Event : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 #endif
 };
@@ -251,6 +257,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Action : public FKzDialogueGraphStep
 
 #if WITH_EDITOR
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 #endif
 };
 
@@ -271,6 +278,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Wait : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 #endif
 };
 
@@ -286,6 +294,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
 #if WITH_EDITOR
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override {}
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 #endif
 };
 
@@ -305,6 +314,7 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_SubGraph : public FKzDialogueGraphSte
 	virtual void GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const override;
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 #endif
 };
@@ -322,5 +332,6 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Exit : public FKzDialogueGraphStep
 	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override {}
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
 #endif
 };
