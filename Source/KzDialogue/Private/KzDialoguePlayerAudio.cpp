@@ -30,6 +30,11 @@ namespace
 
 void UKzDialoguePlayer::StartLineAudio()
 {
+	if (!IsPresentedHere())
+	{
+		return;
+	}
+
 	// Subtitles lead the voice: the whole audio start waits AudioStartDelay, compressed by TimeScale like every line timing.
 	const float Delay = FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale);
 	if (Delay > UE_KINDA_SMALL_NUMBER && !CurrentLine.Audio.IsNull() && ArmTimer(AudioDelayTimerHandle, &UKzDialoguePlayer::HandleAudioDelayElapsed, Delay))
@@ -42,6 +47,11 @@ void UKzDialoguePlayer::StartLineAudio()
 
 void UKzDialoguePlayer::PrefetchLineAudio()
 {
+	if (!IsPresentedHere())
+	{
+		return;
+	}
+
 	// The new handle takes the current audio before the old one lets it go, so it never drops out of memory.
 	TArray<FSoftObjectPath> Paths;
 	if (!CurrentLine.Audio.IsNull()) { Paths.Add(CurrentLine.Audio.ToSoftObjectPath()); }

@@ -13,6 +13,8 @@
 #include "KzDialogueMemorySubsystem.h"
 #include "KzSpeakerAsset.h"
 #include "KzDialogueSpeakerComponent.h"
+#include "Net/KzDialogueNetActor.h"
+#include "Net/KzDialogueNetComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
@@ -37,11 +39,27 @@ void UKzDialogueSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	{
 		DefaultChannel = Kz::Tags::Dialogue::MainChannel;
 	}
+
+	if (UWorld* World = GetWorld())
+	{
+		ActorSpawnedHandle = World->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &UKzDialogueSubsystem::HandleActorSpawned));
+	}
 }
 
 void UKzDialogueSubsystem::Deinitialize()
 {
 	bDeinitializing = true;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->RemoveOnActorSpawnedHandler(ActorSpawnedHandle);
+	}
+
+	// Copies end here quietly: the server's players are not this machine's to interrupt.
+	for (UKzDialoguePlayer* Player : Players)
+	{
+		if (IsValid(Player) && Player->IsProxy()) { Player->EndProxy(); }
+	}
 
 	// Tear down asset sessions BEFORE the players they drive. Iterate a copy: Interrupt() finishes the
 	// session, which calls ReleaseAssetSession and mutates AssetSessions mid-loop.
@@ -164,13 +182,156 @@ void UKzDialogueSubsystem::HandleOwnerEndPlay(AActor* Actor, EEndPlayReason::Typ
 
 	for (UKzDialoguePlayer* Player : Owned)
 	{
-		DropQueue(Player, TEXT("its owner went away"));
-		Player->Interrupt();
-		Players.Remove(Player);
-		Queues.Remove(Player);
-		PlayingRequests.Remove(Player);
-		OnPlayerRemoved.Broadcast(Player->Channel, Player);
+		RemovePlayer(*Player);
 	}
+}
+
+void UKzDialogueSubsystem::RemovePlayer(UKzDialoguePlayer& Player)
+{
+	DropQueue(&Player, TEXT("its owner went away"));
+	if (Player.IsProxy()) { Player.EndProxy(); }
+	else { Player.Interrupt(); }
+
+	if (FKzDialogueNetEntries* Entries = IsNetServer() ? FindNetEntries(Player, false) : nullptr)
+	{
+		Entries->Remove(Player.Channel, Player.GetOwner());
+	}
+
+	Players.Remove(&Player);
+	Queues.Remove(&Player);
+	PlayingRequests.Remove(&Player);
+	OnPlayerRemoved.Broadcast(Player.Channel, &Player);
+}
+
+// ---------------------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------------------
+
+bool UKzDialogueSubsystem::IsNetServer() const
+{
+	const UWorld* World = GetWorld();
+	const ENetMode NetMode = World ? World->GetNetMode() : NM_Standalone;
+	return NetMode == NM_DedicatedServer || NetMode == NM_ListenServer;
+}
+
+bool UKzDialogueSubsystem::IsNetClient() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->GetNetMode() == NM_Client;
+}
+
+void UKzDialogueSubsystem::HandleActorSpawned(AActor* Actor)
+{
+	APlayerController* Controller = Cast<APlayerController>(Actor);
+	if (Controller && IsNetServer())
+	{
+		FindOrAddNetComponent(Controller);
+	}
+}
+
+UKzDialogueNetComponent* UKzDialogueSubsystem::FindOrAddNetComponent(APlayerController* Controller)
+{
+	if (!IsValid(Controller)) { return nullptr; }
+
+	// The subsystem adds exactly one, so the class finds it.
+	if (UKzDialogueNetComponent* Existing = Controller->FindComponentByClass<UKzDialogueNetComponent>())
+	{
+		return Existing;
+	}
+
+	UKzDialogueNetComponent* Component = NewObject<UKzDialogueNetComponent>(Controller, TEXT("KzDialogueNet"));
+	Component->RegisterComponent();
+	return Component;
+}
+
+FKzDialogueNetEntries* UKzDialogueSubsystem::FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate)
+{
+	// A player's own dialogue goes to that player alone; the host's stays on this machine.
+	if (APlayerController* Controller = Cast<APlayerController>(Player.GetOwner()))
+	{
+		if (Controller->IsLocalController()) { return nullptr; }
+
+		UKzDialogueNetComponent* Component = bCreate ? FindOrAddNetComponent(Controller) : Controller->FindComponentByClass<UKzDialogueNetComponent>();
+		return Component ? &Component->Entries : nullptr;
+	}
+
+	if (!IsValid(NetActor) && bCreate && !bDeinitializing && GetWorld())
+	{
+		FActorSpawnParameters Params;
+		Params.ObjectFlags |= RF_Transient;
+		NetActor = GetWorld()->SpawnActor<AKzDialogueNetActor>(Params);
+	}
+	return IsValid(NetActor) ? &NetActor->Entries : nullptr;
+}
+
+void UKzDialogueSubsystem::PublishPlayer(const UKzDialoguePlayer& Player, const FKzDialogueLine* NewLine)
+{
+	FKzDialogueNetEntries* Entries = IsNetServer() ? FindNetEntries(Player, true) : nullptr;
+	if (!Entries) { return; }
+
+	FKzDialogueNetEntry& Entry = Entries->FindOrAdd(Player.Channel, Player.GetOwner());
+	Player.FillNetEntry(Entry);
+	if (NewLine) { Entry.Line = FKzDialogueNetLine(*NewLine); }
+	Entries->Commit(Entry);
+}
+
+void UKzDialogueSubsystem::ReceiveNetEntry(const FKzDialogueNetEntry& Entry)
+{
+	// Its owner is not relevant to this client (or not yet): nothing of it shows here.
+	if (!IsNetClient() || (Entry.bHasOwner && !IsValid(Entry.Owner))) { return; }
+
+	UKzDialoguePlayer* Player = GetOrCreatePlayer(Entry.Channel, Entry.Owner);
+	if (!IsValid(Player)) { return; }
+
+	if (!Player->IsProxy())
+	{
+		// The server's dialogue wins over one this machine started on its own.
+		DropQueue(Player, TEXT("the server took the channel"));
+		Player->BecomeProxy();
+	}
+	Player->ApplyNetEntry(Entry);
+}
+
+void UKzDialogueSubsystem::ReleaseNetEntry(const FKzDialogueNetEntry& Entry)
+{
+	UKzDialoguePlayer* Player = IsNetClient() ? FindResolvedPlayer(Entry.Channel, Entry.Owner) : nullptr;
+	if (IsValid(Player) && Player->IsProxy())
+	{
+		RemovePlayer(*Player);
+	}
+}
+
+void UKzDialogueSubsystem::SendNext(const UKzDialoguePlayer& Player)
+{
+	// Through this machine's player controller: the copy's own, else the first local one.
+	APlayerController* Controller = Cast<APlayerController>(Player.GetOwner());
+	if (!Controller || !Controller->IsLocalController())
+	{
+		Controller = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	}
+
+	UKzDialogueNetComponent* Component = Controller ? Controller->FindComponentByClass<UKzDialogueNetComponent>() : nullptr;
+	if (!Component)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': Next has no way to the server, the local player controller has no dialogue net component yet."), *Player.Channel.ToString());
+		return;
+	}
+	Component->ServerNext(Player.Channel, Player.GetOwner());
+}
+
+void UKzDialogueSubsystem::HandleNetNext(APlayerController* From, FGameplayTag InChannel, AActor* Owner)
+{
+	UKzDialoguePlayer* Player = FindResolvedPlayer(InChannel, Owner);
+	if (!IsValid(Player) || !From) { return; }
+
+	// Another player's own dialogue is not theirs to advance; a shared one is anyone's.
+	const APlayerController* OwnerController = Cast<APlayerController>(Player->GetOwner());
+	if (OwnerController && OwnerController != From)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': %s asked to advance %s's dialogue; refused."), *InChannel.ToString(), *From->GetName(), *OwnerController->GetName());
+		return;
+	}
+	Player->Next();
 }
 
 bool UKzDialogueSubsystem::IsAtConcurrencyLimit(const UKzDialoguePlayer& Player, const FKzDialogueChannelDefinition* ChannelDef) const
@@ -350,6 +511,10 @@ EKzDialoguePlayResult UKzDialogueSubsystem::Admit(UKzDialoguePlayer& Player, int
 	{
 		Result = EKzDialoguePlayResult::RejectedTearingDown;
 	}
+	else if (Player.IsProxy())
+	{
+		Result = EKzDialoguePlayResult::RejectedServerChannel;
+	}
 	else if ((!Player.IsPlaying() && !IsValid(Player.GetProvider())) || Player.GetState() == EKzDialogueState::Exiting)
 	{
 		// Free, or only its exit animations are left; requests already waiting still go first, and other owners may fill the channel.
@@ -371,7 +536,7 @@ EKzDialoguePlayResult UKzDialogueSubsystem::Admit(UKzDialoguePlayer& Player, int
 	}
 
 	// The busy policy may keep a refused request waiting.
-	if (Result != EKzDialoguePlayResult::RejectedTearingDown && ChannelDef && ChannelDef->BusyPolicy != EKzChannelBusyPolicy::Reject)
+	if (Result != EKzDialoguePlayResult::RejectedTearingDown && Result != EKzDialoguePlayResult::RejectedServerChannel && ChannelDef && ChannelDef->BusyPolicy != EKzChannelBusyPolicy::Reject)
 	{
 		const bool bFull = ChannelDef->BusyPolicy == EKzChannelBusyPolicy::Queue && bOthersWaiting && Queue->Entries.Num() >= ChannelDef->MaxQueueLength;
 		Result = bFull ? EKzDialoguePlayResult::RejectedQueueFull : EKzDialoguePlayResult::Queued;

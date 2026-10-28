@@ -586,7 +586,9 @@ enum class EKzDialoguePlayResult : uint8
 	/** Nothing resolved to play: an alias in cooldown, ids that no longer exist, an empty list. */
 	RejectedNothingToPlay,
 	/** The world is tearing down. */
-	RejectedTearingDown
+	RejectedTearingDown,
+	/** On a client, the server plays this channel here and decides for it. */
+	RejectedServerChannel
 };
 
 /** Whose player of a channel a request plays on. */

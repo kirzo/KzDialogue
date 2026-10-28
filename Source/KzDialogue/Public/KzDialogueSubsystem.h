@@ -17,7 +17,12 @@ class UKzDialogueAsset;
 class UKzDialogueAssetSession;
 class UKzDialogueGraphInstance;
 class UKzDialogueChoiceListener;
+class AKzDialogueNetActor;
+class UKzDialogueNetComponent;
+class APlayerController;
 struct FKzDialogueChannelDefinition;
+struct FKzDialogueNetEntry;
+struct FKzDialogueNetEntries;
 
 /** A queued request (RequestId) is about to start on its channel, or was dropped: expired, displaced by Replace, or cleared by a stop. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnQueuedDialogueRequest, FGameplayTag, Channel, FGuid, RequestId);
@@ -194,6 +199,27 @@ public:
 	void AddChoiceListener(UKzDialogueChoiceListener* Listener);
 	void RemoveChoiceListener(UKzDialogueChoiceListener* Listener);
 
+	/** A server of a networked game: it decides every dialogue its clients show. */
+	bool IsNetServer() const;
+
+	/** A client of a networked game: its players copy the server's (UKzDialoguePlayer::IsProxy). */
+	bool IsNetClient() const;
+
+	/** On a server, sends the player's state to the clients that show it; NewLine is the line it just took. Called by the players. */
+	void PublishPlayer(const UKzDialoguePlayer& Player, const FKzDialogueLine* NewLine = nullptr);
+
+	/** On a client, a server player arrived or changed: its copy here follows it. Called by the net entries. */
+	void ReceiveNetEntry(const FKzDialogueNetEntry& Entry);
+
+	/** On a client, a server player went away, and its copy with it. */
+	void ReleaseNetEntry(const FKzDialogueNetEntry& Entry);
+
+	/** On a client, asks the server to advance the player that Player copies. */
+	void SendNext(const UKzDialoguePlayer& Player);
+
+	/** On a server, a client asks to advance a player: they may when it is their own or a shared one. */
+	void HandleNetNext(APlayerController* From, FGameplayTag InChannel, AActor* Owner);
+
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 	// Owner, on an owned channel, picks whose player they play on (see ResolveOwner); without one, the line's speaker decides.
 
@@ -327,9 +353,26 @@ private:
 	/** Gets or creates the player a request plays on, resolving its owner, and names both in the pending request. */
 	UKzDialoguePlayer* GetPlayerForRequest(FGameplayTag InChannel, AActor* Owner, const UKzSpeakerAsset* Speaker);
 
-	/** An owner's players go with it: interrupted, their queues dropped, and removed. */
+	/** An owner's players go with it. */
 	UFUNCTION()
 	void HandleOwnerEndPlay(AActor* Actor, EEndPlayReason::Type EndPlayReason);
+
+	/** Takes a player out: its queue dropped, its dialogue interrupted, OnPlayerRemoved, and on a server its net entry. */
+	void RemovePlayer(UKzDialoguePlayer& Player);
+
+	/** Carries the shared players to the clients; spawned the first time one is published. */
+	UPROPERTY(Transient)
+	TObjectPtr<AKzDialogueNetActor> NetActor;
+
+	FDelegateHandle ActorSpawnedHandle;
+
+	/** On a server, gives each player controller its net component as it spawns, so its client can send requests. */
+	void HandleActorSpawned(AActor* Actor);
+
+	UKzDialogueNetComponent* FindOrAddNetComponent(APlayerController* Controller);
+
+	/** Where the player's net entry travels: its player's net component for a player's own dialogue, the net actor for a shared one. Null when no client shows it. */
+	FKzDialogueNetEntries* FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate);
 
 	/** Whether other owners already fill the channel's MaxConcurrent, so Player may not start. */
 	bool IsAtConcurrencyLimit(const UKzDialoguePlayer& Player, const FKzDialogueChannelDefinition* ChannelDef) const;

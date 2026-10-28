@@ -8,6 +8,7 @@
 #include "Tickable.h"
 #include "KzDialogueTypes.h"
 #include "KzDialogueNotify.h"
+#include "Net/KzDialogueNetTypes.h"
 #include "KzDialoguePlayer.generated.h"
 
 class AActor;
@@ -307,6 +308,29 @@ public:
 	 */
 	TSet<FGuid> ResolveLineRefToMatchSet(const FKzDialogueLineRef& LineRef) const;
 
+	// -------------------------------------------------------------------------------
+	// Network
+	// -------------------------------------------------------------------------------
+
+	/** A copy of a server player on a client: it shows what the server's does and decides nothing. Next goes to the server; Pause, Resume, Stop, Abort and Interrupt are refused. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	bool IsProxy() const { return bProxy; }
+
+	/** Whether this machine shows the player's lines (audio, notifies): not a dedicated server, nor a listen server for another player's own dialogue. */
+	bool IsPresentedHere() const;
+
+	/** The state its copies on the clients follow. */
+	void FillNetEntry(FKzDialogueNetEntry& Entry) const;
+
+	/** Turns a player of this client into a copy of the server's, ending what it played on its own. */
+	void BecomeProxy();
+
+	/** A copy follows its server player's new state. */
+	void ApplyNetEntry(const FKzDialogueNetEntry& Entry);
+
+	/** A copy ends its dialogue here, as its server player goes away. */
+	void EndProxy();
+
 	//~ UObject
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
@@ -332,6 +356,21 @@ private:
 
 	/** The line's time is up: it leaves, unless the provider holds it on screen until ReleaseHeldLine. */
 	void EndLine();
+
+	/** Ends the line shown and moves on, without the reveal step of a Manual Next. */
+	void LeaveLine();
+
+	/** On a server, sends the player's state to its copies; NewLine is the line it just took. */
+	void PublishNet(const FKzDialogueLine* NewLine = nullptr);
+
+	/** A copy leaves its line, or its waiting, for whatever its provider has now. */
+	void MoveOnFromLine();
+
+	/** A copy ends its dialogue as its server player did. */
+	void EndProxyDialogue(EKzDialogueFinishReason Reason);
+
+	/** True, with a warning, when a copy is told from outside what only its server player decides. */
+	bool RefusesLocalControl(const TCHAR* Command) const;
 
 	/** Presentation half of Enter_LineEntering, deferred by LineStartDelay: line-started events, audio kick-off, view enter requests. */
 	void PresentLine();
@@ -468,6 +507,17 @@ private:
 
 	/** The line timer ran out: the line reached its natural end instead of being cut. */
 	bool bLineTimeElapsed = false;
+
+	bool bProxy = false;
+
+	/** A copy is applying its server player's state, so its own commands go through. */
+	bool bApplyingNetEntry = false;
+
+	// What the copies follow: counted here on a server, the last applied on a copy.
+	int32 NetDialogueSerial = 0;
+	int32 NetLineSerial = 0;
+	EKzDialogueNetPhase NetPhase = EKzDialogueNetPhase::Idle;
+	EKzDialogueFinishReason NetFinishReason = EKzDialogueFinishReason::Completed;
 
 	struct FSpecificLineBinding
 	{

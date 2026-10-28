@@ -11,9 +11,11 @@
 #include "KzDialogueSubsystem.h"
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
+#include "Net/KzDialogueNetProvider.h"
 
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
 
@@ -68,6 +70,14 @@ void UKzDialoguePlayer::StartDialogue()
 		return;
 	}
 
+	if (!bProxy)
+	{
+		++NetDialogueSerial;
+		NetLineSerial = 0;
+		NetPhase = EKzDialogueNetPhase::Playing;
+		PublishNet();
+	}
+
 	const uint32 Serial = StateSerial;
 	OnDialogueStarted.Broadcast(this);
 	if (Serial == StateSerial)
@@ -78,7 +88,7 @@ void UKzDialoguePlayer::StartDialogue()
 
 void UKzDialoguePlayer::Pause()
 {
-	if (State == EKzDialogueState::Idle || bPaused)
+	if (State == EKzDialogueState::Idle || bPaused || RefusesLocalControl(TEXT("Pause")))
 	{
 		return;
 	}
@@ -90,12 +100,13 @@ void UKzDialoguePlayer::Pause()
 		ActiveAudio->SetPaused(true);
 	}
 
+	PublishNet();
 	OnPaused.Broadcast(this);
 }
 
 void UKzDialoguePlayer::Resume()
 {
-	if (!bPaused)
+	if (!bPaused || RefusesLocalControl(TEXT("Resume")))
 	{
 		return;
 	}
@@ -107,6 +118,7 @@ void UKzDialoguePlayer::Resume()
 		ActiveAudio->SetPaused(false);
 	}
 
+	PublishNet();
 	const uint32 Serial = StateSerial;
 	OnResumed.Broadcast(this);
 	if (Serial == StateSerial && !bPaused && bAdvanceOnResume)
@@ -118,6 +130,10 @@ void UKzDialoguePlayer::Resume()
 
 void UKzDialoguePlayer::Stop()
 {
+	if (RefusesLocalControl(TEXT("Stop")))
+	{
+		return;
+	}
 	if (State == EKzDialogueState::Idle)
 	{
 		// A dialogue set up but never started still reports its end to whoever waits on it.
@@ -155,6 +171,10 @@ void UKzDialoguePlayer::Stop()
 
 void UKzDialoguePlayer::Abort()
 {
+	if (RefusesLocalControl(TEXT("Abort")))
+	{
+		return;
+	}
 	if (State == EKzDialogueState::Idle)
 	{
 		// Continue-policy tails may outlive the dialogue: a hard stop on an idle player silences the channel.
@@ -170,6 +190,10 @@ void UKzDialoguePlayer::Abort()
 
 void UKzDialoguePlayer::Interrupt()
 {
+	if (RefusesLocalControl(TEXT("Interrupt")))
+	{
+		return;
+	}
 	if (State == EKzDialogueState::Idle)
 	{
 		StopReleasedAudios(0.1f);
@@ -208,13 +232,16 @@ void UKzDialoguePlayer::Next()
 		return;
 	}
 
-	if (State == EKzDialogueState::LineEntering && !bLinePresented)
+	const bool bRevealing = State == EKzDialogueState::LineEntering && bLinePresented && AdvanceMode == EKzDialogueAdvanceMode::Manual;
+	if (bProxy && !bRevealing)
 	{
-		// Still in its LineStartDelay gap: the line never showed, so it leaves without exit events.
-		ClearTimer(LineStartDelayTimerHandle);
-		AdvanceToNextLine();
+		// A copy's line moves on when the server's does; only the reveal is this machine's own.
+		UKzDialogueSubsystem* Subsystem = IsPlaying() ? Cast<UKzDialogueSubsystem>(GetOuter()) : nullptr;
+		if (Subsystem) { Subsystem->SendNext(*this); }
+		return;
 	}
-	else if (State == EKzDialogueState::LineEntering && AdvanceMode == EKzDialogueAdvanceMode::Manual)
+
+	if (bRevealing)
 	{
 		// The first Next completes the reveal; the views' late enter acks are ignored.
 		const uint32 Serial = StateSerial;
@@ -224,6 +251,18 @@ void UKzDialoguePlayer::Next()
 		ClearTimer(ViewWatchdogHandle);
 		PendingViewAcks = 0;
 		OnPhaseAcksDone();
+		return;
+	}
+	LeaveLine();
+}
+
+void UKzDialoguePlayer::LeaveLine()
+{
+	if (State == EKzDialogueState::LineEntering && !bLinePresented)
+	{
+		// Still in its LineStartDelay gap: the line never showed, so it leaves without exit events.
+		ClearTimer(LineStartDelayTimerHandle);
+		AdvanceToNextLine();
 	}
 	else if (State == EKzDialogueState::LineEntering || State == EKzDialogueState::LinePlaying)
 	{
@@ -432,6 +471,14 @@ void UKzDialoguePlayer::Enter_LineEntering()
 
 	const FKzDialogueLine PreviousLine = MoveTemp(CurrentLine);
 	CurrentLine = Provider->Advance();
+
+	// Sent before the ambient arguments: each machine resolves those for itself.
+	if (!bProxy)
+	{
+		++NetLineSerial;
+		NetPhase = EKzDialogueNetPhase::Playing;
+		PublishNet(&CurrentLine);
+	}
 	PrefetchLineAudio();
 
 	// Decide what to do with the previous line's audio now that we know the incoming one.
@@ -463,7 +510,9 @@ void UKzDialoguePlayer::PresentLine()
 	const uint32 Serial = StateSerial;
 	bLinePresented = true;
 
-	if (UKzDialogueMemorySubsystem* Memory = UKzDialogueMemorySubsystem::Get(this))
+	// The server's memory counts it, not each copy.
+	UKzDialogueMemorySubsystem* Memory = bProxy ? nullptr : UKzDialogueMemorySubsystem::Get(this);
+	if (Memory)
 	{
 		Memory->RecordLinePresented(CurrentLine);
 	}
@@ -498,8 +547,8 @@ void UKzDialoguePlayer::Enter_LinePlaying()
 		BakeTimeline();
 	}
 
-	// Manual mode holds the line on screen until Next(), and a held line until its provider lets go: no auto-advance timer.
-	if (AdvanceMode == EKzDialogueAdvanceMode::Manual || bHoldingLine)
+	// Manual mode holds the line on screen until Next(), a held line until its provider lets go, and a copy's line until the server's moves on: no auto-advance timer.
+	if (AdvanceMode == EKzDialogueAdvanceMode::Manual || bHoldingLine || bProxy)
 	{
 		return;
 	}
@@ -538,12 +587,22 @@ void UKzDialoguePlayer::Enter_LineExiting()
 void UKzDialoguePlayer::Enter_Waiting()
 {
 	SetState(EKzDialogueState::Waiting);
+	if (!bProxy)
+	{
+		NetPhase = EKzDialogueNetPhase::Waiting;
+		PublishNet();
+	}
 }
 
 void UKzDialoguePlayer::Enter_Exiting()
 {
 	SetState(EKzDialogueState::Exiting);
 	const uint32 Serial = StateSerial;
+	if (!bProxy)
+	{
+		NetPhase = EKzDialogueNetPhase::Exiting;
+		PublishNet();
+	}
 
 	ResolveOutgoingAudio(CurrentLine, nullptr);
 	PendingViewAcks = 0;
@@ -641,6 +700,12 @@ void UKzDialoguePlayer::FinishWithReason(EKzDialogueFinishReason Reason)
 	CurrentLine = FKzDialogueLine{};
 	AudioPrefetchHandle.Reset();
 
+	if (!bProxy)
+	{
+		NetPhase = EKzDialogueNetPhase::Idle;
+		NetFinishReason = Reason;
+		PublishNet();
+	}
 	OnDialogueFinished.Broadcast(this, Reason);
 }
 
@@ -910,6 +975,12 @@ void UKzDialoguePlayer::BakeTimeline()
 	CachedLineDuration = 0.0f;
 	bLineTimeElapsed = false;
 
+	// Notifies are presentation: they run where the line shows.
+	if (!IsPresentedHere())
+	{
+		return;
+	}
+
 	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
 	if (!Timeline || Timeline->IsEmpty())
 	{
@@ -1027,4 +1098,176 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(FKzDialogueActive
 	Context.EventEnd = Entry.End;
 	Context.InstanceData = &Entry.InstanceData;
 	return Context;
+}
+
+// ---------------------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------------------
+
+bool UKzDialoguePlayer::IsPresentedHere() const
+{
+	const UWorld* World = GetWorld();
+	const ENetMode NetMode = World ? World->GetNetMode() : NM_Standalone;
+	if (NetMode == NM_DedicatedServer)
+	{
+		return false;
+	}
+
+	// On a listen server, another player's own dialogue shows on their machine only.
+	const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	return NetMode != NM_ListenServer || !Controller || Controller->IsLocalController();
+}
+
+void UKzDialoguePlayer::PublishNet(const FKzDialogueLine* NewLine)
+{
+	if (bProxy)
+	{
+		return;
+	}
+	if (UKzDialogueSubsystem* Subsystem = Cast<UKzDialogueSubsystem>(GetOuter()))
+	{
+		Subsystem->PublishPlayer(*this, NewLine);
+	}
+}
+
+void UKzDialoguePlayer::FillNetEntry(FKzDialogueNetEntry& Entry) const
+{
+	Entry.Phase = NetPhase;
+	Entry.FinishReason = NetFinishReason;
+	Entry.AdvanceMode = AdvanceMode;
+	Entry.bPaused = bPaused;
+	Entry.DialogueSerial = NetDialogueSerial;
+	Entry.LineSerial = NetLineSerial;
+}
+
+void UKzDialoguePlayer::BecomeProxy()
+{
+	if (IsPlaying() || IsValid(Provider))
+	{
+		Interrupt();
+	}
+	bProxy = true;
+}
+
+void UKzDialoguePlayer::EndProxy()
+{
+	TGuardValue<bool> Applying(bApplyingNetEntry, true);
+	if (IsPlaying() || IsValid(Provider))
+	{
+		Interrupt();
+	}
+}
+
+bool UKzDialoguePlayer::RefusesLocalControl(const TCHAR* Command) const
+{
+	if (!bProxy || bApplyingNetEntry || (State == EKzDialogueState::Idle && !IsValid(Provider)))
+	{
+		return false;
+	}
+
+	UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': %s refused on a copy of the server's player; the server decides its dialogue."), *Channel.ToString(), Command);
+	return true;
+}
+
+void UKzDialoguePlayer::ApplyNetEntry(const FKzDialogueNetEntry& Entry)
+{
+	TGuardValue<bool> Applying(bApplyingNetEntry, true);
+	AdvanceMode = Entry.AdvanceMode;
+
+	if (Entry.Phase == EKzDialogueNetPhase::Idle)
+	{
+		NetDialogueSerial = Entry.DialogueSerial;
+		NetPhase = Entry.Phase;
+		EndProxyDialogue(Entry.FinishReason);
+		return;
+	}
+
+	// A new dialogue, or the first this copy sees of one: it starts here, waiting for the server's line.
+	if (Entry.DialogueSerial != NetDialogueSerial || !IsValid(Cast<UKzDialogueNetProvider>(Provider)))
+	{
+		if (IsPlaying() || IsValid(Provider))
+		{
+			Interrupt();
+		}
+		NetDialogueSerial = Entry.DialogueSerial;
+		NetLineSerial = 0;
+		NetPhase = EKzDialogueNetPhase::Playing;
+		SetProvider(NewObject<UKzDialogueNetProvider>(this));
+		StartDialogue();
+	}
+
+	// A listener of the start may have ended it.
+	UKzDialogueNetProvider* NetProvider = Cast<UKzDialogueNetProvider>(Provider);
+	if (!NetProvider)
+	{
+		return;
+	}
+
+	const bool bNewLine = Entry.Phase == EKzDialogueNetPhase::Playing && Entry.LineSerial != NetLineSerial;
+	const bool bPhaseChanged = Entry.Phase != NetPhase;
+	NetPhase = Entry.Phase;
+	NetProvider->bEnded = Entry.Phase == EKzDialogueNetPhase::Exiting;
+	if (bNewLine)
+	{
+		NetLineSerial = Entry.LineSerial;
+		FKzDialogueLine Line;
+		if (Entry.Line.Resolve(Line))
+		{
+			NetProvider->SetNextLine(MoveTemp(Line));
+		}
+	}
+	if (bNewLine || bPhaseChanged)
+	{
+		MoveOnFromLine();
+	}
+
+	if (Entry.bPaused != bPaused)
+	{
+		if (Entry.bPaused) { Pause(); }
+		else { Resume(); }
+	}
+}
+
+void UKzDialoguePlayer::MoveOnFromLine()
+{
+	if (State != EKzDialogueState::Waiting)
+	{
+		LeaveLine();
+		return;
+	}
+
+	// Out of waiting only for a line, or for the end.
+	if (IsValid(Provider) && (Provider->HasNext() || !Provider->IsWaiting()))
+	{
+		AdvanceToNextLine();
+	}
+}
+
+void UKzDialoguePlayer::EndProxyDialogue(EKzDialogueFinishReason Reason)
+{
+	if (!IsPlaying() && !IsValid(Provider))
+	{
+		return;
+	}
+
+	switch (Reason)
+	{
+	case EKzDialogueFinishReason::Aborted:
+		Abort();
+		break;
+	case EKzDialogueFinishReason::Interrupted:
+		Interrupt();
+		break;
+	case EKzDialogueFinishReason::Stopped:
+		Stop();
+		break;
+	default:
+		// Out through this machine's own exit, as the server's dialogue went.
+		if (UKzDialogueNetProvider* NetProvider = Cast<UKzDialogueNetProvider>(Provider))
+		{
+			NetProvider->bEnded = true;
+		}
+		MoveOnFromLine();
+		break;
+	}
 }

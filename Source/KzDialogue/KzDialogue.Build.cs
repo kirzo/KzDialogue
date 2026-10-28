@@ -13,6 +13,7 @@ public class KzDialogue : ModuleRules
 			{
 				"Core",
 				"GameplayTags",
+				"NetCore",
 				"KzLib",
 				"KzGraph",
 				"UMG",
