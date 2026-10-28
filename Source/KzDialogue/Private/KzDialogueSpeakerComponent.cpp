@@ -166,9 +166,21 @@ void UKzDialogueSpeakerComponent::SetSpeakingLevel(float NewLevel)
 	}
 }
 
-UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker)
+UKzDialogueSpeakerComponent* UKzDialogueSpeakerComponent::FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker, const AActor* Preferred)
 {
 	if (!IsValid(WorldContextObject) || !InSpeaker) { return nullptr; }
+
+	if (IsValid(Preferred))
+	{
+		TInlineComponentArray<UKzDialogueSpeakerComponent*> Components(Preferred);
+		for (UKzDialogueSpeakerComponent* Component : Components)
+		{
+			if (Component->Speaker == InSpeaker || Component->ExtraPersonas.Contains(InSpeaker))
+			{
+				return Component;
+			}
+		}
+	}
 
 	const UWorld* World = WorldContextObject->GetWorld();
 	if (!World) { return nullptr; }
@@ -213,7 +225,7 @@ UKzDialogueAssetSession* UKzDialogueSpeakerComponent::Speak(UKzDialogueAsset* As
 	UKzDialogueSubsystem* Sub = GetWorld()->GetSubsystem<UKzDialogueSubsystem>();
 	if (!IsValid(Sub)) { return nullptr; }
 
-	return Sub->PlayAsset(Asset, DefaultChannel);
+	return Sub->PlayAsset(Asset, DefaultChannel, EKzDialogueAdvanceMode::Inherit, GetOwner());
 }
 
 UKzDialoguePlayer* UKzDialogueSpeakerComponent::SpeakLine(const FKzDialogueLine& Line)
@@ -229,7 +241,7 @@ UKzDialoguePlayer* UKzDialogueSpeakerComponent::SpeakLine(const FKzDialogueLine&
 	{
 		LineCopy.Speaker.Asset = Speaker;
 	}
-	return Sub->PlayLine(LineCopy, DefaultChannel);
+	return Sub->PlayLine(LineCopy, DefaultChannel, -1, GetOwner());
 }
 
 void UKzDialogueSpeakerComponent::AddDialogueTags(const FGameplayTagContainer& Tags)

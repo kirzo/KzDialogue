@@ -9,9 +9,12 @@
 #include "KzDialogueTypes.h"
 #include "KzSubtitleWidget.generated.h"
 
+class AActor;
+class UPanelWidget;
 class UTextBlock;
 class UWidgetAnimation;
 class UKzDialoguePlayer;
+class UKzSubtitleWidget;
 
 /** The player's subtitle options, shared by every subtitle widget and applied live (UKzSubtitleWidget::SetSubtitleProfile). */
 USTRUCT(BlueprintType)
@@ -137,16 +140,63 @@ struct FKzSubtitleChannelView
 };
 
 /**
+ * One talking player's subtitle in a UKzSubtitleWidget's StackPanel, so several characters talking at
+ * once each get theirs. Name its widgets and animations like a view: SpeakerText, SubtitlesText,
+ * Background, StartFadeIn, EndFadeOut, LineFadeIn and LineFadeOut, all optional.
+ */
+UCLASS(Abstract)
+class KZDIALOGUE_API UKzSubtitleRow : public UUserWidget
+{
+	GENERATED_BODY()
+
+public:
+	/** The view the subtitle widget renders this row's player into. */
+	FKzSubtitleChannelView GetView() const;
+
+	/** The subtitle widget the row belongs to, told when the row's animations end. */
+	TWeakObjectPtr<UKzSubtitleWidget> SubtitleWidget;
+
+protected:
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> SpeakerText;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> SubtitlesText;
+
+	/** Border or Image behind the text. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> Background;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> StartFadeIn;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> EndFadeOut;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> LineFadeIn;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> LineFadeOut;
+
+	virtual void OnAnimationFinished_Implementation(const UWidgetAnimation* Animation) override;
+};
+
+/**
  * Multi-channel subtitle view. Binds to one or more UKzDialoguePlayer instances and
- * renders their events into per-channel UI bundles supplied by the subclass.
+ * renders their events into UI bundles supplied by the subclass, or into rows.
  *
- * The subclass is responsible for providing a FKzSubtitleChannelView for every
- * channel it wants to render via GetViewForChannel(). Channels without a view are
- * silently ignored.
+ * Where a line shows:
+ *  - In a fixed place: GetViewForChannel returns a FKzSubtitleChannelView for the channel
+ *    (and owner, to give each NPC its own).
+ *  - In a row: a channel without a view, with StackPanel and RowClass set, gets a row per
+ *    talking player, so several characters talking at once all show.
+ *  - Nowhere: neither, and the widget ignores the channel.
  *
  * Binding:
  *  - Declarative: set ListenedChannels in the details panel; on construct the widget
- *    resolves players via the dialogue subsystem.
+ *    resolves players via the dialogue subsystem. On a per listener channel only the
+ *    owning player's; with SetOwnerFilter, only that actor's.
  *  - Imperative: call BindPlayer(P) / BindPlayers({P1, P2, ...}) at runtime.
  */
 UCLASS(Abstract)
@@ -154,7 +204,13 @@ class KZDIALOGUE_API UKzSubtitleWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
+	friend class UKzSubtitleRow;
+
 public:
+	/** Only this actor's players, for a widget above one NPC (a widget component): its barks in its bubble. Null listens to every owner again. Re-binds ListenedChannels. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
+	void SetOwnerFilter(AActor* InOwner);
+
 	/** Bind a single player. No-op if already bound. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	void BindPlayer(UKzDialoguePlayer* InPlayer);
@@ -237,15 +293,27 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
 	TMap<FString, FKzSpeakerFormattingRuleSet> SpeakerFormattingRulesPerCulture;
 
+	/** Panel the rows go in, newest last (normally a Vertical Box). Optional: without it, or without RowClass, a channel with no view of its own shows nothing. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (BindWidgetOptional))
+	TObjectPtr<UPanelWidget> StackPanel;
+
+	/** The row each talking player of a channel without a view of its own gets in StackPanel, for the length of its dialogue. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles")
+	TSubclassOf<UKzSubtitleRow> RowClass;
+
+	/** Rows at once; 0 is no limit. Past it the oldest row goes, and its player shows nothing until its dialogue ends. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Subtitles", meta = (ClampMin = 0))
+	int32 MaxRows = 0;
+
 	/**
-	 * Resolve the view bundle for a channel. Subclass must override this and return
-	 * a populated FKzSubtitleChannelView for every supported channel.
+	 * Resolve the view bundle for a channel and owner (the speaking actor or local player on an owned
+	 * channel, none on a global one), for a fixed place on screen.
 	 *
-	 * Returning an empty struct (all nullptr) is valid and means "ignore events from
-	 * this channel". The base class won't apply text or play animations for it.
+	 * Returning an empty struct (all nullptr) sends the channel to a row when StackPanel and RowClass
+	 * are set, and otherwise means "ignore events from this channel".
 	 */
 	UFUNCTION(BlueprintImplementableEvent, BlueprintPure, Category = "Dialogue|Subtitles")
-	FKzSubtitleChannelView GetViewForChannel(FGameplayTag Channel) const;
+	FKzSubtitleChannelView GetViewForChannel(FGameplayTag Channel, AActor* Owner) const;
 
 	/**
 	 * Gate for rendering a line on a channel. Return false to skip showing it: the dialogue keeps playing
@@ -288,8 +356,27 @@ protected:
 	UFUNCTION() void HandleResumed(UKzDialoguePlayer* InPlayer);
 	UFUNCTION() void HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzDialogueFinishReason Reason);
 	UFUNCTION() void HandlePlayerCreated(FGameplayTag Channel, UKzDialoguePlayer* InPlayer);
+	UFUNCTION() void HandlePlayerRemoved(FGameplayTag Channel, UKzDialoguePlayer* InPlayer);
 
 private:
+	/** The player's fixed view, else its row (created when bCreateRow and there is room), else an empty view. */
+	FKzSubtitleChannelView FindView(UKzDialoguePlayer* InPlayer, bool bCreateRow);
+
+	/** The player's row; null when it has none or MaxRows pushed it out. */
+	UKzSubtitleRow* FindOrAddRow(UKzDialoguePlayer* InPlayer, bool bCreate);
+
+	/** Takes the player's row off screen and forgets it. */
+	void RemoveRow(const UKzDialoguePlayer* InPlayer);
+
+	/** The widget that owns and plays the player's animations: its row, or this widget. */
+	UUserWidget* GetAnimHost(const UKzDialoguePlayer* InPlayer) const;
+
+	/** Whether ListenedChannels binding takes the player: the owner filter, and the owning player on a per listener channel. */
+	bool AcceptsPlayer(const UKzDialoguePlayer* InPlayer) const;
+
+	/** An animation of Host ended: the player that started it is told. */
+	void HandleAnimationFinished(UUserWidget* Host, const UWidgetAnimation* Animation);
+
 	/** Subscribe handlers to a player's events. */
 	void BindPlayerEvents(UKzDialoguePlayer* InPlayer);
 
@@ -338,17 +425,34 @@ private:
 	/** Speaker formatting rules for the active culture: the per-culture override when one matches the culture priority chain, SpeakerFormattingRules otherwise. */
 	const TArray<FKzSpeakerAffixRule>& GetActiveSpeakerFormattingRules() const;
 
-	/** Start an animation and remember which player it belongs to. */
+	/** Start an animation on the player's host and remember which player it belongs to. */
 	void PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePlayer* InPlayer);
 
-	/** Look up the player whose animation just finished. */
-	UKzDialoguePlayer* GetPlayerForAnim(UWidgetAnimation* Anim) const;
+	/** Look up the player whose animation of Host this is. */
+	UKzDialoguePlayer* GetPlayerForAnim(const UUserWidget* Host, const UWidgetAnimation* Anim) const;
 
 	UPROPERTY(Transient)
 	TArray<TWeakObjectPtr<UKzDialoguePlayer>> BoundPlayers;
 
-	/** Active animations -> originating player. Used to dispatch Notify*Finished correctly. */
-	TMap<TWeakObjectPtr<UWidgetAnimation>, TWeakObjectPtr<UKzDialoguePlayer>> ActiveAnimations;
+	/** An animation playing for a player, on the widget that hosts it: rows of one class share their animation objects. */
+	struct FActiveAnimation
+	{
+		TWeakObjectPtr<UUserWidget> Host;
+		TWeakObjectPtr<UWidgetAnimation> Anim;
+		TWeakObjectPtr<UKzDialoguePlayer> Player;
+	};
+
+	/** Used to dispatch Notify*Finished to the right player. */
+	TArray<FActiveAnimation> ActiveAnimations;
+
+	/** Rows by player, kept alive by StackPanel; a null row is a player MaxRows pushed out, which shows nothing until its dialogue ends. */
+	TMap<TWeakObjectPtr<UKzDialoguePlayer>, TWeakObjectPtr<UKzSubtitleRow>> Rows;
+
+	/** Players with a row, oldest first, for MaxRows. */
+	TArray<TWeakObjectPtr<UKzDialoguePlayer>> RowOrder;
+
+	/** Set by SetOwnerFilter: only this actor's players bind. */
+	TWeakObjectPtr<AActor> OwnerFilter;
 
 	/** Players whose channel is currently muted on this widget. Kept in sync by RefreshMuteStates. */
 	TSet<TWeakObjectPtr<UKzDialoguePlayer>> MutedPlayers;

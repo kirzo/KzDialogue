@@ -14,6 +14,7 @@
 
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Logging/LogMacros.h"
 
@@ -130,17 +131,26 @@ namespace KzDialogueCmd
 		}
 	}
 
-	/** Run a player command on the channel argument, or on the default channel. */
+	/** A player's channel, with its owner on an owned channel. */
+	static FString DescribePlayer(const UKzDialoguePlayer* Player)
+	{
+		const AActor* Owner = Player->GetOwner();
+		return Owner ? FString::Printf(TEXT("%s / %s"), *Player->Channel.ToString(), *Owner->GetActorNameOrLabel()) : Player->Channel.ToString();
+	}
+
+	/** Run a player command on every owner's player of the channel argument, or of the default channel. */
 	static void RunOnPlayer(const TArray<FString>& Args, const TCHAR* Done, void (UKzDialoguePlayer::*Command)())
 	{
 		UKzDialogueSubsystem* Sub = ResolveSubsystem();
 		if (!Sub) { return; }
 
 		const FGameplayTag Channel = ParseChannelArg(Args, 0);
-		if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel.IsValid() ? Channel : Sub->DefaultChannel))
+		TArray<UKzDialoguePlayer*> Players;
+		Sub->GetPlayersInScope(Channel.IsValid() ? Channel : Sub->DefaultChannel, Players);
+		for (UKzDialoguePlayer* Player : Players)
 		{
 			(Player->*Command)();
-			LogToConsole(FString::Printf(TEXT("%s channel '%s'"), Done, *Player->Channel.ToString()));
+			LogToConsole(FString::Printf(TEXT("%s channel '%s'"), Done, *DescribePlayer(Player)));
 		}
 	}
 
@@ -169,24 +179,15 @@ namespace KzDialogueCmd
 		if (!Sub) { return; }
 
 		const FGameplayTag Channel = ParseChannelArg(Args, 1);
-		if (Channel.IsValid())
+		TArray<UKzDialoguePlayer*> Players;
+		if (Channel.IsValid()) { Sub->GetPlayersInScope(Channel, Players); }
+		else { Sub->GetAllPlayers(Players); }
+
+		for (UKzDialoguePlayer* Player : Players)
 		{
-			if (UKzDialoguePlayer* Player = Sub->FindPlayer(Channel))
-			{
-				Player->TimeScale = Factor;
-				LogToConsole(FString::Printf(TEXT("TimeScale = %.2f on channel '%s'"), Factor, *Channel.ToString()));
-			}
+			Player->TimeScale = Factor;
 		}
-		else
-		{
-			TArray<UKzDialoguePlayer*> Players;
-			Sub->GetAllPlayers(Players);
-			for (UKzDialoguePlayer* Player : Players)
-			{
-				Player->TimeScale = Factor;
-			}
-			LogToConsole(FString::Printf(TEXT("TimeScale = %.2f on %d player(s)"), Factor, Players.Num()));
-		}
+		LogToConsole(FString::Printf(TEXT("TimeScale = %.2f on %d player(s)"), Factor, Players.Num()));
 	}
 
 	static void HandleListChannels(const TArray<FString>& /*Args*/)
@@ -212,7 +213,7 @@ namespace KzDialogueCmd
 				: TEXT("?");
 			LogToConsole(FString::Printf(
 				TEXT("  %s  [%s]  pri=%d  scale=%.2f"),
-				*Player->Channel.ToString(),
+				*DescribePlayer(Player),
 				*StateName,
 				Player->CurrentPriority,
 				Player->TimeScale));
@@ -264,7 +265,8 @@ namespace KzDialogueCmd
 		for (int32 i = History.Num() - Count; i < History.Num(); ++i)
 		{
 			const FKzDialogueHistoryEntry& Entry = History[i];
-			UE_LOG(LogKzDialogue, Display, TEXT("[%8.2f] %s  pri %d  %s -> %s"), Entry.Time, *Entry.Channel.ToString(), Entry.Priority, *Entry.Request, *Entry.Outcome);
+			const FString Where = Entry.Owner.IsEmpty() ? Entry.Channel.ToString() : FString::Printf(TEXT("%s / %s"), *Entry.Channel.ToString(), *Entry.Owner);
+			UE_LOG(LogKzDialogue, Display, TEXT("[%8.2f] %s  pri %d  %s -> %s"), Entry.Time, *Where, Entry.Priority, *Entry.Request, *Entry.Outcome);
 		}
 		LogToConsole(FString::Printf(TEXT("Dumped %d dialogue events to the log."), Count));
 	}

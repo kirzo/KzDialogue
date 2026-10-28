@@ -10,6 +10,7 @@
 #include "KzDialogueNotify.h"
 #include "KzDialoguePlayer.generated.h"
 
+class AActor;
 class UAudioComponent;
 class USoundWave;
 class UKzDialogueProvider;
@@ -98,6 +99,13 @@ public:
 	/** Channel this player is associated with (set by the subsystem on creation). */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")
 	FGameplayTag Channel;
+
+	/** Whose player this is on an owned channel (set by the subsystem on creation): the speaking actor, or a local player's controller. */
+	TWeakObjectPtr<AActor> Owner;
+
+	/** The speaking actor or the local player's controller this player belongs to; none on a global channel. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Player")
+	AActor* GetOwner() const { return Owner.Get(); }
 
 	/** Priority of the currently-playing dialogue, used by the subsystem for preemption. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Player")

@@ -8,7 +8,9 @@
 #include "KzDialogueMemorySubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
+#include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "TimerManager.h"
 
 namespace
@@ -190,7 +192,11 @@ bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
 {
 	UKzDialogueSubsystem* Subsystem = GetSubsystem();
 	const FGameplayTag Channel = Context.Channel.IsValid() ? Context.Channel : (Graph->Channel.IsValid() ? Graph->Channel : Subsystem->DefaultChannel);
-	Player = Subsystem->GetOrCreatePlayer(Channel);
+
+	// The player who talks owns the conversation on a per listener channel; the NPC, on a per speaker one.
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(Channel);
+	AActor* const ChannelOwner = ChannelDef && ChannelDef->Scope == EKzDialogueChannelScope::PerListener ? Context.Instigator.Get() : Context.Owner.Get();
+	Player = Subsystem->GetOrCreatePlayer(Channel, ChannelOwner);
 	if (!Player)
 	{
 		return false;
@@ -214,7 +220,7 @@ bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
 	Subsystem->AddGraphInstance(this);
 	Subsystem->OnDialogueGraphStarted.Broadcast(this);
 
-	if (!Subsystem->Play(Provider, Channel, Priority, AdvanceMode, Graph->bInterruptible))
+	if (!Subsystem->Play(Provider, Channel, Priority, AdvanceMode, Graph->bInterruptible, ChannelOwner))
 	{
 		Finish(true);
 		return false;

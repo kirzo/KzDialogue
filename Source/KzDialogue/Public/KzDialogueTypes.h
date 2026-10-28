@@ -581,10 +581,24 @@ enum class EKzDialoguePlayResult : uint8
 	RejectedNotInterruptible,
 	/** The channel is busy and its queue is full. */
 	RejectedQueueFull,
+	/** The channel already plays as many owners at once as its Max Concurrent allows. */
+	RejectedConcurrencyLimit,
 	/** Nothing resolved to play: an alias in cooldown, ids that no longer exist, an empty list. */
 	RejectedNothingToPlay,
 	/** The world is tearing down. */
 	RejectedTearingDown
+};
+
+/** Whose player of a channel a request plays on. */
+UENUM(BlueprintType)
+enum class EKzDialogueChannelScope : uint8
+{
+	/** One player for the whole world. */
+	Global,
+	/** One player per actor that speaks: each NPC barks on its own. */
+	PerSpeaker,
+	/** One player per local player: each player has their own conversation. */
+	PerListener
 };
 
 /**
@@ -604,6 +618,14 @@ struct FKzDialogueChannelDefinition
 	/** Display name used in editor UI and debug overlays. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
 	FText DisplayName;
+
+	/** Whose player a request plays on: one for the world, one per speaking actor, or one per local player. Queue, priority and history go per player. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
+	EKzDialogueChannelScope Scope = EKzDialogueChannelScope::Global;
+
+	/** Owners that may play on the channel at once; 0 is no limit. A request beyond it follows the busy policy. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel", meta = (ClampMin = 0, EditCondition = "Scope != EKzDialogueChannelScope::Global"))
+	int32 MaxConcurrent = 0;
 
 	/** Priority used when neither the asset nor the caller specify one. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Channel")
@@ -726,6 +748,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDi
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FKzOnDialogueLineSingleEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialoguePlayerEvent, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialoguePlayerCreated, FGameplayTag, Channel, class UKzDialoguePlayer*, Player);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialoguePlayerRemoved, FGameplayTag, Channel, class UKzDialoguePlayer*, Player);
 
 /** Smoothed 0..1 speaking amplitude (jaw / lip-flap). Used by the player (channel-level) and the speaker (gated per speaker). */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnSpeakingLevelChanged, float, Level);

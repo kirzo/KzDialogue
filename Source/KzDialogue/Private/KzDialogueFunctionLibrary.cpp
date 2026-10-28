@@ -23,29 +23,29 @@ bool UKzDialogueFunctionLibrary::IsDialogueSpeakerValid(const FKzDialogueSpeaker
 	return Speaker.IsValid();
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* WorldContextObject, FGameplayTag InChannel, bool bCreateIfNotFound)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::GetDialoguePlayer(const UObject* WorldContextObject, FGameplayTag InChannel, bool bCreateIfNotFound, AActor* Owner)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
 	if (!IsValid(Sub))
 	{
 		return nullptr;
 	}
-	return bCreateIfNotFound ? Sub->GetOrCreatePlayer(InChannel) : Sub->FindPlayer(InChannel);
+	return bCreateIfNotFound ? Sub->GetOrCreatePlayer(InChannel, Owner) : Sub->FindPlayer(InChannel, Owner);
 }
 
-UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode)
+UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode, AActor* Owner)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, AdvanceMode) : nullptr;
+	return IsValid(Sub) ? Sub->PlayAsset(Asset, Channel, AdvanceMode, Owner) : nullptr;
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag Channel, int32 Priority, AActor* Owner)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayAssetLine(Asset, LineId, Channel, Priority) : nullptr;
+	return IsValid(Sub) ? Sub->PlayAssetLine(Asset, LineId, Channel, Priority, Owner) : nullptr;
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Ref, FGameplayTag Channel, int32 Priority, AActor* Owner)
 {
 	if (!Ref.IsValid()) { return nullptr; }
 
@@ -55,13 +55,13 @@ UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLine(const UObject* W
 	UKzDialogueAsset* Loaded = Ref.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	return Sub->PlayAssetLine(Loaded, Ref.LineId, Channel, Priority);
+	return Sub->PlayAssetLine(Loaded, Ref.LineId, Channel, Priority, Owner);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineDirect(const UObject* WorldContextObject, const FKzDialogueLine& Line, FGameplayTag Channel, int32 Priority, AActor* Owner)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayLine(Line, Channel, Priority) : nullptr;
+	return IsValid(Sub) ? Sub->PlayLine(Line, Channel, Priority, Owner) : nullptr;
 }
 
 bool UKzDialogueFunctionLibrary::TryResolveDialogueLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine)
@@ -69,7 +69,7 @@ bool UKzDialogueFunctionLibrary::TryResolveDialogueLineRef(const FKzDialogueLine
 	return Ref.TryResolve(OutLine);
 }
 
-UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority)
+UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& List, FGameplayTag Channel, int32 Priority, AActor* Owner)
 {
 	if (!List.IsValid()) { return nullptr; }
 
@@ -79,13 +79,13 @@ UKzDialogueAssetSession* UKzDialogueFunctionLibrary::PlayDialogueLineList(const 
 	UKzDialogueAsset* Loaded = List.Asset.LoadSynchronous();
 	if (!Loaded) { return nullptr; }
 
-	return Sub->PlayLineList(Loaded, List.LineIds, Channel, Priority);
+	return Sub->PlayLineList(Loaded, List.LineIds, Channel, Priority, EKzDialogueAdvanceMode::Inherit, Owner);
 }
 
-UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority)
+UKzDialoguePlayer* UKzDialogueFunctionLibrary::PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Refs, FGameplayTag Channel, int32 Priority, AActor* Owner)
 {
 	UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject);
-	return IsValid(Sub) ? Sub->PlayLineRefs(Refs, Channel, Priority) : nullptr;
+	return IsValid(Sub) ? Sub->PlayLineRefs(Refs, Channel, Priority, Owner) : nullptr;
 }
 
 bool UKzDialogueFunctionLibrary::TryResolveDialogueLineList(const FKzDialogueLineList& List, TArray<FKzDialogueLine>& OutLines)
@@ -162,11 +162,11 @@ bool UKzDialogueFunctionLibrary::IsDialogueChannelPlaying(const UObject* WorldCo
 	return false;
 }
 
-void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)
+void UKzDialogueFunctionLibrary::StopDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel, AActor* Owner)
 {
 	if (UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject))
 	{
-		Sub->StopChannel(Channel);
+		Sub->StopChannel(Channel, Owner);
 	}
 }
 
@@ -178,11 +178,11 @@ void UKzDialogueFunctionLibrary::StopAllDialogues(const UObject* WorldContextObj
 	}
 }
 
-void UKzDialogueFunctionLibrary::InterruptDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel)
+void UKzDialogueFunctionLibrary::InterruptDialogueChannel(const UObject* WorldContextObject, FGameplayTag Channel, AActor* Owner)
 {
 	if (UKzDialogueSubsystem* Sub = GetDialogueSubsystem(WorldContextObject))
 	{
-		Sub->InterruptChannel(Channel);
+		Sub->InterruptChannel(Channel, Owner);
 	}
 }
 

@@ -29,6 +29,12 @@ namespace
 		return OutSubsystem ? OutSubsystem->ResolveChannelForEntry(Channel, Asset, LineId) : FGameplayTag();
 	}
 
+	// The track is bound to no actor: on a per speaker channel the line's speaker picks the player, as in PlayLine.
+	UKzDialoguePlayer* FindSectionPlayer(const UKzDialogueSubsystem* Subsystem, FGameplayTag Channel, const UKzDialogueAsset* Asset, const FGuid& LineId)
+	{
+		return Subsystem ? Subsystem->FindPlayer(Channel, Subsystem->ResolveOwner(Channel, nullptr, Asset ? Asset->GetEntrySpeaker(LineId) : nullptr)) : nullptr;
+	}
+
 	// Ours-only guard: never touch a dialogue something else put on the shared channel.
 	bool IsOwnLine(const UKzDialoguePlayer* DialoguePlayer, const FGuid& LineId)
 	{
@@ -75,7 +81,7 @@ void FMovieSceneKzDialogueSectionTemplate::TearDown(FPersistentEvaluationData& P
 
 	UKzDialogueSubsystem* Sub = nullptr;
 	const FGameplayTag EffectiveChannel = ResolveSectionChannel(Player, Asset, Channel, LineId, Sub);
-	if (UKzDialoguePlayer* DialoguePlayer = Sub ? Sub->FindPlayer(EffectiveChannel) : nullptr)
+	if (UKzDialoguePlayer* DialoguePlayer = FindSectionPlayer(Sub, EffectiveChannel, Asset, LineId))
 	{
 		// Only the last evaluated time tells a cut from completion: an explicit Stop and a natural
 		// finish both tear down as Stopped.
@@ -123,7 +129,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 			UKzDialogueSubsystem* Sub = nullptr;
 			const FGameplayTag EffectiveChannel = ResolveSectionChannel(InPlayer, WeakAsset.Get(), Channel, LineId, Sub);
 			if (!Sub) { return; }
-			UKzDialoguePlayer* DialoguePlayer = Sub->FindPlayer(EffectiveChannel);
+			UKzDialoguePlayer* DialoguePlayer = FindSectionPlayer(Sub, EffectiveChannel, WeakAsset.Get(), LineId);
 
 			if (Status == EMovieScenePlayerStatus::Playing)
 			{

@@ -4,6 +4,7 @@
 
 #include "Components/Border.h"
 #include "Components/Image.h"
+#include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Animation/WidgetAnimation.h"
 #include "Internationalization/Culture.h"
@@ -12,12 +13,49 @@
 #include "KzSpeakerAsset.h"
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
+#include "GameFramework/PlayerController.h"
 
 namespace
 {
 	FKzSubtitleProfile GSubtitleProfile;
 	FSimpleMulticastDelegate GOnSubtitleProfileChanged;
+
+	bool IsEmptyView(const FKzSubtitleChannelView& View)
+	{
+		return !View.SpeakerText && !View.SubtitlesText && !View.Background && !View.HasAnyAnimation();
+	}
 }
+
+// ---------------------------------------------------------------------------------------
+// Row
+// ---------------------------------------------------------------------------------------
+
+FKzSubtitleChannelView UKzSubtitleRow::GetView() const
+{
+	FKzSubtitleChannelView View;
+	View.SpeakerText = SpeakerText;
+	View.SubtitlesText = SubtitlesText;
+	View.Background = Background;
+	View.StartFadeIn = StartFadeIn;
+	View.EndFadeOut = EndFadeOut;
+	View.LineFadeIn = LineFadeIn;
+	View.LineFadeOut = LineFadeOut;
+	return View;
+}
+
+void UKzSubtitleRow::OnAnimationFinished_Implementation(const UWidgetAnimation* Animation)
+{
+	Super::OnAnimationFinished_Implementation(Animation);
+
+	if (UKzSubtitleWidget* Widget = SubtitleWidget.Get())
+	{
+		Widget->HandleAnimationFinished(this, Animation);
+	}
+}
+
+// ---------------------------------------------------------------------------------------
+// Profile
+// ---------------------------------------------------------------------------------------
 
 void UKzSubtitleWidget::SetSubtitleProfile(const FKzSubtitleProfile& Profile)
 {
@@ -52,6 +90,7 @@ void UKzSubtitleWidget::NativeDestruct()
 		if (UKzDialogueSubsystem* Subsystem = World->GetSubsystem<UKzDialogueSubsystem>())
 		{
 			Subsystem->OnPlayerCreated.RemoveDynamic(this, &UKzSubtitleWidget::HandlePlayerCreated);
+			Subsystem->OnPlayerRemoved.RemoveDynamic(this, &UKzSubtitleWidget::HandlePlayerRemoved);
 		}
 	}
 
@@ -113,6 +152,7 @@ void UKzSubtitleWidget::UnbindPlayer(UKzDialoguePlayer* InPlayer)
 			return Weak.Get() == InPlayer;
 		});
 	ReleaseClaims(InPlayer);
+	RemoveRow(InPlayer);
 }
 
 void UKzSubtitleWidget::UnbindAllPlayers()
@@ -127,24 +167,40 @@ void UKzSubtitleWidget::UnbindAllPlayers()
 	BoundPlayers.Reset();
 	MutedPlayers.Reset();
 	ReleaseClaims(nullptr);
+
+	for (const TPair<TWeakObjectPtr<UKzDialoguePlayer>, TWeakObjectPtr<UKzSubtitleRow>>& Pair : Rows)
+	{
+		if (UKzSubtitleRow* Row = Pair.Value.Get()) { Row->RemoveFromParent(); }
+	}
+	Rows.Reset();
+	RowOrder.Reset();
+}
+
+void UKzSubtitleWidget::SetOwnerFilter(AActor* InOwner)
+{
+	OwnerFilter = InOwner;
+
+	// The players bound so far were picked without the filter.
+	UnbindAllPlayers();
+	BindFromListenedChannels();
 }
 
 void UKzSubtitleWidget::ReleaseClaims(const UKzDialoguePlayer* InPlayer)
 {
 	// Events are already unbound, so the players moving on cannot ask this view for anything new.
-	TArray<TPair<UKzDialoguePlayer*, UWidgetAnimation*>> Pending;
-	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
+	TArray<FActiveAnimation> Pending;
+	for (int32 Index = ActiveAnimations.Num() - 1; Index >= 0; --Index)
 	{
-		UKzDialoguePlayer* Player = It->Value.Get();
-		if (!InPlayer || Player == InPlayer)
+		const FActiveAnimation& Active = ActiveAnimations[Index];
+		if (!InPlayer || Active.Player.Get() == InPlayer)
 		{
-			if (Player && It->Key.IsValid()) { Pending.Emplace(Player, It->Key.Get()); }
-			It.RemoveCurrent();
+			if (Active.Player.IsValid() && Active.Anim.IsValid()) { Pending.Add(Active); }
+			ActiveAnimations.RemoveAt(Index);
 		}
 	}
-	for (const TPair<UKzDialoguePlayer*, UWidgetAnimation*>& Claim : Pending)
+	for (const FActiveAnimation& Claim : Pending)
 	{
-		DispatchViewAck(*Claim.Key, Claim.Value);
+		DispatchViewAck(*Claim.Player.Get(), Claim.Anim.Get());
 	}
 }
 
@@ -176,13 +232,17 @@ void UKzSubtitleWidget::BindFromListenedChannels()
 		Subsystem->GetPlayersInScope(Scope, Matching);
 		for (UKzDialoguePlayer* Player : Matching)
 		{
-			BindPlayer(Player);
+			if (AcceptsPlayer(Player))
+			{
+				BindPlayer(Player);
+			}
 		}
 	}
 
 	// ...and watch for players created later. They are broadcast before anything plays on
-	// them, so the view is wired ahead of their first StartDialogue.
-	Subsystem->OnPlayerCreated.AddDynamic(this, &UKzSubtitleWidget::HandlePlayerCreated);
+	// them, so the view is wired ahead of their first StartDialogue. Owned players leave with their owner.
+	Subsystem->OnPlayerCreated.AddUniqueDynamic(this, &UKzSubtitleWidget::HandlePlayerCreated);
+	Subsystem->OnPlayerRemoved.AddUniqueDynamic(this, &UKzSubtitleWidget::HandlePlayerRemoved);
 
 	// Per-player mute evaluation during the loop above only sees the players bound so far;
 	// re-evaluate now that the full set is known.
@@ -198,12 +258,34 @@ bool UKzSubtitleWidget::MatchesListenedChannels(FGameplayTag Channel) const
 	return false;
 }
 
+bool UKzSubtitleWidget::AcceptsPlayer(const UKzDialoguePlayer* InPlayer) const
+{
+	if (OwnerFilter.IsValid())
+	{
+		return InPlayer->GetOwner() == OwnerFilter.Get();
+	}
+
+	// A per listener channel shows the owning player's conversations only.
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(InPlayer->Channel);
+	const APlayerController* OwningPlayer = GetOwningPlayer();
+	if (ChannelDef && ChannelDef->Scope == EKzDialogueChannelScope::PerListener && OwningPlayer)
+	{
+		return InPlayer->GetOwner() == OwningPlayer;
+	}
+	return true;
+}
+
 void UKzSubtitleWidget::HandlePlayerCreated(FGameplayTag Channel, UKzDialoguePlayer* InPlayer)
 {
-	if (MatchesListenedChannels(Channel))
+	if (MatchesListenedChannels(Channel) && AcceptsPlayer(InPlayer))
 	{
 		BindPlayer(InPlayer);
 	}
+}
+
+void UKzSubtitleWidget::HandlePlayerRemoved(FGameplayTag Channel, UKzDialoguePlayer* InPlayer)
+{
+	UnbindPlayer(InPlayer);
 }
 
 void UKzSubtitleWidget::BindPlayerEvents(UKzDialoguePlayer* InPlayer)
@@ -233,6 +315,71 @@ void UKzSubtitleWidget::UnbindPlayerEvents(UKzDialoguePlayer* InPlayer)
 }
 
 // ---------------------------------------------------------------------------------------
+// Views and rows
+// ---------------------------------------------------------------------------------------
+
+FKzSubtitleChannelView UKzSubtitleWidget::FindView(UKzDialoguePlayer* InPlayer, bool bCreateRow)
+{
+	const FKzSubtitleChannelView Fixed = GetViewForChannel(InPlayer->Channel, InPlayer->GetOwner());
+	if (!IsEmptyView(Fixed)) { return Fixed; }
+
+	const UKzSubtitleRow* Row = FindOrAddRow(InPlayer, bCreateRow);
+	return Row ? Row->GetView() : FKzSubtitleChannelView();
+}
+
+UKzSubtitleRow* UKzSubtitleWidget::FindOrAddRow(UKzDialoguePlayer* InPlayer, bool bCreate)
+{
+	if (const TWeakObjectPtr<UKzSubtitleRow>* Found = Rows.Find(InPlayer)) { return Found->Get(); }
+	if (!bCreate || !StackPanel || !RowClass) { return nullptr; }
+
+	// Past MaxRows the oldest row goes; its player stays rowless until its dialogue ends.
+	int32 Shown = 0;
+	for (const TPair<TWeakObjectPtr<UKzDialoguePlayer>, TWeakObjectPtr<UKzSubtitleRow>>& Pair : Rows)
+	{
+		if (Pair.Value.IsValid()) { ++Shown; }
+	}
+	for (int32 Index = 0; MaxRows > 0 && Shown >= MaxRows && Index < RowOrder.Num(); ++Index)
+	{
+		UKzDialoguePlayer* Oldest = RowOrder[Index].Get();
+		TWeakObjectPtr<UKzSubtitleRow>* OldestRow = Oldest ? Rows.Find(Oldest) : nullptr;
+		if (OldestRow && OldestRow->IsValid())
+		{
+			// Its pending claims are answered while the row still gives its view.
+			ReleaseClaims(Oldest);
+			OldestRow->Get()->RemoveFromParent();
+			OldestRow->Reset();
+			--Shown;
+		}
+	}
+
+	UKzSubtitleRow* Row = CreateWidget<UKzSubtitleRow>(this, RowClass);
+	if (!Row) { return nullptr; }
+
+	Row->SubtitleWidget = this;
+	StackPanel->AddChild(Row);
+	Rows.Add(InPlayer, Row);
+	RowOrder.Add(InPlayer);
+	return Row;
+}
+
+void UKzSubtitleWidget::RemoveRow(const UKzDialoguePlayer* InPlayer)
+{
+	const TWeakObjectPtr<UKzDialoguePlayer> Key(const_cast<UKzDialoguePlayer*>(InPlayer));
+	TWeakObjectPtr<UKzSubtitleRow> Row;
+	if (Rows.RemoveAndCopyValue(Key, Row) && Row.IsValid())
+	{
+		Row->RemoveFromParent();
+	}
+	RowOrder.Remove(Key);
+}
+
+UUserWidget* UKzSubtitleWidget::GetAnimHost(const UKzDialoguePlayer* InPlayer) const
+{
+	const TWeakObjectPtr<UKzSubtitleRow>* Row = Rows.Find(TWeakObjectPtr<UKzDialoguePlayer>(const_cast<UKzDialoguePlayer*>(InPlayer)));
+	return Row && Row->IsValid() ? static_cast<UUserWidget*>(Row->Get()) : const_cast<UKzSubtitleWidget*>(this);
+}
+
+// ---------------------------------------------------------------------------------------
 // Event handlers
 // ---------------------------------------------------------------------------------------
 
@@ -248,7 +395,7 @@ void UKzSubtitleWidget::HandleRequestDialogueEnter(UKzDialoguePlayer* InPlayer)
 	}
 
 	// The first line only arrives after this fade: start blank, not on the last dialogue's texts.
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	const FKzSubtitleChannelView View = FindView(InPlayer, true);
 	if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 	ReceiveShow(InPlayer->Channel);
@@ -267,7 +414,7 @@ void UKzSubtitleWidget::HandleRequestDialogueExit(UKzDialoguePlayer* InPlayer)
 		return;
 	}
 
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	const FKzSubtitleChannelView View = FindView(InPlayer, false);
 	if (View.EndFadeOut)
 	{
 		InPlayer->ClaimViewResponse();
@@ -294,7 +441,7 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 		return;
 	}
 
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	const FKzSubtitleChannelView View = FindView(InPlayer, true);
 	ApplyLineToView(View, Line, InPlayer->Channel);
 	if (View.LineFadeIn)
 	{
@@ -306,10 +453,11 @@ void UKzSubtitleWidget::HandleRequestLineEnter(UKzDialoguePlayer* InPlayer, cons
 void UKzSubtitleWidget::HandleRequestLineRevealComplete(UKzDialoguePlayer* InPlayer, const FKzDialogueLine& Line)
 {
 	// Jump to the end, never StopAnimation: a stop rewinds to frame 0 and hides the line.
-	UWidgetAnimation* FadeIn = GetViewForChannel(InPlayer->Channel).LineFadeIn;
-	if (FadeIn && GetPlayerForAnim(FadeIn) == InPlayer)
+	UWidgetAnimation* FadeIn = FindView(InPlayer, false).LineFadeIn;
+	UUserWidget* Host = GetAnimHost(InPlayer);
+	if (FadeIn && GetPlayerForAnim(Host, FadeIn) == InPlayer)
 	{
-		SetAnimationCurrentTime(FadeIn, FadeIn->GetEndTime());
+		Host->SetAnimationCurrentTime(FadeIn, FadeIn->GetEndTime());
 	}
 }
 
@@ -325,7 +473,7 @@ void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const
 		return;
 	}
 
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	const FKzSubtitleChannelView View = FindView(InPlayer, false);
 	if (View.LineFadeOut)
 	{
 		InPlayer->ClaimViewResponse();
@@ -336,28 +484,26 @@ void UKzSubtitleWidget::HandleRequestLineExit(UKzDialoguePlayer* InPlayer, const
 void UKzSubtitleWidget::HandlePaused(UKzDialoguePlayer* InPlayer)
 {
 	// Pause any animation that belongs to this player.
-	for (const auto& Pair : ActiveAnimations)
+	for (const FActiveAnimation& Active : ActiveAnimations)
 	{
-		if (Pair.Value.Get() == InPlayer)
+		UUserWidget* Host = Active.Host.Get();
+		UWidgetAnimation* Anim = Active.Anim.Get();
+		if (Active.Player.Get() == InPlayer && Host && Anim)
 		{
-			if (UWidgetAnimation* Anim = Pair.Key.Get())
-			{
-				PauseAnimation(Anim);
-			}
+			Host->PauseAnimation(Anim);
 		}
 	}
 }
 
 void UKzSubtitleWidget::HandleResumed(UKzDialoguePlayer* InPlayer)
 {
-	for (const auto& Pair : ActiveAnimations)
+	for (const FActiveAnimation& Active : ActiveAnimations)
 	{
-		if (Pair.Value.Get() == InPlayer)
+		UUserWidget* Host = Active.Host.Get();
+		UWidgetAnimation* Anim = Active.Anim.Get();
+		if (Active.Player.Get() == InPlayer && Host && Anim)
 		{
-			if (UWidgetAnimation* Anim = Pair.Key.Get())
-			{
-				PlayAnimation(Anim, GetAnimationCurrentTime(Anim), 1, EUMGSequencePlayMode::Forward);
-			}
+			Host->PlayAnimation(Anim, Host->GetAnimationCurrentTime(Anim), 1, EUMGSequencePlayMode::Forward);
 		}
 	}
 }
@@ -375,22 +521,24 @@ void UKzSubtitleWidget::HandleDialogueFinished(UKzDialoguePlayer* InPlayer, EKzD
 	// This player may have been a mute-rule trigger: re-show the views it was silencing.
 	RefreshMuteStates();
 
-	if (bWasMuted)
+	if (!bWasMuted)
 	{
-		return;
+		// A normal end already played its exit, so only the texts are left, for views with no fade to hide them.
+		if (Reason == EKzDialogueFinishReason::Completed || Reason == EKzDialogueFinishReason::Stopped)
+		{
+			const FKzSubtitleChannelView View = FindView(InPlayer, false);
+			if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
+			if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
+		}
+		else
+		{
+			// A hard cancel is immediate: no exit animations. ReceiveHide may arrive here without a prior EndFadeOut.
+			HardResetView(InPlayer);
+		}
 	}
 
-	// A normal end already played its exit, so only the texts are left, for views with no fade to hide them.
-	if (Reason == EKzDialogueFinishReason::Completed || Reason == EKzDialogueFinishReason::Stopped)
-	{
-		const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
-		if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
-		if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
-		return;
-	}
-
-	// A hard cancel is immediate: no exit animations. ReceiveHide may arrive here without a prior EndFadeOut.
-	HardResetView(InPlayer);
+	// The row lasts as long as its player's dialogue.
+	RemoveRow(InPlayer);
 }
 
 // ---------------------------------------------------------------------------------------
@@ -485,39 +633,35 @@ void UKzSubtitleWidget::RefreshMuteStates()
 void UKzSubtitleWidget::HardResetView(UKzDialoguePlayer* InPlayer)
 {
 	// UMG fires OnAnimationFinished on stop, which dispatches the pending Notify*Finished and may
-	// start the next phase's fade synchronously: collect first, never stop while iterating the map.
-	TArray<UWidgetAnimation*> ToStop;
-	for (const auto& Pair : ActiveAnimations)
+	// start the next phase's fade synchronously: collect first, never stop while iterating.
+	TArray<TPair<UUserWidget*, UWidgetAnimation*>> ToStop;
+	for (const FActiveAnimation& Active : ActiveAnimations)
 	{
-		if (Pair.Value.Get() == InPlayer)
+		UUserWidget* Host = Active.Host.Get();
+		UWidgetAnimation* Anim = Active.Anim.Get();
+		if (Active.Player.Get() == InPlayer && Host && Anim)
 		{
-			if (UWidgetAnimation* Anim = Pair.Key.Get())
-			{
-				ToStop.Add(Anim);
-			}
+			ToStop.Emplace(Host, Anim);
 		}
 	}
-	for (UWidgetAnimation* Anim : ToStop)
+	for (const TPair<UUserWidget*, UWidgetAnimation*>& Stop : ToStop)
 	{
-		StopAnimation(Anim);
+		Stop.Key->StopAnimation(Stop.Value);
 	}
 
 	// StopAnimation queues a rewind-to-frame-0 on the shared UMG tick manager (deferred, since widget anims
 	// don't use a private linker). Flush it now so that write lands BEFORE the reset below: for a fade-out
 	// (frame 0 = Opacity 1) the deferred rewind would otherwise fire next tick and clobber
 	// ReceiveResetChannelVisual, leaving the background visible with no text.
-	FlushAnimations();
+	GetAnimHost(InPlayer)->FlushAnimations();
 
 	// Sweep what the stops did not untrack: stale weak anims, or animations no longer playing.
-	for (auto It = ActiveAnimations.CreateIterator(); It; ++It)
-	{
-		if (It->Value.Get() == InPlayer || !It->Value.IsValid())
+	ActiveAnimations.RemoveAll([InPlayer](const FActiveAnimation& Active)
 		{
-			It.RemoveCurrent();
-		}
-	}
+			return Active.Player.Get() == InPlayer || !Active.Player.IsValid();
+		});
 
-	const FKzSubtitleChannelView View = GetViewForChannel(InPlayer->Channel);
+	const FKzSubtitleChannelView View = FindView(InPlayer, false);
 	if (View.SpeakerText)   { View.SpeakerText->SetText(FText::GetEmpty()); }
 	if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 
@@ -534,6 +678,7 @@ void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 	const EKzDialogueState CurrentState = InPlayer->GetState();
 	if (CurrentState == EKzDialogueState::Entering || CurrentState == EKzDialogueState::Waiting)
 	{
+		FindView(InPlayer, true);
 		ReceiveShow(InPlayer->Channel);
 	}
 	else if (CurrentState == EKzDialogueState::LineEntering ||
@@ -542,7 +687,7 @@ void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 		CurrentState == EKzDialogueState::Paused)
 	{
 		ReceiveShow(InPlayer->Channel);
-		ApplyLineToView(GetViewForChannel(InPlayer->Channel), InPlayer->GetCurrentLine(), InPlayer->Channel);
+		ApplyLineToView(FindView(InPlayer, true), InPlayer->GetCurrentLine(), InPlayer->Channel);
 	}
 }
 
@@ -558,7 +703,7 @@ void UKzSubtitleWidget::ClearTextWidgets()
 	{
 		UKzDialoguePlayer* Player = Weak.Get();
 		if (!Player) { continue; }
-		const FKzSubtitleChannelView View = GetViewForChannel(Player->Channel);
+		const FKzSubtitleChannelView View = FindView(Player, false);
 		if (View.SpeakerText) { View.SpeakerText->SetText(FText::GetEmpty()); }
 		if (View.SubtitlesText) { View.SubtitlesText->SetText(FText::GetEmpty()); }
 	}
@@ -650,14 +795,14 @@ void UKzSubtitleWidget::ReapplyShownLines()
 {
 	for (const TWeakObjectPtr<UKzDialoguePlayer>& Weak : BoundPlayers)
 	{
-		const UKzDialoguePlayer* Player = Weak.Get();
+		UKzDialoguePlayer* Player = Weak.Get();
 		if (!Player || IsPlayerMuted(Player)) { continue; }
 
 		// The states where the view shows a line, as in SyncViewToPlayer.
 		const EKzDialogueState State = Player->GetState();
 		if (State != EKzDialogueState::LineEntering && State != EKzDialogueState::LinePlaying && State != EKzDialogueState::LineExiting && State != EKzDialogueState::Paused) { continue; }
 
-		ApplyLineToView(GetViewForChannel(Player->Channel), Player->GetCurrentLine(), Player->Channel);
+		ApplyLineToView(FindView(Player, false), Player->GetCurrentLine(), Player->Channel);
 	}
 }
 
@@ -696,47 +841,49 @@ void UKzSubtitleWidget::PlayAnimForPlayer(UWidgetAnimation* Anim, UKzDialoguePla
 
 	// Channels sharing one view bundle: a restarted animation never reports its first run, so the
 	// other player's claim is answered here before the animation changes owner.
-	if (const TWeakObjectPtr<UKzDialoguePlayer>* Owner = ActiveAnimations.Find(Anim))
+	UUserWidget* Host = GetAnimHost(InPlayer);
+	const int32 Existing = ActiveAnimations.IndexOfByPredicate([Host, Anim](const FActiveAnimation& Active) { return Active.Host.Get() == Host && Active.Anim.Get() == Anim; });
+	if (Existing != INDEX_NONE)
 	{
-		UKzDialoguePlayer* Previous = Owner->Get();
-		ActiveAnimations.Remove(Anim);
+		UKzDialoguePlayer* Previous = ActiveAnimations[Existing].Player.Get();
+		ActiveAnimations.RemoveAt(Existing);
 		if (Previous && Previous != InPlayer)
 		{
 			DispatchViewAck(*Previous, Anim);
 		}
 	}
 
-	ActiveAnimations.Add(Anim, InPlayer);
-	PlayAnimation(Anim);
+	ActiveAnimations.Add({ Host, Anim, InPlayer });
+	Host->PlayAnimation(Anim);
 }
 
-UKzDialoguePlayer* UKzSubtitleWidget::GetPlayerForAnim(UWidgetAnimation* Anim) const
+UKzDialoguePlayer* UKzSubtitleWidget::GetPlayerForAnim(const UUserWidget* Host, const UWidgetAnimation* Anim) const
 {
 	if (!Anim) { return nullptr; }
-	if (const TWeakObjectPtr<UKzDialoguePlayer>* Found = ActiveAnimations.Find(Anim))
-	{
-		return Found->Get();
-	}
-	return nullptr;
+	const FActiveAnimation* Found = ActiveAnimations.FindByPredicate([Host, Anim](const FActiveAnimation& Active) { return Active.Host.Get() == Host && Active.Anim.Get() == Anim; });
+	return Found ? Found->Player.Get() : nullptr;
 }
 
 void UKzSubtitleWidget::OnAnimationFinished_Implementation(const UWidgetAnimation* Animation)
 {
 	Super::OnAnimationFinished_Implementation(Animation);
+	HandleAnimationFinished(this, Animation);
+}
 
-	UWidgetAnimation* Finished = const_cast<UWidgetAnimation*>(Animation);
-	UKzDialoguePlayer* Player = GetPlayerForAnim(Finished);
+void UKzSubtitleWidget::HandleAnimationFinished(UUserWidget* Host, const UWidgetAnimation* Animation)
+{
+	UKzDialoguePlayer* Player = GetPlayerForAnim(Host, Animation);
 	if (!Player) { return; }
 
 	// Untrack BEFORE dispatching: the notify re-enters and may start the next line's fade synchronously,
 	// so removing first keeps at most one tracked fade per player.
-	ActiveAnimations.Remove(Finished);
-	DispatchViewAck(*Player, Finished);
+	ActiveAnimations.RemoveAll([Host, Animation](const FActiveAnimation& Active) { return Active.Host.Get() == Host && Active.Anim.Get() == Animation; });
+	DispatchViewAck(*Player, Animation);
 }
 
 void UKzSubtitleWidget::DispatchViewAck(UKzDialoguePlayer& Player, const UWidgetAnimation* Anim)
 {
-	const FKzSubtitleChannelView View = GetViewForChannel(Player.Channel);
+	const FKzSubtitleChannelView View = FindView(&Player, false);
 	if (Anim == View.StartFadeIn) { Player.NotifyEnterFinished(); }
 	else if (Anim == View.EndFadeOut) { Player.NotifyExitFinished(); }
 	else if (Anim == View.LineFadeIn) { Player.NotifyLineEnterFinished(); }

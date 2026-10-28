@@ -3,12 +3,14 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "KzDialogueTypes.h"
 #include "UObject/SoftObjectPath.h"
 #include "KzDialogueSubsystem.generated.h"
 
+class AActor;
 class UKzDialoguePlayer;
 class UKzDialogueProvider;
 class UKzDialogueAsset;
@@ -54,6 +56,9 @@ struct FKzDialogueHistoryEntry
 	FString Request;
 	/** Started, Queued, a rejection with what holds the channel, an ending (Interrupted by ...), Dropped with its cause. */
 	FString Outcome;
+
+	/** The player's owner on an owned channel, by name; empty on a global one. */
+	FString Owner;
 };
 
 /** One channel's waiting requests, in playing order. */
@@ -67,9 +72,10 @@ struct FKzDialogueChannelQueue
 };
 
 /**
- * World-level manager of dialogue playback. Owns a UKzDialoguePlayer per channel and
- * arbitrates between requests using priority. Channels let independent dialogue streams
- * coexist (story, barks, system, tutorial...) without interfering.
+ * World-level manager of dialogue playback. Owns a UKzDialoguePlayer per channel, or per channel and
+ * owner on owned channels (FKzDialogueChannelDefinition::Scope), and arbitrates between requests using
+ * priority. Channels let independent dialogue streams coexist (story, barks, system, tutorial...)
+ * without interfering; owners let each NPC bark and each local player talk on their own.
  */
 UCLASS()
 class KZDIALOGUE_API UKzDialogueSubsystem : public UWorldSubsystem
@@ -83,22 +89,34 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Subsystem")
 	FGameplayTag DefaultChannel;
 
-	/** Fired whenever a channel player is lazily created, BEFORE anything plays on it. Lets views bind to channels that don't exist yet (e.g. per-character bark channels). */
+	/** Fired whenever a channel player is lazily created, BEFORE anything plays on it. Lets views bind to players that don't exist yet (e.g. a new NPC's barks). */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
 	FKzOnDialoguePlayerCreated OnPlayerCreated;
 
-	/** Get (and lazily create) the player associated with a channel. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
-	UKzDialoguePlayer* GetOrCreatePlayer(FGameplayTag InChannel);
+	/** Fired when an owned player goes away with its owner; views unbind here. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
+	FKzOnDialoguePlayerRemoved OnPlayerRemoved;
 
-	/** Get the player for a channel without creating one. */
-	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
-	UKzDialoguePlayer* FindPlayer(FGameplayTag InChannel) const;
+	/** Get (and lazily create) the player of a channel, for Owner on an owned channel (see ResolveOwner). */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "Owner"))
+	UKzDialoguePlayer* GetOrCreatePlayer(FGameplayTag InChannel, AActor* Owner = nullptr);
+
+	/** Get the player of a channel, for Owner on an owned channel, without creating one. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "Owner"))
+	UKzDialoguePlayer* FindPlayer(FGameplayTag InChannel, AActor* Owner = nullptr) const;
 
 	/**
-	 * Fill OutPlayers with every player whose channel matches Scope hierarchically: the scope
-	 * Dialogue.Channel.Bark matches Dialogue.Channel.Bark.MyCharacter (and itself). Pass a leaf
-	 * tag for an exact lookup.
+	 * Whose player of the channel a request with Owner plays on, by the channel's scope. Global: nobody. Per speaker:
+	 * Owner, else the actor of Speaker, else nobody (a shared player). Per listener: Owner's player controller (a pawn
+	 * gives its controller), else the first local player.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "Speaker"))
+	AActor* ResolveOwner(FGameplayTag InChannel, AActor* Owner, const UKzSpeakerAsset* Speaker = nullptr) const;
+
+	/**
+	 * Fill OutPlayers with every player whose channel matches Scope hierarchically, of every owner: the
+	 * scope Dialogue.Channel.Bark matches Dialogue.Channel.Bark.Combat (and itself). Pass a leaf tag for
+	 * an exact lookup.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
 	void GetPlayersInScope(FGameplayTag Scope, TArray<UKzDialoguePlayer*>& OutPlayers) const;
@@ -150,9 +168,10 @@ public:
 	 * A refused request follows the channel's busy policy. Returns the player (also when queued: it plays
 	 * there later), or nullptr when rejected; GetLastPlayResult says which.
 	 * @param Priority -1 (InheritPriority) uses the channel default.
+	 * @param Owner On an owned channel, whose player it plays on (see ResolveOwner).
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode,bInterruptible"))
-	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic, bool bInterruptible = true);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "AdvanceMode,bInterruptible,Owner"))
+	UKzDialoguePlayer* Play(UKzDialogueProvider* Provider, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic, bool bInterruptible = true, AActor* Owner = nullptr);
 
 	/** A dialogue graph started playing; views of its options bind to it here. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
@@ -171,6 +190,7 @@ public:
 	const TArray<TObjectPtr<UKzDialogueGraphInstance>>& GetGraphInstances() const { return GraphInstances; }
 
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
+	// Owner, on an owned channel, picks whose player they play on (see ResolveOwner); without one, the line's speaker decides.
 
 	/**
 	 * Play a whole dialogue asset, resolving EACH line's channel and chaining runs across channel changes.
@@ -178,7 +198,7 @@ public:
 	 * OnDialogueFinished / IsPlaying). A valid InChannel forces every line onto it (single-channel,
 	 * single run). AdvanceMode defaults to the asset's.
 	 */
-	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UKzDialogueAssetSession* PlayAsset(UKzDialogueAsset* Asset, FGameplayTag InChannel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit, AActor* Owner = nullptr);
 
 	/**
 	 * Play an ordered subset of an asset's entries (lines or aliases) with the same per-entry channel
@@ -186,42 +206,42 @@ public:
 	 * A valid InChannel forces every entry onto it (single run); InheritPriority falls back to the asset
 	 * hint / channel default.
 	 */
-	UKzDialogueAssetSession* PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = InheritPriority, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UKzDialogueAssetSession* PlayLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = InheritPriority, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit, AActor* Owner = nullptr);
 
 	/** Convenience wrapper: build a manual single-line provider and play it. */
-	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1);
+	UKzDialoguePlayer* PlayLine(const FKzDialogueLine& Line, FGameplayTag InChannel, int32 Priority = -1, AActor* Owner = nullptr);
 
 	/**
 	 * Play a line or alias from a dialogue asset by GUID. The asset checks both
 	 * Lines and Aliases tables internally, so the same call site works for either.
 	 */
-	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1);
+	UKzDialoguePlayer* PlayAssetLine(UKzDialogueAsset* Asset, FGuid LineId, FGameplayTag InChannel, int32 Priority = -1, AActor* Owner = nullptr);
 
 	/**
 	 * Play several lines or aliases from one dialogue asset as a SINGLE sequential dialogue.
 	 * Aliases are resolved at launch (stateful: shuffle bags, cooldowns...); entries that fail
 	 * to resolve are skipped. Line events fire per entry and OnDialogueFinished once at the end.
 	 */
-	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic);
+	UKzDialoguePlayer* PlayAssetLineList(UKzDialogueAsset* Asset, const TArray<FGuid>& LineIds, FGameplayTag InChannel, int32 Priority = -1, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Automatic, AActor* Owner = nullptr);
 
 	/**
 	 * Play an array of line references (possibly spanning multiple assets) as a SINGLE
 	 * sequential dialogue. Aliases are resolved at launch (stateful); entries that fail to
 	 * resolve are skipped. The first ref's asset gives the channel, priority hint and interruptibility.
 	 */
-	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1);
+	UKzDialoguePlayer* PlayLineRefs(const TArray<FKzDialogueLineRef>& Refs, FGameplayTag InChannel, int32 Priority = -1, AActor* Owner = nullptr);
 
-	/** Stop the dialogue on every channel matching the scope (graceful, with exit animations), dropping their queued requests. E.g. Dialogue.Channel.Bark stops all bark channels; a leaf tag stops just that one. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
-	void StopChannel(FGameplayTag InChannel);
+	/** Stop the dialogue on every channel matching the scope (graceful, with exit animations), dropping their queued requests. E.g. Dialogue.Channel.Bark stops all bark channels; a leaf tag stops just that one. With Owner, only that owner's players. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "Owner"))
+	void StopChannel(FGameplayTag InChannel, AActor* Owner = nullptr);
 
 	/** Stop all channels and drop every queued request. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
 	void StopAll();
 
-	/** Interrupt the dialogue on every channel matching the scope (hard-stop), dropping their queued requests. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel"))
-	void InterruptChannel(FGameplayTag InChannel);
+	/** Interrupt the dialogue on every channel matching the scope (hard-stop), dropping their queued requests. With Owner, only that owner's players. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem", meta = (Categories = "Dialogue.Channel", AdvancedDisplay = "Owner"))
+	void InterruptChannel(FGameplayTag InChannel, AActor* Owner = nullptr);
 
 	/** Interrupt all channels and drop every queued request. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subsystem")
@@ -258,8 +278,9 @@ public:
 	virtual void Deinitialize() override;
 
 private:
+	/** One per channel, or per channel and owner on owned channels; looked up by both. */
 	UPROPERTY(Transient)
-	TMap<FGameplayTag, TObjectPtr<UKzDialoguePlayer>> Players;
+	TArray<TObjectPtr<UKzDialoguePlayer>> Players;
 
 	/** Asset sessions kept alive while they run; each removes itself on finish via ReleaseAssetSession. */
 	UPROPERTY(Transient)
@@ -272,9 +293,9 @@ private:
 	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
 	bool bDeinitializing = false;
 
-	/** Requests waiting for their busy channel, by player channel. */
+	/** Requests waiting for their busy player. */
 	UPROPERTY(Transient)
-	TMap<FGameplayTag, FKzDialogueChannelQueue> Queues;
+	TMap<TObjectPtr<UKzDialoguePlayer>, FKzDialogueChannelQueue> Queues;
 
 	EKzDialoguePlayResult LastPlayResult = EKzDialoguePlayResult::Started;
 	FGuid LastQueuedRequestId;
@@ -282,12 +303,28 @@ private:
 	/** The request being admitted now, guarded per entry point so a nested one restores it; Record files it, and an interruption meanwhile names it. */
 	FKzDialogueHistoryEntry PendingRequest;
 
-	/** What each channel plays, by history label, for its ending and for the rejections it causes. */
-	TMap<FGameplayTag, FString> PlayingRequests;
+	/** What each player plays, by history label, for its ending and for the rejections it causes. */
+	TMap<const UKzDialoguePlayer*, FString> PlayingRequests;
 
 	TArray<FKzDialogueHistoryEntry> History;
 
-	void AddHistory(FGameplayTag Channel, int32 Priority, const FString& Request, const FString& Outcome);
+	void AddHistory(FGameplayTag Channel, const FString& Owner, int32 Priority, const FString& Request, const FString& Outcome);
+
+	/** The player's owner as the history and the debug name it; empty without one. */
+	static FString DescribeOwner(const UKzDialoguePlayer* Player);
+
+	/** Looks a player up by channel and an already resolved owner. */
+	UKzDialoguePlayer* FindResolvedPlayer(FGameplayTag InChannel, const AActor* ResolvedOwner) const;
+
+	/** Gets or creates the player a request plays on, resolving its owner, and names both in the pending request. */
+	UKzDialoguePlayer* GetPlayerForRequest(FGameplayTag InChannel, AActor* Owner, const UKzSpeakerAsset* Speaker);
+
+	/** An owner's players go with it: interrupted, their queues dropped, and removed. */
+	UFUNCTION()
+	void HandleOwnerEndPlay(AActor* Actor, EEndPlayReason::Type EndPlayReason);
+
+	/** Whether other owners already fill the channel's MaxConcurrent, so Player may not start. */
+	bool IsAtConcurrencyLimit(const UKzDialoguePlayer& Player, const FKzDialogueChannelDefinition* ChannelDef) const;
 
 	/**
 	 * Resolve the priority to use given:
@@ -300,7 +337,7 @@ private:
 	int32 ResolvePriority(int32 RequestedPriority, int32 AssetHintPriority, const FKzDialogueChannelDefinition* ChannelDef) const;
 
 	/** The single gate every play request passes BEFORE anything with side effects (alias state, providers) runs: Started when it may play now, Queued when the channel's busy policy keeps it, else the rejection. */
-	EKzDialoguePlayResult Admit(const UKzDialoguePlayer& Player, int32 Priority, const FKzDialogueChannelDefinition* ChannelDef) const;
+	EKzDialoguePlayResult Admit(UKzDialoguePlayer& Player, int32 Priority, const FKzDialogueChannelDefinition* ChannelDef) const;
 
 	/** Records Result as the last play result; returns Player, or null for a rejection. */
 	UKzDialoguePlayer* Record(EKzDialoguePlayResult Result, UKzDialoguePlayer* Player);
@@ -308,16 +345,16 @@ private:
 	/** Files an admitted-to-wait request in Player's queue, by priority then arrival; Replace first drops what was waiting. */
 	UKzDialoguePlayer* Enqueue(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, EKzDialogueAdvanceMode AdvanceMode, const FKzDialogueChannelDefinition* ChannelDef);
 
-	/** A channel finished: its next queued request starts on the next tick, once every finish listener has run. */
+	/** A player finished: its next queued request starts on the next tick, once every finish listener has run, and so do those waiting for a concurrency slot of its channel. */
 	UFUNCTION()
 	void HandlePlayerFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);
 
-	/** Starts the next live request waiting for Channel, if the channel is free. */
-	void ProcessQueue(FGameplayTag Channel);
-	void ScheduleQueue(FGameplayTag Channel);
+	/** Starts the next live request waiting for Player, if it is free and its channel has a slot. */
+	void ProcessQueue(UKzDialoguePlayer* Player);
+	void ScheduleQueue(UKzDialoguePlayer* Player);
 
-	/** Drops the requests waiting for Channel, reporting each one; Cause goes to the history. */
-	void DropQueue(FGameplayTag Channel, const TCHAR* Cause);
+	/** Drops the requests waiting for Player, reporting each one; Cause goes to the history. */
+	void DropQueue(UKzDialoguePlayer* Player, const TCHAR* Cause);
 
 	/** Ends whatever occupies the admitted player and starts Provider on it. Null when a listener of that ending took the channel first. */
 	UKzDialoguePlayer* StartOnPlayer(UKzDialoguePlayer& Player, UKzDialogueProvider* Provider, int32 Priority, bool bInterruptible, EKzDialogueAdvanceMode AdvanceMode);

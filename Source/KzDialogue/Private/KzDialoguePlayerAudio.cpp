@@ -81,7 +81,7 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	FName AttachSocket = NAME_None;
 	if (ResolveAudioSpatialization(CurrentLine) == EKzLineAudioSpatialization::AttachedToSpeaker && CurrentLine.Speaker.IsValid())
 	{
-		if (UKzDialogueSpeakerComponent* SpeakerComponent = UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset))
+		if (UKzDialogueSpeakerComponent* SpeakerComponent = UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset, GetOwner()))
 		{
 			AttachTarget = SpeakerComponent->GetAudioAttachComponent(AttachSocket);
 		}
@@ -225,7 +225,7 @@ void UKzDialoguePlayer::UpdateSpeakingLevel(float DeltaTime)
 void UKzDialoguePlayer::ResolveSpeakingSpeaker()
 {
 	UKzDialogueSpeakerComponent* NewSpeaker = CurrentLine.Speaker.IsValid()
-		? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset)
+		? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset, GetOwner())
 		: nullptr;
 
 	if (NewSpeaker != SpeakingSpeaker.Get())

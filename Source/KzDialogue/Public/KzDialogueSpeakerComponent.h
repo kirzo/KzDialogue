@@ -98,9 +98,9 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Speaker|Speaking")
 	FKzOnSpeakingSuppressedChanged OnSpeakingSuppressedChanged;
 
-	/** Get the world component registered for a speaker asset (main identity or extra persona). */
+	/** Get the world component registered for a speaker asset (main identity or extra persona). Preferred goes first: one of its components with that identity wins over the world's, so a crowd sharing a speaker speaks from the right mouth. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker", meta = (WorldContext = "WorldContextObject"))
-	static UKzDialogueSpeakerComponent* FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker);
+	static UKzDialogueSpeakerComponent* FindSpeaker(const UObject* WorldContextObject, const UKzSpeakerAsset* InSpeaker, const AActor* Preferred = nullptr);
 
 	/** Every identity registered in the world, with the component FindSpeaker resolves it to. */
 	static void GetRegisteredSpeakers(const UObject* WorldContextObject, TMap<const UKzSpeakerAsset*, UKzDialogueSpeakerComponent*>& OutSpeakers);

@@ -91,6 +91,13 @@ const FKzDialogueLine* UKzDialogueAsset::FindLine(const FGuid& LineId) const
 	return Lines.FindByPredicate([&LineId](const FKzDialogueLine& L) { return L.LineId == LineId; });
 }
 
+const UKzSpeakerAsset* UKzDialogueAsset::GetEntrySpeaker(const FGuid& EntryId) const
+{
+	if (const FKzDialogueLine* Line = FindLine(EntryId)) { return Line->Speaker.Asset; }
+	const FKzDialogueAlias* Alias = FindAlias(EntryId);
+	return Alias ? Alias->Speaker.Asset.Get() : nullptr;
+}
+
 const FKzDialogueAlias* UKzDialogueAsset::FindAlias(const FGuid& AliasId) const
 {
 	return AliasId.IsValid() ? Aliases.FindByPredicate([&AliasId](const FKzDialogueAlias& A) { return A.AliasId == AliasId; }) : nullptr;

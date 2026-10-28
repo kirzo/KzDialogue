@@ -5,7 +5,7 @@
 #include "KzDialoguePlayer.h"
 #include "KzDialogueAsset.h"
 
-void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode)
+void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode, AActor* InOwner)
 {
 	TArray<FGuid> EntryIds;
 	if (InAsset)
@@ -16,14 +16,15 @@ void UKzDialogueAssetSession::Start(UKzDialogueSubsystem* InSubsystem, UKzDialog
 			EntryIds.Add(Line.LineId);
 		}
 	}
-	StartEntries(InSubsystem, InAsset, EntryIds, ExplicitChannel, UKzDialogueSubsystem::InheritPriority, InAdvanceMode);
+	StartEntries(InSubsystem, InAsset, EntryIds, ExplicitChannel, UKzDialogueSubsystem::InheritPriority, InAdvanceMode, InOwner);
 }
 
-void UKzDialogueAssetSession::StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode)
+void UKzDialogueAssetSession::StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode, AActor* InOwner)
 {
 	Subsystem = InSubsystem;
 	Asset = InAsset;
 	Priority = InPriority;
+	Owner = InOwner;
 	ResolvedAdvanceMode = (InSubsystem && InAsset) ? InSubsystem->ResolveAdvanceMode(InAdvanceMode, InAsset) : EKzDialogueAdvanceMode::Automatic;
 
 	// Split the entries into maximal consecutive runs sharing a resolved channel. A valid explicit
@@ -70,7 +71,9 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 	const FRun& Run = Runs[RunIndex];
 	CurrentChannel = Run.Channel;
 
-	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Run.Channel);
+	// Resolved here as the play will, so the events below bind to the player the run lands on.
+	AActor* const RunOwner = Subsystem->ResolveOwner(Run.Channel, Owner.Get(), Asset->GetEntrySpeaker(Run.LineIds[0]));
+	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(Run.Channel, RunOwner);
 	if (!Player)
 	{
 		FinishSession(EKzDialogueFinishReason::Aborted);
@@ -88,7 +91,7 @@ void UKzDialogueAssetSession::LaunchRun(int32 RunIndex)
 
 	// The run's channel goes EXPLICITLY (playback channel == grouping channel), with the caller's priority
 	// (InheritPriority by default -> the asset's Priority hint).
-	if (!Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, ResolvedAdvanceMode))
+	if (!Subsystem->PlayAssetLineList(Asset, Run.LineIds, Run.Channel, Priority, ResolvedAdvanceMode, RunOwner))
 	{
 		// Refused (a higher-priority dialogue holds this run's channel) or nothing resolved: terminal,
 		// so the session can't stall waiting for a finish that will never come.

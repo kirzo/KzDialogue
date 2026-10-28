@@ -22,8 +22,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkFinished, EKzDialogueFinish
  * higher-priority dialogue. Gate it from the outside with Start / Stop or Pause / Resume.
  *
  * Line variety and per-line cooldown come from the dialogue alias itself (SelectionMode / CooldownSeconds),
- * so point Bark at an alias and the asset decides which variation plays. Use a dedicated channel per barker
- * (e.g. Dialogue.Channel.Bark) so stop / pause only affect this one's lines.
+ * so point Bark at an alias and the asset decides which variation plays. On a per speaker channel (such as
+ * Dialogue.Channel.Bark) each barker plays on its own actor's player, so barkers neither cut each other nor
+ * get stopped by each other.
  *
  * The Rules skip a bark that would not make sense now, and the loop waits another interval. BarkNow
  * honors them too, except Probability, which only thins the loop.
@@ -40,7 +41,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark")
 	FKzDialogueLineRef Bark;
 
-	/** Channel to bark on; empty resolves like any line (line, asset, settings). A dedicated per-barker channel keeps stop / pause to this one. */
+	/** Channel to bark on; empty resolves like any line (line, asset, settings). A per speaker channel gives this actor its own player. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", meta = (Categories = "Dialogue.Channel"))
 	FGameplayTag Channel;
 

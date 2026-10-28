@@ -88,6 +88,9 @@ public:
 	/** The alias with that id, or null. */
 	const FKzDialogueAlias* FindAlias(const FGuid& AliasId) const;
 
+	/** The speaker of a line, or the one an alias constrains its lines to; null without one. */
+	const UKzSpeakerAsset* GetEntrySpeaker(const FGuid& EntryId) const;
+
 	/** Find the notify timeline owned by the given line id, or null. */
 	UKzDialogueTimeline* FindTimelineForLine(const FGuid& LineId) const;
 

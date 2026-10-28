@@ -94,7 +94,7 @@ void UKzBarkComponent::StopBarking()
 	{
 		if (UKzDialogueSubsystem* Subsystem = GetSubsystem())
 		{
-			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(ResolveBarkChannel()))
+			if (UKzDialoguePlayer* Player = Subsystem->FindPlayer(ResolveBarkChannel(), GetOwner()))
 			{
 				if (Player->IsPlaying() && Player->ResolveLineRefToMatchSet(Bark).Contains(Player->GetCurrentLineId()))
 				{
@@ -229,7 +229,7 @@ void UKzBarkComponent::PlayBark(bool bRollProbability)
 	}
 
 	const TArray<FKzDialogueLineRef> Refs = { Bark };
-	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority);
+	UKzDialoguePlayer* Player = Subsystem->PlayLineRefs(Refs, Channel, Priority, GetOwner());
 	if (Player && Subsystem->GetLastPlayResult() == EKzDialoguePlayResult::Queued)
 	{
 		// Barks are ambient: a busy channel means try later, not wait behind it.
@@ -270,7 +270,7 @@ void UKzBarkComponent::BindChannelPlayer()
 	{
 		return;
 	}
-	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(ResolveBarkChannel());
+	UKzDialoguePlayer* Player = Subsystem->GetOrCreatePlayer(ResolveBarkChannel(), GetOwner());
 	if (!Player || Player == BoundPlayer.Get())
 	{
 		return;

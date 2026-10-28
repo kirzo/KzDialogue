@@ -917,7 +917,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	}
 
 	CachedLineDuration = ResolveLineDuration(CurrentLine);
-	UKzDialogueSpeakerComponent* LineSpeaker = CurrentLine.Speaker.IsValid() ? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset) : nullptr;
+	UKzDialogueSpeakerComponent* LineSpeaker = CurrentLine.Speaker.IsValid() ? UKzDialogueSpeakerComponent::FindSpeaker(this, CurrentLine.Speaker.Asset, GetOwner()) : nullptr;
 
 	FKzDialogueTimeResolveContext ResolveContext;
 	ResolveContext.LineDuration = CachedLineDuration;
@@ -1016,7 +1016,7 @@ FKzDialogueNotifyContext UKzDialoguePlayer::BuildNotifyContext(FKzDialogueActive
 	UKzDialogueSpeakerComponent* Target = Entry.LineSpeaker;
 	if (IsValid(Entry.Notify) && Entry.Notify->TargetSpeakerOverride)
 	{
-		Target = UKzDialogueSpeakerComponent::FindSpeaker(this, Entry.Notify->TargetSpeakerOverride);
+		Target = UKzDialogueSpeakerComponent::FindSpeaker(this, Entry.Notify->TargetSpeakerOverride, GetOwner());
 	}
 
 	Context.TargetSpeaker = Target;

@@ -73,10 +73,10 @@ public:
 	void Interrupt();
 
 	/** Subsystem entry point: split the asset into runs and start. Call UKzDialogueSubsystem::PlayAsset, not this. */
-	void Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode);
+	void Start(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, FGameplayTag ExplicitChannel, EKzDialogueAdvanceMode InAdvanceMode, AActor* InOwner);
 
 	/** Subsystem entry point: same as Start, but over an explicit ordered subset of the asset's entries (lines or aliases). Call UKzDialogueSubsystem::PlayLineList, not this. */
-	void StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode);
+	void StartEntries(UKzDialogueSubsystem* InSubsystem, UKzDialogueAsset* InAsset, const TArray<FGuid>& EntryIds, FGameplayTag ExplicitChannel, int32 InPriority, EKzDialogueAdvanceMode InAdvanceMode, AActor* InOwner);
 
 private:
 	void LaunchRun(int32 RunIndex);
@@ -130,6 +130,9 @@ private:
 	TArray<FRun> Runs;
 	int32 CurrentRunIndex = INDEX_NONE;
 	FGameplayTag CurrentChannel;
+
+	/** Caller's owner for every run; on a per speaker channel without one, each run's first speaker picks it. */
+	TWeakObjectPtr<AActor> Owner;
 
 	/** Caller's priority request, applied to every run; -1 (InheritPriority) falls back to the asset hint / channel default. */
 	int32 Priority = -1;

@@ -168,7 +168,8 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* PC)
 			const FKzDialogueHistoryEntry& Entry = History[i];
 			const bool bProblem = Entry.Outcome.StartsWith(TEXT("Rejected")) || Entry.Outcome.StartsWith(TEXT("Dropped")) || Entry.Outcome.StartsWith(TEXT("Interrupted")) || Entry.Outcome.StartsWith(TEXT("Aborted"));
 			const FLinearColor Color = bProblem ? WarningColor : (Entry.Outcome.StartsWith(TEXT("Started")) ? ActiveColor : MutedColor);
-			DrawLine(Canvas, X, Y, FString::Printf(TEXT("[%7.2f] %s  pri %d  %s -> %s"), Entry.Time, *Entry.Channel.ToString(), Entry.Priority, *Entry.Request, *Entry.Outcome), Color);
+			const FString Where = Entry.Owner.IsEmpty() ? Entry.Channel.ToString() : FString::Printf(TEXT("%s / %s"), *Entry.Channel.ToString(), *Entry.Owner);
+			DrawLine(Canvas, X, Y, FString::Printf(TEXT("[%7.2f] %s  pri %d  %s -> %s"), Entry.Time, *Where, Entry.Priority, *Entry.Request, *Entry.Outcome), Color);
 		}
 		return;
 	}
@@ -190,7 +191,8 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* PC)
 	{
 		if (!IsValid(Player)) { continue; }
 
-		DrawLine(Canvas, X, Y, FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString()), TitleColor);
+		const AActor* Owner = Player->GetOwner();
+		DrawLine(Canvas, X, Y, Owner ? FString::Printf(TEXT("Channel: %s / %s"), *Player->Channel.ToString(), *Owner->GetActorNameOrLabel()) : FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString()), TitleColor);
 
 		// The phase stays visible under a pause.
 		const FString StateLine = FString::Printf(TEXT("State: %s%s   Priority: %d   TimeScale: %.2fx   Pending acks: %d"),

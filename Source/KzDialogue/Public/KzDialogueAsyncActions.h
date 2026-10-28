@@ -8,6 +8,7 @@
 #include "KzDialogueTypes.h"
 #include "KzDialogueAsyncActions.generated.h"
 
+class AActor;
 class UKzDialogueAsset;
 class UKzDialoguePlayer;
 class UKzDialogueSubsystem;
@@ -52,6 +53,9 @@ protected:
 	 * pre-acquired player identical to the one playback lands on.
 	 */
 	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const { return Channel; }
+
+	/** The speaker of what the action launches first: on a per speaker channel without an owner, its actor picks the player. */
+	virtual const UKzSpeakerAsset* ResolveLaunchSpeaker() const { return nullptr; }
 
 	/** Binds HandleSpecificLineFinished to Ref on the acquired player. False when the ref cannot be resolved. */
 	bool BindSpecificLineFinished(const FKzDialogueLineRef& Ref);
@@ -106,6 +110,10 @@ protected:
 
 	FGameplayTag Channel;
 	int32 Priority = -1;
+
+	/** On an owned channel, whose player the action plays on; AcquirePlayer resolves it for good. */
+	TWeakObjectPtr<AActor> Owner;
+
 	bool bResolved = false;
 	FGuid LineBindingHandle;
 
@@ -128,8 +136,8 @@ public:
 	 * Plays a dialogue line and waits for that specific line to finish.
 	 * @param Priority -1 inherits the asset's priority, then the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Ref (Async)", AutoCreateRefTerm = "Line", AdvancedDisplay = "Channel,Priority"))
-	static UKzAsyncPlayDialogueLine* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Ref (Async)", AutoCreateRefTerm = "Line", AdvancedDisplay = "Channel,Priority,Owner"))
+	static UKzAsyncPlayDialogueLine* PlayDialogueLine(const UObject* WorldContextObject, const FKzDialogueLineRef& Line, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, AActor* Owner = nullptr);
 
 	/** Fired right after the request, with the channel player to bind line events on. Line is empty (invalid LineId). */
 	UPROPERTY(BlueprintAssignable)
@@ -147,6 +155,7 @@ public:
 
 protected:
 	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
+	virtual const UKzSpeakerAsset* ResolveLaunchSpeaker() const override;
 	virtual void HandleSpecificLineFinished(UKzDialoguePlayer* Player, const FKzDialogueLine& Line) override;
 	virtual void NotifyCancelled() override;
 	virtual bool IsOwnContent(UKzDialoguePlayer& Player, const FGuid& LineId) const override;
@@ -169,8 +178,8 @@ public:
 	 * Plays a line from a dialogue asset and waits for that specific line to finish.
 	 * @param Priority -1 inherits the asset's priority, then the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line From Asset (Async)", AdvancedDisplay = "Channel,Priority"))
-	static UKzAsyncPlayDialogueLineInline* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line From Asset (Async)", AdvancedDisplay = "Channel,Priority,Owner"))
+	static UKzAsyncPlayDialogueLineInline* PlayDialogueLineFromAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, FGuid LineId, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, AActor* Owner = nullptr);
 };
 
 /**
@@ -204,6 +213,7 @@ public:
 
 protected:
 	virtual FGameplayTag ResolveLaunchChannel(const UKzDialogueSubsystem& Subsystem) const override;
+	virtual const UKzSpeakerAsset* ResolveLaunchSpeaker() const override;
 
 	/** Fills OutRefs with the awaited entries, in playback order. */
 	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const {}
@@ -236,8 +246,8 @@ public:
 	 * Plays an array of dialogue line refs sequentially and waits until the last one finishes.
 	 * @param Priority -1 inherits the first entry's asset priority, then the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
-	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line Refs (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority,Owner"))
+	static UKzAsyncPlayDialogueLineRefs* PlayDialogueLineRefs(const UObject* WorldContextObject, const TArray<FKzDialogueLineRef>& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, AActor* Owner = nullptr);
 
 protected:
 	virtual void GatherEntryRefs(TArray<FKzDialogueLineRef>& OutRefs) const override;
@@ -310,8 +320,8 @@ public:
 	 * Plays a list of dialogue lines sequentially and waits until the last one finishes.
 	 * @param Priority -1 inherits the asset's priority, then the channel default.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority"))
-	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Line List (Async)", AutoCreateRefTerm = "Lines", AdvancedDisplay = "Channel,Priority,Owner"))
+	static UKzAsyncPlayDialogueLineList* PlayDialogueLineList(const UObject* WorldContextObject, const FKzDialogueLineList& Lines, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, int32 Priority = -1, AActor* Owner = nullptr);
 
 protected:
 	virtual UKzDialogueAssetSession* LaunchSession() override;
@@ -328,8 +338,8 @@ class KZDIALOGUE_API UKzAsyncPlayDialogueAsset : public UKzAsyncDialogueSessionA
 
 public:
 	/** Plays a dialogue asset and waits until the whole dialogue finishes. */
-	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,AdvanceMode"))
-	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit);
+	UFUNCTION(BlueprintCallable, Category = "Dialogue", meta = (WorldContext = "WorldContextObject", BlueprintInternalUseOnly = "true", DisplayName = "Play Dialogue Asset (Async)", AdvancedDisplay = "Channel,AdvanceMode,Owner"))
+	static UKzAsyncPlayDialogueAsset* PlayDialogueAsset(const UObject* WorldContextObject, UKzDialogueAsset* Asset, UPARAM(meta = (Categories = "Dialogue.Channel")) FGameplayTag Channel, EKzDialogueAdvanceMode AdvanceMode = EKzDialogueAdvanceMode::Inherit, AActor* Owner = nullptr);
 
 protected:
 	virtual UKzDialogueAssetSession* LaunchSession() override;
