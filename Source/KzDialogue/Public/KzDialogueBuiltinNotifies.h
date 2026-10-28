@@ -257,6 +257,8 @@ class KZDIALOGUE_API UKzDialogueNotifyState_SetTag : public UKzDialogueNotifySta
 	GENERATED_BODY()
 
 public:
+	UKzDialogueNotifyState_SetTag();
+
 	/** Tags applied to the speaker while this state is active (e.g. Dialogue.Mood.Angry). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tag")
 	FGameplayTagContainer Tags;

@@ -15,6 +15,16 @@ class UKzDialoguePlayer;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkPlayed, UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkFinished, EKzDialogueFinishReason, Reason);
 
+/** Where a bark component barks in a networked game. */
+UENUM(BlueprintType)
+enum class EKzBarkNetworkMode : uint8
+{
+	/** The server barks, and every player hears the same bark at once. Bark Now is the server's to call. */
+	Shared,
+	/** Each machine barks on its own, without the network (none on a dedicated server): background chatter, where each player may hear another line. */
+	PerMachine
+};
+
 /**
  * Periodically plays a bark (a line or alias from a dialogue asset) on a channel, with a random gap
  * [MinInterval, MaxInterval] measured end-to-end, plus start / stop / pause / resume. Reschedules after
@@ -28,6 +38,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnBarkFinished, EKzDialogueFinish
  *
  * The Rules skip a bark that would not make sense now, and the loop waits another interval. BarkNow
  * honors them too, except Probability, which only thins the loop.
+ *
+ * In a networked game, NetworkMode picks who barks: the server for everyone, or each machine on its own.
  */
 UCLASS(ClassGroup = (Dialogue), meta = (BlueprintSpawnableComponent))
 class KZDIALOGUE_API UKzBarkComponent : public UActorComponent
@@ -65,15 +77,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark", AdvancedDisplay)
 	int32 Priority = -1;
 
+	/** In a networked game: the server barks for everyone, or each machine on its own. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark")
+	EKzBarkNetworkMode NetworkMode = EKzBarkNetworkMode::Shared;
+
 	/** Chance each scheduled bark plays. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Probability = 1.0f;
 
-	/** Skip barks farther than this from the nearest local player's audio listener. 0 = any distance. */
+	/** Skip barks farther than this from the nearest player: a local player's audio listener, or on a server where a remote player looks from. 0 = any distance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules", meta = (ClampMin = "0.0", Units = "Centimeters"))
 	float MaxListenerDistance = 0.0f;
 
-	/** Skip barks while the owner has not been rendered lately (off screen or culled). */
+	/** Skip barks while the owner has not been rendered lately (off screen or culled). A dedicated server renders nothing, so there it does not apply. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dialogue|Bark|Rules")
 	bool bRequireRecentlyRendered = false;
 
@@ -134,7 +150,10 @@ private:
 
 	void PlayBark(bool bRollProbability);
 	bool PassesRules(const UKzDialogueSubsystem& Subsystem, bool bRollProbability) const;
-	bool IsNearLocalListener() const;
+	bool IsNearListener() const;
+
+	/** Whether this machine barks, by the network mode: the server for a shared one, every machine but a dedicated server for a per machine one. */
+	bool BarksHere() const;
 
 	UFUNCTION()
 	void HandleBarkFinished(UKzDialoguePlayer* Player, EKzDialogueFinishReason Reason);

@@ -186,6 +186,12 @@ void UKzDialogueNotify_ForceFeedback::Notify_Implementation(const FKzDialogueNot
 	}
 }
 
+UKzDialogueNotifyState_SetTag::UKzDialogueNotifyState_SetTag()
+{
+	// The server's gameplay reads the speaker's tags too, even where the line does not show.
+	RunOn = EKzDialogueNotifyRunOn::Everywhere;
+}
+
 void UKzDialogueNotifyState_SetTag::NotifyBegin_Implementation(const FKzDialogueNotifyContext& Context)
 {
 	if (Tags.IsEmpty()) { return; }

@@ -128,7 +128,9 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 
 			UKzDialogueSubsystem* Sub = nullptr;
 			const FGameplayTag EffectiveChannel = ResolveSectionChannel(InPlayer, WeakAsset.Get(), Channel, LineId, Sub);
-			if (!Sub) { return; }
+
+			// The sequence plays on every machine, so each says its lines itself; a dedicated server has nobody to say them to.
+			if (!Sub || Sub->GetWorld()->GetNetMode() == NM_DedicatedServer) { return; }
 			UKzDialoguePlayer* DialoguePlayer = FindSectionPlayer(Sub, EffectiveChannel, WeakAsset.Get(), LineId);
 
 			if (Status == EMovieScenePlayerStatus::Playing)
@@ -150,6 +152,7 @@ void FMovieSceneKzDialogueSectionTemplate::Evaluate(const FMovieSceneEvaluationO
 						if (bSuppressAudio) { LineCopy.Audio = nullptr; }
 						if (SectionDurationSeconds > 0.f) { LineCopy.Duration = SectionDurationSeconds; }
 						// The sequence owns the timing: a line that would wait for its channel is dropped, not played late.
+						UKzDialogueSubsystem::FLocalRequestScope LocalScope(*Sub);
 						if (Sub->PlayLine(LineCopy, EffectiveChannel) && Sub->GetLastPlayResult() == EKzDialoguePlayResult::Queued)
 						{
 							Sub->CancelQueuedRequest(Sub->GetLastQueuedRequestId());

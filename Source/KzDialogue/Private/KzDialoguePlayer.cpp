@@ -1005,11 +1005,18 @@ void UKzDialoguePlayer::BakeTimeline()
 	CachedLineDuration = 0.0f;
 	bLineTimeElapsed = false;
 
-	// Notifies are presentation: they run where the line shows.
-	if (!IsPresentedHere())
+	// Each notify runs where its Run On says: where the line shows, where the dialogue is decided, or both.
+	const bool bShownHere = IsPresentedHere();
+	const bool bDecidedHere = !bProxy;
+	auto RunsHere = [bShownHere, bDecidedHere](EKzDialogueNotifyRunOn RunOn)
 	{
-		return;
-	}
+		switch (RunOn)
+		{
+		case EKzDialogueNotifyRunOn::Everywhere: return bShownHere || bDecidedHere;
+		case EKzDialogueNotifyRunOn::ServerOnly: return bDecidedHere;
+		default: return bShownHere;
+		}
+	};
 
 	UKzDialogueTimeline* Timeline = CurrentLine.Timeline;
 	if (!Timeline || Timeline->IsEmpty())
@@ -1032,7 +1039,7 @@ void UKzDialoguePlayer::BakeTimeline()
 	{
 		for (const FKzDialogueNotifyEvent& Event : Track.Events)
 		{
-			if (!Event.bEnabled || !IsValid(Event.Notify))
+			if (!Event.bEnabled || !IsValid(Event.Notify) || !RunsHere(Event.Notify->RunOn))
 			{
 				continue;
 			}
@@ -1160,7 +1167,7 @@ bool UKzDialoguePlayer::IsPresentedHere() const
 
 void UKzDialoguePlayer::PublishNet(const FKzDialogueLine* NewLine)
 {
-	if (bProxy)
+	if (bProxy || bLocalOnly)
 	{
 		return;
 	}
@@ -1183,7 +1190,7 @@ void UKzDialoguePlayer::FillNetEntry(FKzDialogueNetEntry& Entry) const
 
 bool UKzDialoguePlayer::WaitsForRemoteView() const
 {
-	if (bProxy)
+	if (bProxy || bLocalOnly)
 	{
 		return false;
 	}

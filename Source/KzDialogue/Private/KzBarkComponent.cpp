@@ -43,9 +43,16 @@ FGameplayTag UKzBarkComponent::ResolveBarkChannel() const
 	return Subsystem ? Subsystem->ResolveChannelForEntry(Channel, Bark.Asset.LoadSynchronous(), Bark.LineId) : Channel;
 }
 
+bool UKzBarkComponent::BarksHere() const
+{
+	const ENetMode Mode = GetNetMode();
+	return NetworkMode == EKzBarkNetworkMode::Shared ? Mode != NM_Client : Mode != NM_DedicatedServer;
+}
+
 void UKzBarkComponent::StartBarking()
 {
-	if (bBarking)
+	// The machines that do not bark stay quiet: the server's barks reach them, or nobody hears them there.
+	if (bBarking || !BarksHere())
 	{
 		return;
 	}
@@ -143,7 +150,7 @@ void UKzBarkComponent::ResumeBarking()
 
 void UKzBarkComponent::BarkNow()
 {
-	if (bBarkInFlight || !Bark.IsValid() || !GetSubsystem())
+	if (bBarkInFlight || !Bark.IsValid() || !GetSubsystem() || !BarksHere())
 	{
 		return;
 	}
@@ -175,17 +182,26 @@ void UKzBarkComponent::RescheduleIfLooping()
 	}
 }
 
-bool UKzBarkComponent::IsNearLocalListener() const
+bool UKzBarkComponent::IsNearListener() const
 {
-	// Local coop has a listener per player: the nearest one counts.
+	// Every player counts, the nearest one deciding: a local one by its audio listener, a remote one (on a server) by where it looks from.
 	const FVector Location = GetOwner()->GetActorLocation();
 	for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
 	{
 		const APlayerController* Controller = It->Get();
-		if (!Controller || !Controller->IsLocalController()) { continue; }
+		if (!Controller) { continue; }
 
-		FVector ListenerLocation, Front, Right;
-		Controller->GetAudioListenerPosition(ListenerLocation, Front, Right);
+		FVector ListenerLocation;
+		if (Controller->IsLocalController())
+		{
+			FVector Front, Right;
+			Controller->GetAudioListenerPosition(ListenerLocation, Front, Right);
+		}
+		else
+		{
+			FRotator ViewRotation;
+			Controller->GetPlayerViewPoint(ListenerLocation, ViewRotation);
+		}
 		if (FVector::DistSquared(ListenerLocation, Location) <= FMath::Square(MaxListenerDistance)) { return true; }
 	}
 	return false;
@@ -194,8 +210,8 @@ bool UKzBarkComponent::IsNearLocalListener() const
 bool UKzBarkComponent::PassesRules(const UKzDialogueSubsystem& Subsystem, bool bRollProbability) const
 {
 	if (bRollProbability && FMath::FRand() >= Probability) { return false; }
-	if (bRequireRecentlyRendered && !GetOwner()->WasRecentlyRendered()) { return false; }
-	if (MaxListenerDistance > 0.0f && !IsNearLocalListener()) { return false; }
+	if (bRequireRecentlyRendered && GetNetMode() != NM_DedicatedServer && !GetOwner()->WasRecentlyRendered()) { return false; }
+	if (MaxListenerDistance > 0.0f && !IsNearListener()) { return false; }
 
 	if (bSkipWhileSpeakerTalking)
 	{
@@ -226,6 +242,13 @@ void UKzBarkComponent::PlayBark(bool bRollProbability)
 	{
 		RescheduleIfLooping();
 		return;
+	}
+
+	// A per machine bark on a server stays there, as the clients bark on their own.
+	TOptional<UKzDialogueSubsystem::FLocalRequestScope> LocalScope;
+	if (NetworkMode == EKzBarkNetworkMode::PerMachine)
+	{
+		LocalScope.Emplace(*Subsystem);
 	}
 
 	const TArray<FKzDialogueLineRef> Refs = { Bark };

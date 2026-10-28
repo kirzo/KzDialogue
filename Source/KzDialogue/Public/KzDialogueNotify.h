@@ -62,6 +62,18 @@ struct KZDIALOGUE_API FKzDialogueNotifyContext
 	FInstancedStruct* InstanceData = nullptr;
 };
 
+/** Where a dialogue notify runs in a networked game. */
+UENUM(BlueprintType)
+enum class EKzDialogueNotifyRunOn : uint8
+{
+	/** On every machine that shows the line, a listen server's host included, and not on a dedicated server: sounds, camera shakes, rumble, gestures. */
+	WhereShown,
+	/** Also where the dialogue is decided when it does not show the line (a dedicated server), so its gameplay sees it: speaker tags. */
+	Everywhere,
+	/** Only where the dialogue is decided: the server for its dialogues, a machine for those it starts on its own. Gameplay that reaches the clients by its own replication. */
+	ServerOnly
+};
+
 /**
  * Shared base for dialogue notifies. Holds only what point and state notifies have in
  * common; the firing contract lives in the two subclasses, so Blueprints derive from those.
@@ -77,6 +89,10 @@ public:
 	/** Optional target override. When unset, the notify acts on the line's speaker. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Notify")
 	TObjectPtr<UKzSpeakerAsset> TargetSpeakerOverride;
+
+	/** In a networked game, the machines it runs on. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Notify")
+	EKzDialogueNotifyRunOn RunOn = EKzDialogueNotifyRunOn::WhereShown;
 
 	/** Label shown on the timeline marker, the add menu and debug overlays. Defaults to the class name. */
 	UFUNCTION(BlueprintNativeEvent, Category = "Dialogue|Notify")

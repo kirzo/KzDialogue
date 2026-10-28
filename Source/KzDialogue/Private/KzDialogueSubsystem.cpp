@@ -653,8 +653,9 @@ EKzDialoguePlayResult UKzDialogueSubsystem::Admit(UKzDialoguePlayer& Player, int
 	{
 		Result = EKzDialoguePlayResult::RejectedTearingDown;
 	}
-	else if (Player.IsProxy())
+	else if (Player.IsProxy() && (Player.IsPlaying() || IsValid(Player.GetProvider())))
 	{
+		// An idle copy lends its player to this machine until the server plays on it again.
 		Result = EKzDialoguePlayResult::RejectedServerChannel;
 	}
 	else if ((!Player.IsPlaying() && !IsValid(Player.GetProvider())) || Player.GetState() == EKzDialogueState::Exiting)
@@ -895,6 +896,10 @@ UKzDialoguePlayer* UKzDialogueSubsystem::StartOnPlayer(UKzDialoguePlayer& Player
 		}
 	}
 
+	// A dialogue of this machine's own on an idle copy, or one that stays here.
+	if (Player.IsProxy()) { Player.BecomeLocal(); }
+	Player.bLocalOnly = bLocalRequests;
+
 	Player.CurrentPriority = Priority;
 	Player.bCurrentInterruptible = bInterruptible;
 	// Inherit at this level means "no asset to resolve against" (manual providers): fall to Automatic.
@@ -1049,8 +1054,9 @@ UKzDialoguePlayer* UKzDialogueSubsystem::CommitLine(UKzDialoguePlayer& Player, c
 	if (IsPlayingManualLine(Player, Line)) { return &Player; }
 
 	// Hot-swap inside the manual provider: a line fade instead of a full exit and enter (Sequencer lines back to back).
+	// A line that stays on this machine never swaps into one the clients follow, nor the other way round.
 	UKzManualDialogueProvider* ManualProv = Player.IsPlaying() ? Cast<UKzManualDialogueProvider>(Player.GetProvider()) : nullptr;
-	if (ManualProv && Player.GetState() != EKzDialogueState::Exiting)
+	if (ManualProv && Player.GetState() != EKzDialogueState::Exiting && Player.bLocalOnly == bLocalRequests)
 	{
 		if (const FString* Playing = PlayingRequests.Find(&Player))
 		{

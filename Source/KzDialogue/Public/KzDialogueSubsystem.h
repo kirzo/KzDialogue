@@ -201,6 +201,15 @@ public:
 	void AddChoiceListener(UKzDialogueChoiceListener* Listener);
 	void RemoveChoiceListener(UKzDialogueChoiceListener* Listener);
 
+	/** While one lives, the requests made play on this machine only and never reach the clients: Sequencer lines, per machine barks. */
+	struct FLocalRequestScope
+	{
+		explicit FLocalRequestScope(UKzDialogueSubsystem& InSubsystem) : Guard(InSubsystem.bLocalRequests, true) {}
+
+	private:
+		TGuardValue<bool> Guard;
+	};
+
 	/** A server of a networked game: it decides every dialogue its clients show. */
 	bool IsNetServer() const;
 
@@ -354,6 +363,9 @@ private:
 
 	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
 	bool bDeinitializing = false;
+
+	/** Requests made now stay on this machine (FLocalRequestScope). */
+	bool bLocalRequests = false;
 
 	/** Requests waiting for their busy player. */
 	UPROPERTY(Transient)

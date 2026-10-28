@@ -325,6 +325,12 @@ public:
 	/** Turns a player of this client into a copy of the server's, ending what it played on its own. */
 	void BecomeProxy();
 
+	/** An idle copy plays a dialogue of this machine's own, until the server's next one turns it back. */
+	void BecomeLocal() { bProxy = false; }
+
+	/** The dialogue playing stays on this machine and never reaches the clients (Sequencer lines, per machine barks). Set by the subsystem as it starts one. */
+	bool bLocalOnly = false;
+
 	/** A copy follows its server player's new state. */
 	void ApplyNetEntry(const FKzDialogueNetEntry& Entry);
 
