@@ -33,7 +33,7 @@ enum class EKzDialogueNetPhase : uint8
 
 /** A call site format argument of a line, as it travels. */
 USTRUCT()
-struct FKzDialogueNetArgument
+struct KZDIALOGUE_API FKzDialogueNetArgument
 {
 	GENERATED_BODY()
 
@@ -61,7 +61,7 @@ struct FKzDialogueNetArgument
 
 /** A line as it travels to the clients: its asset and id, which each client resolves in its own language, or the whole line when it was built by hand. */
 USTRUCT()
-struct FKzDialogueNetLine
+struct KZDIALOGUE_API FKzDialogueNetLine
 {
 	GENERATED_BODY()
 
@@ -87,7 +87,7 @@ struct FKzDialogueNetLine
 
 /** One server player, for its copy on each client that shows it to follow. */
 USTRUCT()
-struct FKzDialogueNetEntry : public FFastArraySerializerItem
+struct KZDIALOGUE_API FKzDialogueNetEntry : public FFastArraySerializerItem
 {
 	GENERATED_BODY()
 
@@ -137,7 +137,7 @@ struct FKzDialogueNetEntry : public FFastArraySerializerItem
 
 /** The server players an actor carries to the clients: the net actor the shared ones, a player's net component that player's own. */
 USTRUCT()
-struct FKzDialogueNetEntries : public FFastArraySerializer
+struct KZDIALOGUE_API FKzDialogueNetEntries : public FFastArraySerializer
 {
 	GENERATED_BODY()
 
@@ -168,7 +168,7 @@ struct TStructOpsTypeTraits<FKzDialogueNetEntries> : public TStructOpsTypeTraits
 
 /** An option of a Choice as it travels; each client resolves its line in its own language. */
 USTRUCT()
-struct FKzDialogueNetOption
+struct KZDIALOGUE_API FKzDialogueNetOption
 {
 	GENERATED_BODY()
 
@@ -187,7 +187,7 @@ struct FKzDialogueNetOption
 
 /** One server play of a dialogue graph, for its copy on each client that shows it. */
 USTRUCT()
-struct FKzDialogueNetGraphEntry : public FFastArraySerializerItem
+struct KZDIALOGUE_API FKzDialogueNetGraphEntry : public FFastArraySerializerItem
 {
 	GENERATED_BODY()
 
@@ -232,7 +232,7 @@ struct FKzDialogueNetGraphEntry : public FFastArraySerializerItem
 
 /** The server's dialogue graph plays an actor carries to the clients, next to their players' entries. */
 USTRUCT()
-struct FKzDialogueNetGraphEntries : public FFastArraySerializer
+struct KZDIALOGUE_API FKzDialogueNetGraphEntries : public FFastArraySerializer
 {
 	GENERATED_BODY()
 
