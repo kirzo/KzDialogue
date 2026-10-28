@@ -6,11 +6,14 @@
 #include "GameplayTagContainer.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "KzDialogueTypes.h"
+#include "Graph/KzDialogueGraphInstance.h"
 #include "KzDialogueNetTypes.generated.h"
 
 class AActor;
 class UKzDialogueAsset;
+class UKzDialogueGraph;
 struct FKzDialogueNetEntries;
+struct FKzDialogueNetGraphEntries;
 
 /** Where a server player's dialogue is, for its copies on the clients to follow. */
 UENUM()
@@ -155,13 +158,105 @@ struct FKzDialogueNetEntries : public FFastArraySerializer
 	{
 		return FFastArraySerializer::FastArrayDeltaSerialize<FKzDialogueNetEntry, FKzDialogueNetEntries>(Entries, DeltaParams, *this);
 	}
-
-private:
-	void ForceHostUpdate() const;
 };
 
 template<>
 struct TStructOpsTypeTraits<FKzDialogueNetEntries> : public TStructOpsTypeTraitsBase2<FKzDialogueNetEntries>
+{
+	enum { WithNetDeltaSerializer = true };
+};
+
+/** An option of a Choice as it travels; each client resolves its line in its own language. */
+USTRUCT()
+struct FKzDialogueNetOption
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	int32 Index = INDEX_NONE;
+
+	UPROPERTY()
+	bool bAvailable = true;
+
+	UPROPERTY()
+	bool bDefault = false;
+
+	UPROPERTY()
+	FKzDialogueNetLine Line;
+};
+
+/** One server play of a dialogue graph, for its copy on each client that shows it. */
+USTRUCT()
+struct FKzDialogueNetGraphEntry : public FFastArraySerializerItem
+{
+	GENERATED_BODY()
+
+	/** Names the play across the network. */
+	UPROPERTY()
+	int32 PlayId = 0;
+
+	/** The channel of the player its lines go to. */
+	UPROPERTY()
+	FGameplayTag Channel;
+
+	/** The owner of the player its lines go to; also null on a client the server's owner is not relevant to. */
+	UPROPERTY()
+	TObjectPtr<AActor> Owner = nullptr;
+
+	UPROPERTY()
+	bool bHasOwner = false;
+
+	/** The graph the play is in now. */
+	UPROPERTY()
+	TObjectPtr<UKzDialogueGraph> Graph = nullptr;
+
+	UPROPERTY()
+	FKzDialogueGraphContext Context;
+
+	/** Counts the offers of options, so a copy tells a new one from the one it shows. */
+	UPROPERTY()
+	int32 OfferSerial = 0;
+
+	/** The options offered now; empty when no Choice waits. */
+	UPROPERTY()
+	TArray<FKzDialogueNetOption> Options;
+
+	/** Server time the options' time limit runs out at; 0 without one. */
+	UPROPERTY()
+	double ChoiceEndTime = 0.0;
+
+	void PostReplicatedAdd(const FKzDialogueNetGraphEntries& InArray);
+	void PostReplicatedChange(const FKzDialogueNetGraphEntries& InArray);
+	void PreReplicatedRemove(const FKzDialogueNetGraphEntries& InArray);
+};
+
+/** The server's dialogue graph plays an actor carries to the clients, next to their players' entries. */
+USTRUCT()
+struct FKzDialogueNetGraphEntries : public FFastArraySerializer
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<FKzDialogueNetGraphEntry> Entries;
+
+	/** The actor or component carrying it, whose world the entries arrive in. */
+	UPROPERTY(NotReplicated)
+	TObjectPtr<UObject> Host = nullptr;
+
+	FKzDialogueNetGraphEntry& FindOrAdd(int32 PlayId);
+	void Remove(int32 PlayId);
+
+	/** Sends the entry with the host's next net update, asked for now. */
+	void Commit(FKzDialogueNetGraphEntry& Entry);
+
+	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParams)
+	{
+		return FFastArraySerializer::FastArrayDeltaSerialize<FKzDialogueNetGraphEntry, FKzDialogueNetGraphEntries>(Entries, DeltaParams, *this);
+	}
+};
+
+template<>
+struct TStructOpsTypeTraits<FKzDialogueNetGraphEntries> : public TStructOpsTypeTraitsBase2<FKzDialogueNetGraphEntries>
 {
 	enum { WithNetDeltaSerializer = true };
 };

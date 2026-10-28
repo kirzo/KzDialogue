@@ -23,6 +23,8 @@ class APlayerController;
 struct FKzDialogueChannelDefinition;
 struct FKzDialogueNetEntry;
 struct FKzDialogueNetEntries;
+struct FKzDialogueNetGraphEntry;
+struct FKzDialogueNetGraphEntries;
 
 /** A queued request (RequestId) is about to start on its channel, or was dropped: expired, displaced by Replace, or cleared by a stop. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnQueuedDialogueRequest, FGameplayTag, Channel, FGuid, RequestId);
@@ -229,6 +231,23 @@ public:
 	/** The server's clock, on the server and estimated on its clients; line start times travel in it. */
 	double GetServerTime() const;
 
+	/** On a server, a new id to name a dialogue graph play across the network. */
+	int32 AllocateNetPlayId() { return ++LastNetPlayId; }
+
+	/** On a server, sends a dialogue graph play's state to the clients that show its player. Called by the instances. */
+	void PublishGraph(const UKzDialogueGraphInstance& Instance);
+	void UnpublishGraph(const UKzDialogueGraphInstance& Instance);
+
+	/** On a client, a server play of a dialogue graph arrived or changed: its copy here follows it. Called by the net entries. */
+	void ReceiveNetGraphEntry(const FKzDialogueNetGraphEntry& Entry);
+	void ReleaseNetGraphEntry(const FKzDialogueNetGraphEntry& Entry);
+
+	/** On a client, asks the server to choose an option of the play that Instance copies. */
+	void SendSelectOption(const UKzDialogueGraphInstance& Instance, int32 Index);
+
+	/** On a server, a client chooses an option: they may in their own conversation, and in a shared one the first to choose does. */
+	void HandleNetSelectOption(APlayerController* From, int32 PlayId, int32 Index);
+
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 	// Owner, on an owned channel, picks whose player they play on (see ResolveOwner); without one, the line's speaker decides.
 
@@ -383,8 +402,15 @@ private:
 	/** On a client, the net component its requests about Player go through: the copy's own player's, else the first local one's. */
 	UKzDialogueNetComponent* FindLocalNetComponent(const UKzDialoguePlayer& Player) const;
 
-	/** Where the player's net entry travels: its player's net component for a player's own dialogue, the net actor for a shared one. Null when no client shows it. */
+	/** What the player's net entries travel in: its player's net component for a player's own dialogue, the net actor for a shared one. Null when no client shows it. */
+	UObject* FindNetHost(const UKzDialoguePlayer& Player, bool bCreate);
 	FKzDialogueNetEntries* FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate);
+	FKzDialogueNetGraphEntries* FindNetGraphEntries(const UKzDialoguePlayer& Player, bool bCreate);
+
+	/** On a client, the copy of the server play with that id. */
+	UKzDialogueGraphInstance* FindGraphCopy(int32 PlayId) const;
+
+	int32 LastNetPlayId = 0;
 
 	/** Whether other owners already fill the channel's MaxConcurrent, so Player may not start. */
 	bool IsAtConcurrencyLimit(const UKzDialoguePlayer& Player, const FKzDialogueChannelDefinition* ChannelDef) const;

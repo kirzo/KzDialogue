@@ -84,10 +84,30 @@ bool FKzDialogueNetLine::Resolve(FKzDialogueLine& OutLine) const
 // Entries
 // ---------------------------------------------------------------------------------------
 
+static UKzDialogueSubsystem* GetHostSubsystem(const UObject* Host)
+{
+	const UWorld* World = Host ? Host->GetWorld() : nullptr;
+	return World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+}
+
 static UKzDialogueSubsystem* GetEntriesSubsystem(const FKzDialogueNetEntries& InArray)
 {
-	const UWorld* World = InArray.Host ? InArray.Host->GetWorld() : nullptr;
-	return World ? World->GetSubsystem<UKzDialogueSubsystem>() : nullptr;
+	return GetHostSubsystem(InArray.Host);
+}
+
+// The host's actor sends what changed with its next net update, asked for now.
+static void ForceHostUpdate(UObject* Host)
+{
+	AActor* Actor = Cast<AActor>(Host);
+	if (!Actor)
+	{
+		const UActorComponent* Component = Cast<UActorComponent>(Host);
+		Actor = Component ? Component->GetOwner() : nullptr;
+	}
+	if (Actor)
+	{
+		Actor->ForceNetUpdate();
+	}
 }
 
 void FKzDialogueNetEntry::PostReplicatedAdd(const FKzDialogueNetEntries& InArray)
@@ -124,26 +144,58 @@ void FKzDialogueNetEntries::Remove(FGameplayTag Channel, const AActor* Owner)
 	if (Entries.RemoveAll([Channel, Owner](const FKzDialogueNetEntry& Entry) { return Entry.Channel == Channel && Entry.Owner == Owner; }) > 0)
 	{
 		MarkArrayDirty();
-		ForceHostUpdate();
+		ForceHostUpdate(Host);
 	}
 }
 
 void FKzDialogueNetEntries::Commit(FKzDialogueNetEntry& Entry)
 {
 	MarkItemDirty(Entry);
-	ForceHostUpdate();
+	ForceHostUpdate(Host);
 }
 
-void FKzDialogueNetEntries::ForceHostUpdate() const
+// ---------------------------------------------------------------------------------------
+// Graph entries
+// ---------------------------------------------------------------------------------------
+
+void FKzDialogueNetGraphEntry::PostReplicatedAdd(const FKzDialogueNetGraphEntries& InArray)
 {
-	AActor* Actor = Cast<AActor>(Host);
-	if (!Actor)
+	if (UKzDialogueSubsystem* Subsystem = GetHostSubsystem(InArray.Host)) { Subsystem->ReceiveNetGraphEntry(*this); }
+}
+
+void FKzDialogueNetGraphEntry::PostReplicatedChange(const FKzDialogueNetGraphEntries& InArray)
+{
+	if (UKzDialogueSubsystem* Subsystem = GetHostSubsystem(InArray.Host)) { Subsystem->ReceiveNetGraphEntry(*this); }
+}
+
+void FKzDialogueNetGraphEntry::PreReplicatedRemove(const FKzDialogueNetGraphEntries& InArray)
+{
+	if (UKzDialogueSubsystem* Subsystem = GetHostSubsystem(InArray.Host)) { Subsystem->ReleaseNetGraphEntry(*this); }
+}
+
+FKzDialogueNetGraphEntry& FKzDialogueNetGraphEntries::FindOrAdd(int32 PlayId)
+{
+	if (FKzDialogueNetGraphEntry* Existing = Entries.FindByPredicate([PlayId](const FKzDialogueNetGraphEntry& Entry) { return Entry.PlayId == PlayId; }))
 	{
-		const UActorComponent* Component = Cast<UActorComponent>(Host);
-		Actor = Component ? Component->GetOwner() : nullptr;
+		return *Existing;
 	}
-	if (Actor)
+
+	FKzDialogueNetGraphEntry& Added = Entries.AddDefaulted_GetRef();
+	Added.PlayId = PlayId;
+	return Added;
+}
+
+void FKzDialogueNetGraphEntries::Remove(int32 PlayId)
+{
+	if (Entries.RemoveAll([PlayId](const FKzDialogueNetGraphEntry& Entry) { return Entry.PlayId == PlayId; }) > 0)
 	{
-		Actor->ForceNetUpdate();
+		MarkArrayDirty();
+		ForceHostUpdate(Host);
 	}
+}
+
+void FKzDialogueNetGraphEntries::Commit(FKzDialogueNetGraphEntry& Entry)
+{
+	MarkItemDirty(Entry);
+	ForceHostUpdate(Host);
 }

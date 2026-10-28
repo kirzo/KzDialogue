@@ -16,6 +16,7 @@ class UKzDialoguePlayer;
 class UKzDialogueSubsystem;
 struct FKzDialogueGraphNode_Choice;
 struct FKzDialogueGraphNode_SubGraph;
+struct FKzDialogueNetGraphEntry;
 
 /** Who plays a dialogue graph and how. Empty fields take the graph's settings. */
 USTRUCT(BlueprintType)
@@ -254,6 +255,22 @@ public:
 	UKzDialogueMemorySubsystem* GetMemory() const;
 	UKzDialogueSubsystem* GetSubsystem() const;
 
+	/** A copy of a server play on a client: its options and countdown follow the server's, Select Option and Next go there, and Continue and Stop are refused. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
+	bool IsProxy() const { return bProxy; }
+
+	/** Names the play across the network; 0 off it. */
+	int32 GetNetPlayId() const { return NetPlayId; }
+
+	/** The state its copies on the clients follow. */
+	void FillNetEntry(FKzDialogueNetGraphEntry& Entry) const;
+
+	/** A copy follows its server play's new state; the first one starts it. */
+	void ApplyNetEntry(const FKzDialogueNetGraphEntry& Entry);
+
+	/** A copy ends, as its server play did or went away. */
+	void EndProxy();
+
 	virtual UWorld* GetWorld() const override;
 
 	// The provider's questions, as the player asks them.
@@ -322,6 +339,9 @@ private:
 
 	void Finish(bool bInterrupted);
 
+	/** On a server, sends the play's state to its copies. */
+	void PublishNet() const;
+
 	/** The graph walked now; its callers wait in Callers. */
 	UPROPERTY()
 	TObjectPtr<UKzDialogueGraph> Graph;
@@ -361,6 +381,15 @@ private:
 
 	bool bStarted = false;
 	bool bFinished = false;
+
+	bool bProxy = false;
+	int32 NetPlayId = 0;
+
+	/** Counts the offers of options: on a server the ones made, on a copy the last one shown. */
+	int32 NetOfferSerial = 0;
+
+	/** Server time the options' time limit runs out at; 0 without one. */
+	double ChoiceEndTime = 0.0;
 };
 
 /** Feeds a dialogue graph's lines to its player, one at a time as the walk reaches them. */

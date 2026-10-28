@@ -19,6 +19,9 @@ public:
 	UPROPERTY(Replicated)
 	FKzDialogueNetEntries Entries;
 
+	UPROPERTY(Replicated)
+	FKzDialogueNetGraphEntries GraphEntries;
+
 	//~ AActor
 	virtual void PostInitProperties() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

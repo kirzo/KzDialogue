@@ -8,6 +8,7 @@
 #include "KzDialogueMemorySubsystem.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
+#include "Net/KzDialogueNetTypes.h"
 #include "Settings/KzDialogueSettings.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -202,6 +203,10 @@ bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
 		return false;
 	}
 	bStarted = true;
+	if (Subsystem->IsNetServer())
+	{
+		NetPlayId = Subsystem->AllocateNetPlayId();
+	}
 	if (bVisitNode)
 	{
 		Visit(Graph->GetData().GetNodeGuid(Node));
@@ -218,6 +223,7 @@ bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
 	Player->OnDialogueStarted.AddDynamic(this, &UKzDialogueGraphInstance::HandleDialogueStarted);
 	Player->OnDialogueFinished.AddDynamic(this, &UKzDialogueGraphInstance::HandleDialogueFinished);
 	Subsystem->AddGraphInstance(this);
+	PublishNet();
 	Subsystem->OnDialogueGraphStarted.Broadcast(this);
 
 	if (!Subsystem->Play(Provider, Channel, Priority, AdvanceMode, Graph->bInterruptible, ChannelOwner))
@@ -236,6 +242,18 @@ bool UKzDialogueGraphInstance::PlayOnChannel(bool bVisitNode)
 bool UKzDialogueGraphInstance::SelectOption(int32 Index)
 {
 	const FKzDialogueGraphOption* Offered = Options.FindByPredicate([Index](const FKzDialogueGraphOption& Option) { return Option.Index == Index; });
+	if (bProxy)
+	{
+		// The server decides; the options go when it takes the answer.
+		UKzDialogueSubsystem* Subsystem = GetSubsystem();
+		if (Step != EStep::Choosing || !Offered || !Offered->bAvailable || !Subsystem)
+		{
+			return false;
+		}
+		Subsystem->SendSelectOption(*this, Index);
+		return true;
+	}
+
 	const FKzDialogueGraphNode_Choice* Choice = Graph ? Graph->GetData().GetNode<FKzDialogueGraphNode_Choice>(Node) : nullptr;
 	if (Step != EStep::Choosing || !Offered || !Offered->bAvailable || !Choice || !Choice->Options.IsValidIndex(Index))
 	{
@@ -260,6 +278,12 @@ void UKzDialogueGraphInstance::Next()
 
 void UKzDialogueGraphInstance::Continue(FGameplayTag Tag)
 {
+	if (bProxy)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Continue refused on a copy of a server's dialogue graph play; the server decides it."));
+		return;
+	}
+
 	const FKzDialogueGraphNode_Wait* Wait = Step == EStep::Waiting ? Graph->GetData().GetNode<FKzDialogueGraphNode_Wait>(Node) : nullptr;
 	if (Wait && (!Wait->ContinueTag.IsValid() || Wait->ContinueTag == Tag))
 	{
@@ -269,6 +293,11 @@ void UKzDialogueGraphInstance::Continue(FGameplayTag Tag)
 
 void UKzDialogueGraphInstance::Stop()
 {
+	if (bProxy)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Stop refused on a copy of a server's dialogue graph play; the server decides it."));
+		return;
+	}
 	if (!IsRunning())
 	{
 		return;
@@ -290,6 +319,13 @@ void UKzDialogueGraphInstance::Stop()
 
 float UKzDialogueGraphInstance::GetTimeLeft() const
 {
+	if (bProxy)
+	{
+		const UKzDialogueSubsystem* Subsystem = GetSubsystem();
+		const bool bCounting = Step == EStep::Choosing && ChoiceEndTime > 0.0 && Subsystem;
+		return bCounting ? FMath::Max(static_cast<float>(ChoiceEndTime - Subsystem->GetServerTime()), 0.0f) : 0.0f;
+	}
+
 	const UWorld* World = GetWorld();
 	return Step == EStep::Choosing && World ? FMath::Max(World->GetTimerManager().GetTimerRemaining(StepTimer), 0.0f) : 0.0f;
 }
@@ -537,6 +573,7 @@ int32 UKzDialogueGraphInstance::EnterSubGraph(const FKzDialogueGraphNode_SubGrap
 	Graph = Called;
 	Node = Entry;
 	Visit(Graph->GetData().GetNodeGuid(Node));
+	PublishNet();
 	return FindTarget(Node, DefaultOutput);
 }
 
@@ -545,6 +582,7 @@ int32 UKzDialogueGraphInstance::ReturnToCaller(FName Exit)
 	const FKzDialogueGraphCaller Caller = Callers.Pop();
 	Graph = Caller.Graph;
 	Node = Caller.Node;
+	PublishNet();
 
 	// An Exit the Sub Graph node has no output for leaves through Out.
 	const bool bNamedOutput = !Exit.IsNone() && Graph->GetData().FindOutput(Node, Exit) != INDEX_NONE;
@@ -612,6 +650,9 @@ bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& C
 	{
 		GetWorld()->GetTimerManager().SetTimer(StepTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleChoiceTimeout), TimeLimit, false);
 	}
+	++NetOfferSerial;
+	ChoiceEndTime = TimeLimit > 0.0f && Subsystem ? Subsystem->GetServerTime() + TimeLimit : 0.0;
+	PublishNet();
 	OnOptionsOffered.Broadcast(this, Options);
 	return true;
 }
@@ -625,6 +666,8 @@ void UKzDialogueGraphInstance::WithdrawOptions()
 	if (!Options.IsEmpty())
 	{
 		Options.Reset();
+		ChoiceEndTime = 0.0;
+		PublishNet();
 		OnOptionsWithdrawn.Broadcast(this);
 	}
 }
@@ -739,9 +782,98 @@ void UKzDialogueGraphInstance::Finish(bool bInterrupted)
 	{
 		Subsystem->OnQueuedRequestDropped.RemoveAll(this);
 		Subsystem->RemoveGraphInstance(this);
+		if (!bProxy)
+		{
+			Subsystem->UnpublishGraph(*this);
+		}
 	}
 
 	OnEnded.Broadcast(this, bInterrupted ? NAME_None : ExitName, bInterrupted);
+}
+
+// ---------------------------------------------------------------------------------------
+// Network
+// ---------------------------------------------------------------------------------------
+
+void UKzDialogueGraphInstance::PublishNet() const
+{
+	UKzDialogueSubsystem* Subsystem = !bProxy && NetPlayId != 0 ? GetSubsystem() : nullptr;
+	if (Subsystem)
+	{
+		Subsystem->PublishGraph(*this);
+	}
+}
+
+void UKzDialogueGraphInstance::FillNetEntry(FKzDialogueNetGraphEntry& Entry) const
+{
+	Entry.Graph = Graph;
+	Entry.Context = Context;
+	Entry.OfferSerial = NetOfferSerial;
+	Entry.ChoiceEndTime = ChoiceEndTime;
+	Entry.Options.Reset();
+	for (const FKzDialogueGraphOption& Option : Options)
+	{
+		FKzDialogueNetOption& NetOption = Entry.Options.AddDefaulted_GetRef();
+		NetOption.Index = Option.Index;
+		NetOption.bAvailable = Option.bAvailable;
+		NetOption.bDefault = Option.bDefault;
+		NetOption.Line = FKzDialogueNetLine(Option.Line);
+	}
+}
+
+void UKzDialogueGraphInstance::ApplyNetEntry(const FKzDialogueNetGraphEntry& Entry)
+{
+	UKzDialogueSubsystem* Subsystem = GetSubsystem();
+	if (!Subsystem || bFinished)
+	{
+		return;
+	}
+
+	Graph = Entry.Graph;
+	Context = Entry.Context;
+	ChoiceEndTime = Entry.ChoiceEndTime;
+	if (!bStarted)
+	{
+		bProxy = true;
+		NetPlayId = Entry.PlayId;
+		Player = Subsystem->GetOrCreatePlayer(Entry.Channel, Entry.Owner);
+		bStarted = true;
+		bPlaying = true;
+		Subsystem->AddGraphInstance(this);
+		Subsystem->OnDialogueGraphStarted.Broadcast(this);
+	}
+
+	// A new offer replaces the one shown; an empty one withdraws it.
+	const bool bNewOffer = Entry.OfferSerial != NetOfferSerial && !Entry.Options.IsEmpty();
+	NetOfferSerial = Entry.OfferSerial;
+	if (bNewOffer || Entry.Options.IsEmpty())
+	{
+		Step = EStep::Passed;
+		WithdrawOptions();
+	}
+	if (!bNewOffer)
+	{
+		return;
+	}
+
+	for (const FKzDialogueNetOption& NetOption : Entry.Options)
+	{
+		FKzDialogueGraphOption& Offered = Options.AddDefaulted_GetRef();
+		Offered.Index = NetOption.Index;
+		Offered.bAvailable = NetOption.bAvailable;
+		Offered.bDefault = NetOption.bDefault;
+		NetOption.Line.Resolve(Offered.Line);
+	}
+	Step = EStep::Choosing;
+	OnOptionsOffered.Broadcast(this, Options);
+}
+
+void UKzDialogueGraphInstance::EndProxy()
+{
+	if (bProxy)
+	{
+		Finish(false);
+	}
 }
 
 bool UKzDialogueGraphProvider::HasNext_Implementation() const

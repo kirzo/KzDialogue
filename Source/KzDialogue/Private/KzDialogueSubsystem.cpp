@@ -198,6 +198,17 @@ void UKzDialogueSubsystem::RemovePlayer(UKzDialoguePlayer& Player)
 		Entries->Remove(Player.Channel, Player.GetOwner());
 	}
 
+	// A copy of a play on this player goes with it.
+	TArray<UKzDialogueGraphInstance*> Copies;
+	for (UKzDialogueGraphInstance* Instance : GraphInstances)
+	{
+		if (Instance && Instance->IsProxy() && Instance->GetPlayer() == &Player) { Copies.Add(Instance); }
+	}
+	for (UKzDialogueGraphInstance* Copy : Copies)
+	{
+		Copy->EndProxy();
+	}
+
 	Players.Remove(&Player);
 	Queues.Remove(&Player);
 	PlayingRequests.Remove(&Player);
@@ -245,15 +256,13 @@ UKzDialogueNetComponent* UKzDialogueSubsystem::FindOrAddNetComponent(APlayerCont
 	return Component;
 }
 
-FKzDialogueNetEntries* UKzDialogueSubsystem::FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate)
+UObject* UKzDialogueSubsystem::FindNetHost(const UKzDialoguePlayer& Player, bool bCreate)
 {
 	// A player's own dialogue goes to that player alone; the host's stays on this machine.
 	if (APlayerController* Controller = Cast<APlayerController>(Player.GetOwner()))
 	{
 		if (Controller->IsLocalController()) { return nullptr; }
-
-		UKzDialogueNetComponent* Component = bCreate ? FindOrAddNetComponent(Controller) : Controller->FindComponentByClass<UKzDialogueNetComponent>();
-		return Component ? &Component->Entries : nullptr;
+		return bCreate ? FindOrAddNetComponent(Controller) : Controller->FindComponentByClass<UKzDialogueNetComponent>();
 	}
 
 	if (!IsValid(NetActor) && bCreate && !bDeinitializing && GetWorld())
@@ -262,7 +271,104 @@ FKzDialogueNetEntries* UKzDialogueSubsystem::FindNetEntries(const UKzDialoguePla
 		Params.ObjectFlags |= RF_Transient;
 		NetActor = GetWorld()->SpawnActor<AKzDialogueNetActor>(Params);
 	}
-	return IsValid(NetActor) ? &NetActor->Entries : nullptr;
+	return IsValid(NetActor) ? NetActor.Get() : nullptr;
+}
+
+FKzDialogueNetEntries* UKzDialogueSubsystem::FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate)
+{
+	UObject* Host = FindNetHost(Player, bCreate);
+	if (AKzDialogueNetActor* Actor = Cast<AKzDialogueNetActor>(Host)) { return &Actor->Entries; }
+	UKzDialogueNetComponent* Component = Cast<UKzDialogueNetComponent>(Host);
+	return Component ? &Component->Entries : nullptr;
+}
+
+FKzDialogueNetGraphEntries* UKzDialogueSubsystem::FindNetGraphEntries(const UKzDialoguePlayer& Player, bool bCreate)
+{
+	UObject* Host = FindNetHost(Player, bCreate);
+	if (AKzDialogueNetActor* Actor = Cast<AKzDialogueNetActor>(Host)) { return &Actor->GraphEntries; }
+	UKzDialogueNetComponent* Component = Cast<UKzDialogueNetComponent>(Host);
+	return Component ? &Component->GraphEntries : nullptr;
+}
+
+UKzDialogueGraphInstance* UKzDialogueSubsystem::FindGraphCopy(int32 PlayId) const
+{
+	const TObjectPtr<UKzDialogueGraphInstance>* Found = GraphInstances.FindByPredicate([PlayId](const UKzDialogueGraphInstance* Instance)
+	{
+		return Instance && Instance->IsProxy() && Instance->GetNetPlayId() == PlayId;
+	});
+	return Found ? Found->Get() : nullptr;
+}
+
+void UKzDialogueSubsystem::PublishGraph(const UKzDialogueGraphInstance& Instance)
+{
+	const UKzDialoguePlayer* Player = Instance.GetPlayer();
+	FKzDialogueNetGraphEntries* Entries = IsNetServer() && Player && Instance.GetNetPlayId() != 0 ? FindNetGraphEntries(*Player, true) : nullptr;
+	if (!Entries) { return; }
+
+	FKzDialogueNetGraphEntry& Entry = Entries->FindOrAdd(Instance.GetNetPlayId());
+	Entry.Channel = Player->Channel;
+	Entry.Owner = Player->GetOwner();
+	Entry.bHasOwner = Entry.Owner != nullptr;
+	Instance.FillNetEntry(Entry);
+	Entries->Commit(Entry);
+}
+
+void UKzDialogueSubsystem::UnpublishGraph(const UKzDialogueGraphInstance& Instance)
+{
+	const UKzDialoguePlayer* Player = Instance.GetPlayer();
+	if (FKzDialogueNetGraphEntries* Entries = IsNetServer() && Player && Instance.GetNetPlayId() != 0 ? FindNetGraphEntries(*Player, false) : nullptr)
+	{
+		Entries->Remove(Instance.GetNetPlayId());
+	}
+}
+
+void UKzDialogueSubsystem::ReceiveNetGraphEntry(const FKzDialogueNetGraphEntry& Entry)
+{
+	if (!IsNetClient() || (Entry.bHasOwner && !IsValid(Entry.Owner))) { return; }
+
+	UKzDialogueGraphInstance* Instance = FindGraphCopy(Entry.PlayId);
+	if (!Instance)
+	{
+		Instance = NewObject<UKzDialogueGraphInstance>(this);
+	}
+	Instance->ApplyNetEntry(Entry);
+}
+
+void UKzDialogueSubsystem::ReleaseNetGraphEntry(const FKzDialogueNetGraphEntry& Entry)
+{
+	if (UKzDialogueGraphInstance* Instance = IsNetClient() ? FindGraphCopy(Entry.PlayId) : nullptr)
+	{
+		Instance->EndProxy();
+	}
+}
+
+void UKzDialogueSubsystem::SendSelectOption(const UKzDialogueGraphInstance& Instance, int32 Index)
+{
+	const UKzDialoguePlayer* Player = Instance.GetPlayer();
+	if (UKzDialogueNetComponent* Component = Player ? FindLocalNetComponent(*Player) : nullptr)
+	{
+		Component->ServerSelectOption(Instance.GetNetPlayId(), Index);
+	}
+}
+
+void UKzDialogueSubsystem::HandleNetSelectOption(APlayerController* From, int32 PlayId, int32 Index)
+{
+	const TObjectPtr<UKzDialogueGraphInstance>* Found = GraphInstances.FindByPredicate([PlayId](const UKzDialogueGraphInstance* Instance)
+	{
+		return Instance && !Instance->IsProxy() && Instance->GetNetPlayId() == PlayId;
+	});
+	UKzDialogueGraphInstance* Instance = Found ? Found->Get() : nullptr;
+	if (!Instance || !From) { return; }
+
+	// Another player's own conversation is not theirs to answer; a shared one is anyone's, and the first answer wins.
+	const UKzDialoguePlayer* Player = Instance->GetPlayer();
+	const APlayerController* OwnerController = Player ? Cast<APlayerController>(Player->GetOwner()) : nullptr;
+	if (OwnerController && OwnerController != From)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph play %d: %s tried to answer %s's conversation; refused."), PlayId, *From->GetName(), *OwnerController->GetName());
+		return;
+	}
+	Instance->SelectOption(Index);
 }
 
 void UKzDialogueSubsystem::PublishPlayer(const UKzDialoguePlayer& Player, const FKzDialogueLine* NewLine)

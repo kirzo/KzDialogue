@@ -25,6 +25,9 @@ public:
 	UPROPERTY(Replicated)
 	FKzDialogueNetEntries Entries;
 
+	UPROPERTY(Replicated)
+	FKzDialogueNetGraphEntries GraphEntries;
+
 	/** On the server, the owning player's reading speed scale as their machine sent it; 0 until it does. */
 	float ReadingSpeedScale = 0.0f;
 
@@ -38,6 +41,10 @@ public:
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetReadingSpeedScale(float Scale);
+
+	/** Chooses an option of the server's dialogue graph play with that id, as Select Option on its copy here. */
+	UFUNCTION(Server, Reliable)
+	void ServerSelectOption(int32 PlayId, int32 Index);
 
 	//~ UActorComponent
 	virtual void PostInitProperties() override;

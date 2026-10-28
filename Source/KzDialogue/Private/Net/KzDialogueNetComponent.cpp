@@ -17,6 +17,7 @@ void UKzDialogueNetComponent::PostInitProperties()
 {
 	Super::PostInitProperties();
 	Entries.Host = this;
+	GraphEntries.Host = this;
 }
 
 void UKzDialogueNetComponent::BeginPlay()
@@ -42,6 +43,7 @@ void UKzDialogueNetComponent::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(UKzDialogueNetComponent, Entries);
+	DOREPLIFETIME(UKzDialogueNetComponent, GraphEntries);
 }
 
 void UKzDialogueNetComponent::SendReadingSpeedScale()
@@ -68,4 +70,12 @@ void UKzDialogueNetComponent::ServerViewPhaseDone_Implementation(FGameplayTag Ch
 void UKzDialogueNetComponent::ServerSetReadingSpeedScale_Implementation(float Scale)
 {
 	ReadingSpeedScale = FMath::Clamp(Scale, 0.1f, 10.0f);
+}
+
+void UKzDialogueNetComponent::ServerSelectOption_Implementation(int32 PlayId, int32 Index)
+{
+	if (UKzDialogueSubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UKzDialogueSubsystem>() : nullptr)
+	{
+		Subsystem->HandleNetSelectOption(Cast<APlayerController>(GetOwner()), PlayId, Index);
+	}
 }

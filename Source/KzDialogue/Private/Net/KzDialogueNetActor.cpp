@@ -17,10 +17,12 @@ void AKzDialogueNetActor::PostInitProperties()
 {
 	Super::PostInitProperties();
 	Entries.Host = this;
+	GraphEntries.Host = this;
 }
 
 void AKzDialogueNetActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AKzDialogueNetActor, Entries);
+	DOREPLIFETIME(AKzDialogueNetActor, GraphEntries);
 }
