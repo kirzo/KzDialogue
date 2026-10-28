@@ -61,6 +61,17 @@ namespace KzDialogueDebugDraw
 		return IsValid(Provider) ? Provider->GetClass()->GetName() : TEXT("none");
 	}
 
+	/** Where the player stands in a networked game, after its channel; nothing off the network. */
+	static FString DescribeNetRole(const UKzDialoguePlayer& Player)
+	{
+		const UWorld* World = Player.GetWorld();
+		const ENetMode NetMode = World ? World->GetNetMode() : NM_Standalone;
+		if (NetMode == NM_Standalone) { return FString(); }
+		if (Player.IsProxy()) { return TEXT("   [copy of the server's]"); }
+		if (Player.bLocalOnly && Player.IsPlaying()) { return TEXT("   [this machine only]"); }
+		return NetMode == NM_Client ? TEXT("   [this client's own]") : TEXT("   [server]");
+	}
+
 	/** Draw a single line of text and advance Y. */
 	static void DrawLine(UCanvas* Canvas, float X, float& Y, const FString& Text, const FLinearColor& Color)
 	{
@@ -192,11 +203,13 @@ void FKzDialogueDebugOverlay::DrawDebug(UCanvas* Canvas, APlayerController* PC)
 		if (!IsValid(Player)) { continue; }
 
 		const AActor* Owner = Player->GetOwner();
-		DrawLine(Canvas, X, Y, Owner ? FString::Printf(TEXT("Channel: %s / %s"), *Player->Channel.ToString(), *Owner->GetActorNameOrLabel()) : FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString()), TitleColor);
+		const FString ChannelLine = Owner ? FString::Printf(TEXT("Channel: %s / %s"), *Player->Channel.ToString(), *Owner->GetActorNameOrLabel()) : FString::Printf(TEXT("Channel: %s"), *Player->Channel.ToString());
+		DrawLine(Canvas, X, Y, ChannelLine + DescribeNetRole(*Player), TitleColor);
 
 		// The phase stays visible under a pause.
-		const FString StateLine = FString::Printf(TEXT("State: %s%s   Priority: %d   TimeScale: %.2fx   Pending acks: %d"),
-			*StateName(Player->State), Player->IsPaused() ? TEXT(" (paused)") : TEXT(""), Player->CurrentPriority, Player->TimeScale, Player->PendingViewAcks);
+		const FString StateLine = FString::Printf(TEXT("State: %s%s   Priority: %d   TimeScale: %.2fx   Pending acks: %d%s"),
+			*StateName(Player->State), Player->IsPaused() ? TEXT(" (paused)") : TEXT(""), Player->CurrentPriority, Player->TimeScale, Player->PendingViewAcks,
+			Player->bAwaitingRemoteView ? TEXT(" (one is its player's machine)") : TEXT(""));
 		DrawLine(Canvas, X + Indent, Y, StateLine, StateColor(Player->GetState()));
 
 		FString Source = ProviderTypeName(Player->GetProvider());

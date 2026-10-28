@@ -366,9 +366,14 @@ void UKzDialogueSubsystem::HandleNetSelectOption(APlayerController* From, int32 
 	if (OwnerController && OwnerController != From)
 	{
 		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph play %d: %s tried to answer %s's conversation; refused."), PlayId, *From->GetName(), *OwnerController->GetName());
+		AddHistory(Player->Channel, DescribeOwner(Player), Player->CurrentPriority, FString::Printf(TEXT("Option %d from %s"), Index, *From->GetName()), TEXT("Rejected: another player's conversation"));
 		return;
 	}
-	Instance->SelectOption(Index);
+	if (!Instance->SelectOption(Index))
+	{
+		// A shared question someone else answered first, or an option no longer offered.
+		AddHistory(Player ? Player->Channel : FGameplayTag(), DescribeOwner(Player), 0, FString::Printf(TEXT("Option %d from %s"), Index, *From->GetName()), TEXT("Rejected: not offered now"));
+	}
 }
 
 void UKzDialogueSubsystem::PublishPlayer(const UKzDialoguePlayer& Player, const FKzDialogueLine* NewLine)
@@ -393,10 +398,21 @@ void UKzDialogueSubsystem::ReceiveNetEntry(const FKzDialogueNetEntry& Entry)
 	if (!Player->IsProxy())
 	{
 		// The server's dialogue wins over one this machine started on its own.
+		if (const FString* Playing = PlayingRequests.Find(Player); Playing && Player->IsPlaying())
+		{
+			AddHistory(Player->Channel, DescribeOwner(Player), Player->CurrentPriority, *Playing, TEXT("Interrupted by the server's dialogue"));
+		}
 		DropQueue(Player, TEXT("the server took the channel"));
 		Player->BecomeProxy();
 	}
+
+	// Each dialogue the copy shows goes to this machine's history, so both sides tell what played.
+	const bool bNewDialogue = Entry.Phase != EKzDialogueNetPhase::Idle && !Player->IsPlaying();
 	Player->ApplyNetEntry(Entry);
+	if (bNewDialogue && Player->IsPlaying())
+	{
+		AddHistory(Player->Channel, DescribeOwner(Player), 0, TEXT("server's dialogue"), TEXT("Copied"));
+	}
 }
 
 void UKzDialogueSubsystem::ReleaseNetEntry(const FKzDialogueNetEntry& Entry)
@@ -404,6 +420,7 @@ void UKzDialogueSubsystem::ReleaseNetEntry(const FKzDialogueNetEntry& Entry)
 	UKzDialoguePlayer* Player = IsNetClient() ? FindResolvedPlayer(Entry.Channel, Entry.Owner) : nullptr;
 	if (IsValid(Player) && Player->IsProxy())
 	{
+		AddHistory(Player->Channel, DescribeOwner(Player), 0, TEXT("server's player"), TEXT("Removed with it"));
 		RemovePlayer(*Player);
 	}
 }
@@ -471,6 +488,7 @@ void UKzDialogueSubsystem::HandleNetNext(APlayerController* From, FGameplayTag I
 	if (OwnerController && OwnerController != From)
 	{
 		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': %s asked to advance %s's dialogue; refused."), *InChannel.ToString(), *From->GetName(), *OwnerController->GetName());
+		AddHistory(InChannel, DescribeOwner(Player), Player->CurrentPriority, FString::Printf(TEXT("Next from %s"), *From->GetName()), TEXT("Rejected: another player's dialogue"));
 		return;
 	}
 	Player->Next();
