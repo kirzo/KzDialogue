@@ -53,14 +53,24 @@ FText FKzDialogueLine::GetDisplayText() const
 
 float FKzDialogueLine::ResolveReadingDuration() const
 {
+	return ResolveReadingDuration(UKzDialogueSettings::GetReadingSpeedScale());
+}
+
+float FKzDialogueLine::ResolveReadingDuration(float ReadingSpeedScale) const
+{
 	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
-	const float Speed = Settings ? Settings->GetActiveReadingSpeed() * UKzDialogueSettings::GetReadingSpeedScale() : 0.0f;
+	const float Speed = Settings ? Settings->GetActiveReadingSpeed() * ReadingSpeedScale : 0.0f;
 	if (Speed <= 0.0f) { return Settings ? Settings->DefaultDuration : 2.5f; }
 
 	return FMath::Max(Settings->MinReadingDuration, GetFormattedText().ToString().TrimStartAndEnd().Len() / Speed);
 }
 
 float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
+{
+	return ResolveTotalDuration(FullAudioDuration, UKzDialogueSettings::GetReadingSpeedScale());
+}
+
+float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration, float ReadingSpeedScale) const
 {
 	// Trimmed range when the line cuts a section out of the wave; full length otherwise.
 	float End = FullAudioDuration;
@@ -80,7 +90,7 @@ float FKzDialogueLine::ResolveTotalDuration(float FullAudioDuration) const
 		Length = AudioLength + Duration;
 		break;
 	default:
-		Length = Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : ResolveReadingDuration());
+		Length = Duration > 0.0f ? Duration : (AudioLength > 0.0f ? AudioLength : ResolveReadingDuration(ReadingSpeedScale));
 		break;
 	}
 

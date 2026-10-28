@@ -48,9 +48,16 @@ namespace
 	float GReadingSpeedScale = 1.0f;
 }
 
+FSimpleMulticastDelegate& UKzDialogueSettings::OnReadingSpeedScaleChanged()
+{
+	static FSimpleMulticastDelegate Delegate;
+	return Delegate;
+}
+
 void UKzDialogueSettings::SetReadingSpeedScale(float Scale)
 {
 	GReadingSpeedScale = FMath::Max(0.1f, Scale);
+	OnReadingSpeedScaleChanged().Broadcast();
 }
 
 float UKzDialogueSettings::GetReadingSpeedScale()

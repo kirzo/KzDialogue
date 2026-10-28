@@ -16,10 +16,16 @@ public:
 	/** The server's dialogue has no more lines. */
 	bool bEnded = false;
 
+	/** Server time the line taken last started at there, and whether it reached this machine already well under way. */
+	double TakenLineEnterTime = 0.0;
+	bool bTakenLineLate = false;
+
 	/** The line to show next; it replaces one not shown yet, which the server already left behind. */
-	void SetNextLine(FKzDialogueLine&& Line)
+	void SetNextLine(FKzDialogueLine&& Line, double EnterTime, bool bLate)
 	{
 		NextLine = MoveTemp(Line);
+		NextLineEnterTime = EnterTime;
+		bNextLineLate = bLate;
 		bHasNextLine = true;
 	}
 
@@ -27,6 +33,8 @@ public:
 	virtual FKzDialogueLine Advance_Implementation() override
 	{
 		bHasNextLine = false;
+		TakenLineEnterTime = NextLineEnterTime;
+		bTakenLineLate = bNextLineLate;
 		return MoveTemp(NextLine);
 	}
 	virtual FKzDialogueLine PeekNext_Implementation() const override { return bHasNextLine ? NextLine : FKzDialogueLine{}; }
@@ -40,5 +48,7 @@ private:
 	UPROPERTY(Transient)
 	FKzDialogueLine NextLine;
 
+	double NextLineEnterTime = 0.0;
+	bool bNextLineLate = false;
 	bool bHasNextLine = false;
 };

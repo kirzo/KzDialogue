@@ -16,6 +16,7 @@
 #include "Net/KzDialogueNetActor.h"
 #include "Net/KzDialogueNetComponent.h"
 #include "Engine/World.h"
+#include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "TimerManager.h"
@@ -301,9 +302,8 @@ void UKzDialogueSubsystem::ReleaseNetEntry(const FKzDialogueNetEntry& Entry)
 	}
 }
 
-void UKzDialogueSubsystem::SendNext(const UKzDialoguePlayer& Player)
+UKzDialogueNetComponent* UKzDialogueSubsystem::FindLocalNetComponent(const UKzDialoguePlayer& Player) const
 {
-	// Through this machine's player controller: the copy's own, else the first local one.
 	APlayerController* Controller = Cast<APlayerController>(Player.GetOwner());
 	if (!Controller || !Controller->IsLocalController())
 	{
@@ -313,10 +313,46 @@ void UKzDialogueSubsystem::SendNext(const UKzDialoguePlayer& Player)
 	UKzDialogueNetComponent* Component = Controller ? Controller->FindComponentByClass<UKzDialogueNetComponent>() : nullptr;
 	if (!Component)
 	{
-		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': Next has no way to the server, the local player controller has no dialogue net component yet."), *Player.Channel.ToString());
-		return;
+		UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': no way to the server, the local player controller has no dialogue net component yet."), *Player.Channel.ToString());
 	}
-	Component->ServerNext(Player.Channel, Player.GetOwner());
+	return Component;
+}
+
+void UKzDialogueSubsystem::SendNext(const UKzDialoguePlayer& Player)
+{
+	if (UKzDialogueNetComponent* Component = FindLocalNetComponent(Player))
+	{
+		Component->ServerNext(Player.Channel, Player.GetOwner());
+	}
+}
+
+void UKzDialogueSubsystem::SendViewPhaseDone(const UKzDialoguePlayer& Player, EKzDialogueState Phase, int32 DialogueSerial, int32 LineSerial)
+{
+	if (UKzDialogueNetComponent* Component = FindLocalNetComponent(Player))
+	{
+		Component->ServerViewPhaseDone(Player.Channel, Player.GetOwner(), Phase, DialogueSerial, LineSerial);
+	}
+}
+
+void UKzDialogueSubsystem::HandleNetViewPhaseDone(APlayerController* From, FGameplayTag InChannel, AActor* Owner, EKzDialogueState Phase, int32 DialogueSerial, int32 LineSerial)
+{
+	// Only the player whose own dialogue it is answers for its views.
+	UKzDialoguePlayer* Player = FindResolvedPlayer(InChannel, Owner);
+	if (IsValid(Player) && From && Player->GetOwner() == From)
+	{
+		Player->HandleRemoteViewPhaseDone(Phase, DialogueSerial, LineSerial);
+	}
+}
+
+double UKzDialogueSubsystem::GetServerTime() const
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return 0.0;
+	}
+	const AGameStateBase* GameState = World->GetGameState();
+	return GameState ? GameState->GetServerWorldTimeSeconds() : World->GetTimeSeconds();
 }
 
 void UKzDialogueSubsystem::HandleNetNext(APlayerController* From, FGameplayTag InChannel, AActor* Owner)

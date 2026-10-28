@@ -35,8 +35,8 @@ void UKzDialoguePlayer::StartLineAudio()
 		return;
 	}
 
-	// Subtitles lead the voice: the whole audio start waits AudioStartDelay, compressed by TimeScale like every line timing.
-	const float Delay = FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale);
+	// Subtitles lead the voice: the whole audio start waits AudioStartDelay, compressed by TimeScale like every line timing. A line joined under way is that much further on.
+	const float Delay = FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale) - PresentOffset;
 	if (Delay > UE_KINDA_SMALL_NUMBER && !CurrentLine.Audio.IsNull() && ArmTimer(AudioDelayTimerHandle, &UKzDialoguePlayer::HandleAudioDelayElapsed, Delay))
 	{
 		return;
@@ -134,7 +134,9 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	// from OnAudioSingleEnvelopeValue.IsBound() at sound-start time, so binding after Play never fires it.
 	BindAudioEnvelope();
 	ResolveSpeakingSpeaker(); // resolve speaker + tuning before the first envelope callback can land
-	ActiveAudio->Play(FMath::Max(0.0f, CurrentLine.AudioStartTime));
+	// A line joined under way starts its audio as far in as the line already went past its start.
+	const float Skip = FMath::Max(0.0f, PresentOffset - FMath::Max(0.0f, CurrentLine.AudioStartDelay) / FMath::Max(0.1f, TimeScale));
+	ActiveAudio->Play(FMath::Max(0.0f, CurrentLine.AudioStartTime) + Skip);
 	if (bPaused)
 	{
 		// A listener paused while the line was presenting.
@@ -144,7 +146,7 @@ void UKzDialoguePlayer::StartLineAudioNow()
 	// Cut at AudioEndTime (0 = natural end, nothing armed). Audio plays in real time, so the cut is not scaled by TimeScale.
 	if (CurrentLine.AudioEndTime > 0.0f)
 	{
-		const float StopIn = FMath::Max(0.05f, CurrentLine.AudioEndTime - FMath::Max(0.0f, CurrentLine.AudioStartTime));
+		const float StopIn = FMath::Max(0.05f, CurrentLine.AudioEndTime - FMath::Max(0.0f, CurrentLine.AudioStartTime) - Skip);
 		ArmTimer(AudioStopTimerHandle, &UKzDialoguePlayer::HandleAudioStopElapsed, StopIn);
 	}
 }

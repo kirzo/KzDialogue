@@ -331,6 +331,9 @@ public:
 	/** A copy ends its dialogue here, as its server player goes away. */
 	void EndProxy();
 
+	/** On a server, the copy of this player's own dialogue finished a view phase on the player's machine: one more ack, or an early one kept for when the phase comes. */
+	void HandleRemoteViewPhaseDone(EKzDialogueState Phase, int32 InDialogueSerial, int32 InLineSerial);
+
 	//~ UObject
 	virtual UWorld* GetWorld() const override;
 	virtual void BeginDestroy() override;
@@ -371,6 +374,19 @@ private:
 
 	/** True, with a warning, when a copy is told from outside what only its server player decides. */
 	bool RefusesLocalControl(const TCHAR* Command) const;
+
+	/** On a server, a player's own dialogue waits in each view phase for its copy on the player's machine too, as one more claim. */
+	bool WaitsForRemoteView() const;
+	void ClaimRemoteView();
+
+	/** A copy of a player's own dialogue tells the server it finished a view phase. */
+	void SendViewPhaseDone(EKzDialogueState Phase, int32 InDialogueSerial, int32 InLineSerial) const;
+
+	/** The reading speed scale lines without audio are timed with: the owning player's for their own dialogue on a server, this machine's otherwise. */
+	float GetReadingSpeedScale() const;
+
+	/** A copy: how far into the line just taken it presents from, when the line reached it well under way; 0 otherwise. */
+	float GetLateLineOffset() const;
 
 	/** Presentation half of Enter_LineEntering, deferred by LineStartDelay: line-started events, audio kick-off, view enter requests. */
 	void PresentLine();
@@ -518,6 +534,21 @@ private:
 	int32 NetLineSerial = 0;
 	EKzDialogueNetPhase NetPhase = EKzDialogueNetPhase::Idle;
 	EKzDialogueFinishReason NetFinishReason = EKzDialogueFinishReason::Completed;
+	double NetLineEnterTime = 0.0;
+
+	/** On a server, the current phase waits for the copy on the owning player's machine. */
+	bool bAwaitingRemoteView = false;
+
+	// A copy's phase done that came before this server got to the phase; Idle when none.
+	EKzDialogueState EarlyRemotePhase = EKzDialogueState::Idle;
+	int32 EarlyRemoteDialogueSerial = 0;
+	int32 EarlyRemoteLineSerial = 0;
+
+	/** A copy: the server's serial of the line it shows. */
+	int32 ShownNetLineSerial = 0;
+
+	/** Seconds into the current line it presents from: a copy joining a line already under way. */
+	float PresentOffset = 0.0f;
 
 	struct FSpecificLineBinding
 	{

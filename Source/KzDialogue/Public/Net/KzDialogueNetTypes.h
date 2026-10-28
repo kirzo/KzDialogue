@@ -20,6 +20,8 @@ enum class EKzDialogueNetPhase : uint8
 	Idle,
 	/** Showing its lines. */
 	Playing,
+	/** Leaving the line shown; the next one, or the end, comes after. */
+	LineExiting,
 	/** Open with no line shown, until the next one comes. */
 	Waiting,
 	/** Past its last line, playing its exit. */
@@ -120,6 +122,10 @@ struct FKzDialogueNetEntry : public FFastArraySerializerItem
 
 	UPROPERTY()
 	FKzDialogueNetLine Line;
+
+	/** Server time the line was taken at, so a copy that gets it late joins it where it goes. */
+	UPROPERTY()
+	double LineEnterTime = 0.0;
 
 	void PostReplicatedAdd(const FKzDialogueNetEntries& InArray);
 	void PostReplicatedChange(const FKzDialogueNetEntries& InArray);

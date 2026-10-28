@@ -220,6 +220,15 @@ public:
 	/** On a server, a client asks to advance a player: they may when it is their own or a shared one. */
 	void HandleNetNext(APlayerController* From, FGameplayTag InChannel, AActor* Owner);
 
+	/** On a client, tells the server that its copy of Player finished a view phase here. */
+	void SendViewPhaseDone(const UKzDialoguePlayer& Player, EKzDialogueState Phase, int32 DialogueSerial, int32 LineSerial);
+
+	/** On a server, the copy of a player's own dialogue finished a view phase on that player's machine. */
+	void HandleNetViewPhaseDone(APlayerController* From, FGameplayTag InChannel, AActor* Owner, EKzDialogueState Phase, int32 DialogueSerial, int32 LineSerial);
+
+	/** The server's clock, on the server and estimated on its clients; line start times travel in it. */
+	double GetServerTime() const;
+
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 	// Owner, on an owned channel, picks whose player they play on (see ResolveOwner); without one, the line's speaker decides.
 
@@ -370,6 +379,9 @@ private:
 	void HandleActorSpawned(AActor* Actor);
 
 	UKzDialogueNetComponent* FindOrAddNetComponent(APlayerController* Controller);
+
+	/** On a client, the net component its requests about Player go through: the copy's own player's, else the first local one's. */
+	UKzDialogueNetComponent* FindLocalNetComponent(const UKzDialoguePlayer& Player) const;
 
 	/** Where the player's net entry travels: its player's net component for a player's own dialogue, the net actor for a shared one. Null when no client shows it. */
 	FKzDialogueNetEntries* FindNetEntries(const UKzDialoguePlayer& Player, bool bCreate);

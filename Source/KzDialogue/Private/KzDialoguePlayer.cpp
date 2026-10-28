@@ -12,12 +12,16 @@
 #include "KzDialogueTimeline.h"
 #include "KzDialogueSpeakerComponent.h"
 #include "Net/KzDialogueNetProvider.h"
+#include "Net/KzDialogueNetComponent.h"
 
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Sound/SoundBase.h"
 #include "TimerManager.h"
+
+/** A line that started this long before reaching a copy is joined where it goes, not from its start: more than any network delay. */
+static constexpr double LateLineThreshold = 0.5;
 
 UKzDialoguePlayer::UKzDialoguePlayer()
 {
@@ -365,11 +369,19 @@ void UKzDialoguePlayer::HandleViewWatchdogElapsed()
 	UE_LOG(LogKzDialogue, Warning, TEXT("Channel '%s': %d view claim(s) unanswered in %s after %.1f s; advancing without them."),
 		*Channel.ToString(), PendingViewAcks, *UEnum::GetValueAsString(State), UKzDialogueSettings::Get()->ViewResponseTimeout);
 	PendingViewAcks = 0;
+	bAwaitingRemoteView = false;
 	OnPhaseAcksDone();
 }
 
 void UKzDialoguePlayer::OnPhaseAcksDone()
 {
+	// A copy of a player's own dialogue: the server waits for this machine's views as well.
+	if (bProxy && State != EKzDialogueState::Waiting)
+	{
+		const bool bLinePhase = State == EKzDialogueState::LineEntering || State == EKzDialogueState::LineExiting;
+		SendViewPhaseDone(State, NetDialogueSerial, bLinePhase ? ShownNetLineSerial : 0);
+	}
+
 	if (bPaused)
 	{
 		UE_LOG(LogKzDialogue, Verbose, TEXT("Channel '%s': %s done while paused; advancing on resume."), *Channel.ToString(), *UEnum::GetValueAsString(State));
@@ -439,6 +451,7 @@ void UKzDialoguePlayer::SetState(EKzDialogueState NewState)
 	State = NewState;
 	++StateSerial;
 	bAdvanceOnResume = false;
+	bAwaitingRemoteView = false;
 	ClearTimer(ViewWatchdogHandle);
 }
 
@@ -449,6 +462,7 @@ void UKzDialoguePlayer::Enter_Entering()
 	PrefetchLineAudio();
 
 	PendingViewAcks = 0;
+	ClaimRemoteView();
 	OnRequestDialogueEnter.Broadcast(this);
 	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
@@ -473,11 +487,19 @@ void UKzDialoguePlayer::Enter_LineEntering()
 	CurrentLine = Provider->Advance();
 
 	// Sent before the ambient arguments: each machine resolves those for itself.
+	PresentOffset = 0.0f;
 	if (!bProxy)
 	{
 		++NetLineSerial;
 		NetPhase = EKzDialogueNetPhase::Playing;
+		const UKzDialogueSubsystem* Subsystem = Cast<UKzDialogueSubsystem>(GetOuter());
+		NetLineEnterTime = Subsystem ? Subsystem->GetServerTime() : 0.0;
 		PublishNet(&CurrentLine);
+	}
+	else
+	{
+		ShownNetLineSerial = NetLineSerial;
+		PresentOffset = GetLateLineOffset();
 	}
 	PrefetchLineAudio();
 
@@ -487,9 +509,9 @@ void UKzDialoguePlayer::Enter_LineEntering()
 	// Ambient template arguments go in before anyone sees the line, so every event and view gets a copy that formats.
 	ResolveLineFormatArguments();
 
-	// Silent pre-line gap: nothing presents (no subtitle, audio or view enter) until it elapses.
+	// Silent pre-line gap: nothing presents (no subtitle, audio or view enter) until it elapses. A line joined under way is past it.
 	const float Gap = FMath::Max(0.0f, CurrentLine.LineStartDelay) / FMath::Max(0.1f, TimeScale);
-	if (Gap > UE_KINDA_SMALL_NUMBER && ArmTimer(LineStartDelayTimerHandle, &UKzDialoguePlayer::HandleLineStartDelayElapsed, Gap))
+	if (PresentOffset <= 0.0f && Gap > UE_KINDA_SMALL_NUMBER && ArmTimer(LineStartDelayTimerHandle, &UKzDialoguePlayer::HandleLineStartDelayElapsed, Gap))
 	{
 		return;
 	}
@@ -530,6 +552,7 @@ void UKzDialoguePlayer::PresentLine()
 	}
 
 	PendingViewAcks = 0;
+	ClaimRemoteView();
 	OnRequestLineEnter.Broadcast(this, CurrentLine);
 	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
@@ -565,6 +588,11 @@ void UKzDialoguePlayer::Enter_LineExiting()
 	SetState(EKzDialogueState::LineExiting);
 	const uint32 Serial = StateSerial;
 	bHoldingLine = false;
+	if (!bProxy)
+	{
+		NetPhase = EKzDialogueNetPhase::LineExiting;
+		PublishNet();
+	}
 
 	// Audio still waiting on its AudioStartDelay must never start now.
 	ClearTimer(AudioDelayTimerHandle);
@@ -574,6 +602,7 @@ void UKzDialoguePlayer::Enter_LineExiting()
 	if (Serial != StateSerial) { return; }
 
 	PendingViewAcks = 0;
+	ClaimRemoteView();
 	OnRequestLineExit.Broadcast(this, CurrentLine);
 	if (Serial != StateSerial) { return; }
 
@@ -606,6 +635,7 @@ void UKzDialoguePlayer::Enter_Exiting()
 
 	ResolveOutgoingAudio(CurrentLine, nullptr);
 	PendingViewAcks = 0;
+	ClaimRemoteView();
 	OnRequestDialogueExit.Broadcast(this);
 	if (Serial == StateSerial && PendingViewAcks == 0)
 	{
@@ -713,7 +743,7 @@ float UKzDialoguePlayer::ResolveLineDuration(const FKzDialogueLine& Line) const
 {
 	// Loaded, not Get(): in cooked builds or behind an AudioStartDelay the wave may not be in memory yet.
 	const USoundBase* Sound = Line.Audio.IsNull() ? nullptr : Line.Audio.LoadSynchronous();
-	const float Duration = Line.ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.0f);
+	const float Duration = Line.ResolveTotalDuration(Sound ? Sound->GetDuration() : 0.0f, GetReadingSpeedScale());
 
 	// Apply TimeScale, but clamp to a sane minimum so we never set a 0-duration timer.
 	return FMath::Max(0.1f, Duration / FMath::Max(0.1f, TimeScale));
@@ -1027,6 +1057,16 @@ void UKzDialoguePlayer::BakeTimeline()
 			Entry.bFireIfSkipped = Event.bFireIfSkipped;
 		}
 	}
+
+	// Joined under way: what already happened stays behind, and what is in progress begins with the next tick.
+	if (PresentOffset > 0.0f)
+	{
+		TimelineClock = PresentOffset;
+		for (FKzDialogueActiveNotify& Entry : ActiveNotifies)
+		{
+			Entry.bDone = Entry.bIsState ? (!Entry.bFlushBound && Entry.End <= PresentOffset) : Entry.Start < PresentOffset;
+		}
+	}
 }
 
 void UKzDialoguePlayer::FlushTimeline()
@@ -1138,6 +1178,98 @@ void UKzDialoguePlayer::FillNetEntry(FKzDialogueNetEntry& Entry) const
 	Entry.bPaused = bPaused;
 	Entry.DialogueSerial = NetDialogueSerial;
 	Entry.LineSerial = NetLineSerial;
+	Entry.LineEnterTime = NetLineEnterTime;
+}
+
+bool UKzDialoguePlayer::WaitsForRemoteView() const
+{
+	if (bProxy)
+	{
+		return false;
+	}
+
+	const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	const UWorld* World = GetWorld();
+	const ENetMode NetMode = World ? World->GetNetMode() : NM_Standalone;
+	return Controller && !Controller->IsLocalController() && (NetMode == NM_DedicatedServer || NetMode == NM_ListenServer);
+}
+
+// Entering and Exiting happen once per dialogue; the line phases once per line.
+static bool IsLinePhase(EKzDialogueState Phase)
+{
+	return Phase == EKzDialogueState::LineEntering || Phase == EKzDialogueState::LineExiting;
+}
+
+void UKzDialoguePlayer::ClaimRemoteView()
+{
+	if (!WaitsForRemoteView())
+	{
+		return;
+	}
+
+	const bool bEarly = EarlyRemotePhase == State && EarlyRemoteDialogueSerial == NetDialogueSerial && (!IsLinePhase(State) || EarlyRemoteLineSerial == NetLineSerial);
+	EarlyRemotePhase = EKzDialogueState::Idle;
+	if (bEarly)
+	{
+		// Its copy got there first.
+		return;
+	}
+
+	bAwaitingRemoteView = true;
+	ClaimViewResponse();
+}
+
+void UKzDialoguePlayer::HandleRemoteViewPhaseDone(EKzDialogueState Phase, int32 InDialogueSerial, int32 InLineSerial)
+{
+	if (InDialogueSerial != NetDialogueSerial || (IsLinePhase(Phase) && InLineSerial != NetLineSerial))
+	{
+		return;
+	}
+
+	if (bAwaitingRemoteView && State == Phase)
+	{
+		bAwaitingRemoteView = false;
+		HandleViewAck(Phase);
+		return;
+	}
+
+	// Ahead of this machine (still in the line's start gap, say): counted when it gets to the phase.
+	EarlyRemotePhase = Phase;
+	EarlyRemoteDialogueSerial = InDialogueSerial;
+	EarlyRemoteLineSerial = InLineSerial;
+}
+
+void UKzDialoguePlayer::SendViewPhaseDone(EKzDialogueState Phase, int32 InDialogueSerial, int32 InLineSerial) const
+{
+	// Only a player's own dialogue waits for its copy; the shared ones wait for nobody away.
+	const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	UKzDialogueSubsystem* Subsystem = Cast<UKzDialogueSubsystem>(GetOuter());
+	if (bProxy && Controller && Controller->IsLocalController() && Subsystem)
+	{
+		Subsystem->SendViewPhaseDone(*this, Phase, InDialogueSerial, InLineSerial);
+	}
+}
+
+float UKzDialoguePlayer::GetReadingSpeedScale() const
+{
+	// A player's own dialogue reads at that player's speed, which their machine sends to the server.
+	const APlayerController* Controller = Cast<APlayerController>(GetOwner());
+	const UKzDialogueNetComponent* Component = Controller && !Controller->IsLocalController() ? Controller->FindComponentByClass<UKzDialogueNetComponent>() : nullptr;
+	return Component && Component->ReadingSpeedScale > 0.0f ? Component->ReadingSpeedScale : UKzDialogueSettings::GetReadingSpeedScale();
+}
+
+float UKzDialoguePlayer::GetLateLineOffset() const
+{
+	const UKzDialogueNetProvider* NetProvider = Cast<UKzDialogueNetProvider>(Provider);
+	const UKzDialogueSubsystem* Subsystem = Cast<UKzDialogueSubsystem>(GetOuter());
+	if (!NetProvider || !NetProvider->bTakenLineLate || !Subsystem)
+	{
+		return 0.0f;
+	}
+
+	// Where the server's line is now, past its start gap.
+	const double SinceEnter = Subsystem->GetServerTime() - NetProvider->TakenLineEnterTime;
+	return FMath::Max(0.0f, static_cast<float>(SinceEnter) - FMath::Max(0.0f, CurrentLine.LineStartDelay));
 }
 
 void UKzDialoguePlayer::BecomeProxy()
@@ -1213,12 +1345,25 @@ void UKzDialoguePlayer::ApplyNetEntry(const FKzDialogueNetEntry& Entry)
 		FKzDialogueLine Line;
 		if (Entry.Line.Resolve(Line))
 		{
-			NetProvider->SetNextLine(MoveTemp(Line));
+			// Late by more than the network's own delay: this machine joins it, or the dialogue, under way.
+			const UKzDialogueSubsystem* Subsystem = Cast<UKzDialogueSubsystem>(GetOuter());
+			const double Since = Subsystem ? Subsystem->GetServerTime() - Entry.LineEnterTime - FMath::Max(0.0f, Line.LineStartDelay) : 0.0;
+			NetProvider->SetNextLine(MoveTemp(Line), Entry.LineEnterTime, Since > LateLineThreshold);
 		}
 	}
 	if (bNewLine || bPhaseChanged)
 	{
 		MoveOnFromLine();
+	}
+
+	// Told to leave a line it is not showing (never presented, or already left), or a dialogue it already ended: done at once, so the server does not wait for it.
+	if (bPhaseChanged && Entry.Phase == EKzDialogueNetPhase::LineExiting && State != EKzDialogueState::LineExiting)
+	{
+		SendViewPhaseDone(EKzDialogueState::LineExiting, Entry.DialogueSerial, Entry.LineSerial);
+	}
+	if (bPhaseChanged && Entry.Phase == EKzDialogueNetPhase::Exiting && State == EKzDialogueState::Idle)
+	{
+		SendViewPhaseDone(EKzDialogueState::Exiting, Entry.DialogueSerial, 0);
 	}
 
 	if (Entry.bPaused != bPaused)

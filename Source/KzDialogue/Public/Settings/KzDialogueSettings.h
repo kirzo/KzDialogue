@@ -58,6 +58,9 @@ public:
 	static void SetReadingSpeedScale(float Scale);
 	static float GetReadingSpeedScale();
 
+	/** The reading speed scale changed: a client tells the server, which times its player's own dialogue with it. */
+	static FSimpleMulticastDelegate& OnReadingSpeedScaleChanged();
+
 	/** Seconds a dialogue waits for views that claimed a phase before advancing anyway (a removed widget, a missed notify). 0 waits forever. */
 	UPROPERTY(Config, EditAnywhere, Category = "General", meta = (ClampMin = 0.0, Units = "Seconds"))
 	float ViewResponseTimeout = 10.0f;
