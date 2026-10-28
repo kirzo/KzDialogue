@@ -58,6 +58,10 @@ struct KZDIALOGUE_API FKzDialogueGraphOption
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
 	bool bAvailable = true;
 
+	/** The Choice marks it Default: the one to mark first. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
+	bool bDefault = false;
+
 	/** What SelectOption takes for it. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
 	int32 Index = INDEX_NONE;
@@ -209,6 +213,10 @@ public:
 	/** The options offered now; empty when no Choice waits for an answer. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
 	const TArray<FKzDialogueGraphOption>& GetOptions() const { return Options; }
+
+	/** Seconds left of the time limit of the options offered, for a countdown; 0 without one or when nothing is offered. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
+	float GetTimeLeft() const;
 
 	/** The graph the play is in now: the one it started with, or a Sub Graph it went into. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")

@@ -261,6 +261,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	static FKzSubtitleProfile GetSubtitleProfile();
 
+	const TArray<FGameplayTag>& GetListenedChannels() const { return ListenedChannels; }
+
 protected:
 	/**
 	 * Channels the widget listens to, matched hierarchically: listening to

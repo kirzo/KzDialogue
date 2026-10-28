@@ -7,6 +7,7 @@
 #include "KzDialogueProvider.h"
 #include "KzDialogueAsset.h"
 #include "KzDialogueAssetSession.h"
+#include "Graph/KzDialogueChoiceListener.h"
 #include "Graph/KzDialogueGraphInstance.h"
 #include "Settings/KzDialogueSettings.h"
 #include "KzDialogueMemorySubsystem.h"
@@ -665,6 +666,18 @@ void UKzDialogueSubsystem::AddGraphInstance(UKzDialogueGraphInstance* Instance)
 void UKzDialogueSubsystem::RemoveGraphInstance(UKzDialogueGraphInstance* Instance)
 {
 	GraphInstances.RemoveSingle(Instance);
+}
+
+void UKzDialogueSubsystem::AddChoiceListener(UKzDialogueChoiceListener* Listener)
+{
+	// Those whose creator is gone go now; the rest notice it at the next start.
+	ChoiceListeners.RemoveAll([](const UKzDialogueChoiceListener* Each) { return !IsValid(Each) || Each->IsAbandoned(); });
+	ChoiceListeners.AddUnique(Listener);
+}
+
+void UKzDialogueSubsystem::RemoveChoiceListener(UKzDialogueChoiceListener* Listener)
+{
+	ChoiceListeners.RemoveSingle(Listener);
 }
 
 bool UKzDialogueSubsystem::ResolveLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine)

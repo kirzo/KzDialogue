@@ -288,6 +288,12 @@ void UKzDialogueGraphInstance::Stop()
 	}
 }
 
+float UKzDialogueGraphInstance::GetTimeLeft() const
+{
+	const UWorld* World = GetWorld();
+	return Step == EStep::Choosing && World ? FMath::Max(World->GetTimerManager().GetTimerRemaining(StepTimer), 0.0f) : 0.0f;
+}
+
 bool UKzDialogueGraphInstance::WasVisited(const FGuid& Id, bool bEver) const
 {
 	return bEver ? GetVisitCount(Id) > 0 : Visited.Contains(Id);
@@ -587,6 +593,7 @@ bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& C
 		FKzDialogueGraphOption& Offered = Options.AddDefaulted_GetRef();
 		Offered.Index = Index;
 		Offered.bAvailable = bAvailable;
+		Offered.bDefault = Option.bDefault;
 		if (Subsystem)
 		{
 			Subsystem->ResolveLineRef(Option.Line, Offered.Line);

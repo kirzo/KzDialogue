@@ -345,6 +345,31 @@ namespace
 			.DesiredSizeOverride(FVector2D(12.0f, 12.0f));
 	}
 
+	/** A flag on an option's band, such as "disabled" or "default". */
+	TSharedRef<SWidget> MakeOptionChip(const FName IconName, const FText& Text, const FText& ToolTip)
+	{
+		return SNew(SBorder)
+			.BorderImage(&Brushes().Chip)
+			.Padding(FMargin(5.0f, 0.0f))
+			.ToolTipText(ToolTip)
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.0f, 0.0f, 3.0f, 0.0f)
+				[
+					MakeIcon(FAppStyle::GetBrush(IconName), ChipColor)
+				]
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				[
+					MakeSmallText(Text, ChipColor)
+				]
+			];
+	}
+
 	/** "all of" or "any of", switched with a click. */
 	TSharedRef<SWidget> MakeMatchChip(const TWeakObjectPtr<UKzEdGraphNode>& WeakNode, const FConditionsPath& Path, EKzDialogueConditionMatch Match)
 	{
@@ -972,26 +997,17 @@ namespace
 				.VAlign(VAlign_Center)
 				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
 				[
-					SNew(SBorder)
-					.BorderImage(&Brushes().Chip)
-					.Padding(FMargin(5.0f, 0.0f))
-					.ToolTipText(LOCTEXT("DisabledTip", "Shown disabled, instead of hidden, while its condition fails."))
-					[
-						SNew(SHorizontalBox)
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						.Padding(0.0f, 0.0f, 3.0f, 0.0f)
-						[
-							MakeIcon(FAppStyle::GetBrush("Icons.Hidden"), ChipColor)
-						]
-						+ SHorizontalBox::Slot()
-						.AutoWidth()
-						.VAlign(VAlign_Center)
-						[
-							MakeSmallText(LOCTEXT("Disabled", "disabled"), ChipColor)
-						]
-					]
+					MakeOptionChip("Icons.Hidden", LOCTEXT("Disabled", "disabled"), LOCTEXT("DisabledTip", "Shown disabled, instead of hidden, while its condition fails."))
+				];
+			}
+			if (Option.bDefault)
+			{
+				Band->AddSlot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(6.0f, 0.0f, 0.0f, 0.0f)
+				[
+					MakeOptionChip("Icons.Star", LOCTEXT("Default", "default"), LOCTEXT("DefaultTip", "Marked first when the options show, while available."))
 				];
 			}
 

@@ -16,6 +16,7 @@ class UKzDialogueProvider;
 class UKzDialogueAsset;
 class UKzDialogueAssetSession;
 class UKzDialogueGraphInstance;
+class UKzDialogueChoiceListener;
 struct FKzDialogueChannelDefinition;
 
 /** A queued request (RequestId) is about to start on its channel, or was dropped: expired, displaced by Replace, or cleared by a stop. */
@@ -189,6 +190,10 @@ public:
 	void RemoveGraphInstance(UKzDialogueGraphInstance* Instance);
 	const TArray<TObjectPtr<UKzDialogueGraphInstance>>& GetGraphInstances() const { return GraphInstances; }
 
+	/** Keeps a choice listener alive while whoever created it lives, or until it stops listening. Called by the listeners. */
+	void AddChoiceListener(UKzDialogueChoiceListener* Listener);
+	void RemoveChoiceListener(UKzDialogueChoiceListener* Listener);
+
 	// The entry points below are C++ only: Blueprints reach them through UKzDialogueFunctionLibrary and the async nodes.
 	// Owner, on an owned channel, picks whose player they play on (see ResolveOwner); without one, the line's speaker decides.
 
@@ -289,6 +294,9 @@ private:
 	/** Dialogue graphs kept alive while they run; each removes itself when it ends. */
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UKzDialogueGraphInstance>> GraphInstances;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UKzDialogueChoiceListener>> ChoiceListeners;
 
 	/** Set in Deinitialize so in-flight sessions don't chain another run during world teardown. */
 	bool bDeinitializing = false;

@@ -154,6 +154,10 @@ void FKzDialogueGraphNode_Choice::Validate(TArray<FKzValidationIssue>& OutIssues
 	{
 		ValidateRef(Options[Index].Line, FText::Format(LOCTEXT("OptionN", "Option {0}"), Index + 1), OutIssues);
 	}
+	if (Options.FilterByPredicate([](const FKzDialogueChoiceOption& Option) { return Option.bDefault; }).Num() > 1)
+	{
+		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Warning, LOCTEXT("SeveralDefaults", "More than one option is marked Default: the first available one is marked."), NAME_None));
+	}
 }
 
 void FKzDialogueGraphNode_Choice::PostEditChange()

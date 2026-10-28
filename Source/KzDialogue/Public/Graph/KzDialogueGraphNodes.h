@@ -122,6 +122,10 @@ struct KZDIALOGUE_API FKzDialogueChoiceOption
 	UPROPERTY(EditAnywhere, Category = "Option")
 	bool bShowWhenUnavailable = false;
 
+	/** Marked first when the options show, while available. Only one option should be. */
+	UPROPERTY(EditAnywhere, Category = "Option")
+	bool bDefault = false;
+
 	/** Names the option's output, so its link survives reordering. */
 	UPROPERTY()
 	FGuid Id;

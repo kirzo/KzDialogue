@@ -28,6 +28,8 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 		{ TEXT("KzBarkComponent"), TEXT("BarkComponent") },
 		{ TEXT("KzSubtitleWidget"), TEXT("SubtitleWidget") },
 		{ TEXT("KzDialogueGraphInstance"), TEXT("DialogueGraph") },
+		{ TEXT("KzChoiceWidget"), TEXT("ChoiceWidget") },
+		{ TEXT("KzChoiceOption"), TEXT("ChoiceOption") },
 		{ TEXT("KzDialogueNotify"), TEXT("DialogueNotify") },
 		{ TEXT("KzDialogueNotifyState"), TEXT("DialogueNotifyState") },
 		{ TEXT("KzDialogueNotify_CameraShake"), TEXT("CameraShake") },
