@@ -8,6 +8,7 @@
 #include "Components/TextBlock.h"
 #include "Animation/WidgetAnimation.h"
 #include "Internationalization/Culture.h"
+#include "Misc/ConfigCacheIni.h"
 #include "KzDialoguePlayer.h"
 #include "KzDialogueSubsystem.h"
 #include "KzSpeakerAsset.h"
@@ -17,7 +18,26 @@
 
 namespace
 {
-	FKzSubtitleProfile GSubtitleProfile;
+	/** The profile lives in GameUserSettings' ini, next to the player's other settings. */
+	const TCHAR* ProfileSection = TEXT("/Script/KzDialogue.KzSubtitleWidget");
+	const TCHAR* ProfileKey = TEXT("SubtitleProfile");
+
+	/** The player's profile, read from the ini the first time. */
+	FKzSubtitleProfile& SubtitleProfile()
+	{
+		static FKzSubtitleProfile Profile = []
+		{
+			FKzSubtitleProfile Saved;
+			FString Text;
+			if (GConfig && GConfig->GetString(ProfileSection, ProfileKey, Text, GGameUserSettingsIni))
+			{
+				FKzSubtitleProfile::StaticStruct()->ImportText(*Text, &Saved, nullptr, PPF_None, GLog, FKzSubtitleProfile::StaticStruct()->GetName());
+			}
+			return Saved;
+		}();
+		return Profile;
+	}
+
 	FSimpleMulticastDelegate GOnSubtitleProfileChanged;
 
 	bool IsEmptyView(const FKzSubtitleChannelView& View)
@@ -59,13 +79,20 @@ void UKzSubtitleRow::OnAnimationFinished_Implementation(const UWidgetAnimation* 
 
 void UKzSubtitleWidget::SetSubtitleProfile(const FKzSubtitleProfile& Profile)
 {
-	GSubtitleProfile = Profile;
+	SubtitleProfile() = Profile;
+	if (GConfig)
+	{
+		FString Text;
+		FKzSubtitleProfile::StaticStruct()->ExportText(Text, &Profile, nullptr, nullptr, PPF_None, nullptr);
+		GConfig->SetString(ProfileSection, ProfileKey, *Text, GGameUserSettingsIni);
+		GConfig->Flush(false, GGameUserSettingsIni);
+	}
 	GOnSubtitleProfileChanged.Broadcast();
 }
 
 FKzSubtitleProfile UKzSubtitleWidget::GetSubtitleProfile()
 {
-	return GSubtitleProfile;
+	return SubtitleProfile();
 }
 
 void UKzSubtitleWidget::NativeConstruct()
@@ -573,10 +600,11 @@ void UKzSubtitleWidget::SetViewEnabled(bool bEnabled)
 
 bool UKzSubtitleWidget::IsChannelMuted(FGameplayTag Channel) const
 {
-	if (!GSubtitleProfile.bShowClosedCaptions)
+	const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(Channel);
+	const bool bClosedCaptions = ChannelDef && ChannelDef->bClosedCaptions;
+	if (bClosedCaptions ? !SubtitleProfile().bShowClosedCaptions : !SubtitleProfile().bShowSubtitles)
 	{
-		const FKzDialogueChannelDefinition* ChannelDef = UKzDialogueSettings::Get()->FindChannel(Channel);
-		if (ChannelDef && ChannelDef->bClosedCaptions) { return true; }
+		return true;
 	}
 
 	for (const FKzSubtitleMuteRule& Rule : MuteRules)
@@ -752,7 +780,7 @@ void UKzSubtitleWidget::ApplyProfileToView(const FKzSubtitleChannelView& View, c
 	{
 		if (!Text) { continue; }
 		FSlateFontInfo Font = FindOrCaptureDesignedLook(Text).Font;
-		Font.Size *= GSubtitleProfile.TextScale;
+		Font.Size *= SubtitleProfile().TextScale;
 		Text->SetFont(Font);
 	}
 
@@ -761,13 +789,13 @@ void UKzSubtitleWidget::ApplyProfileToView(const FKzSubtitleChannelView& View, c
 		const FDesignedLook Look = FindOrCaptureDesignedLook(Speaker);
 		const UKzSpeakerAsset* Asset = Line.Speaker.Asset;
 		Speaker->SetColorAndOpacity(Asset && Asset->bUseSubtitleColor ? FSlateColor(Asset->SubtitleColor) : Look.Color);
-		Speaker->SetVisibility(GSubtitleProfile.bShowSpeakerNames ? Look.Visibility : ESlateVisibility::Collapsed);
+		Speaker->SetVisibility(SubtitleProfile().bShowSpeakerNames ? Look.Visibility : ESlateVisibility::Collapsed);
 	}
 
 	if (UWidget* Background = View.Background)
 	{
 		FLinearColor Color = FindOrCaptureDesignedLook(Background).Color.GetSpecifiedColor();
-		if (GSubtitleProfile.BackgroundOpacity >= 0.0f) { Color.A = GSubtitleProfile.BackgroundOpacity; }
+		if (SubtitleProfile().BackgroundOpacity >= 0.0f) { Color.A = SubtitleProfile().BackgroundOpacity; }
 		if (UBorder* Border = Cast<UBorder>(Background)) { Border->SetBrushColor(Color); }
 		else if (UImage* Image = Cast<UImage>(Background)) { Image->SetColorAndOpacity(Color); }
 	}

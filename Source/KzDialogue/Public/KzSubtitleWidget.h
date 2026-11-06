@@ -16,11 +16,15 @@ class UWidgetAnimation;
 class UKzDialoguePlayer;
 class UKzSubtitleWidget;
 
-/** The player's subtitle options, shared by every subtitle widget and applied live (UKzSubtitleWidget::SetSubtitleProfile). */
+/** The player's subtitle options, shared by every subtitle widget, applied live and saved (UKzSubtitleWidget::SetSubtitleProfile). */
 USTRUCT(BlueprintType)
 struct KZDIALOGUE_API FKzSubtitleProfile
 {
 	GENERATED_BODY()
+
+	/** Off hides every channel except the closed-caption ones, which follow bShowClosedCaptions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowSubtitles = true;
 
 	/** Multiplies the designed font size of the speaker and subtitle texts. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = 0.5, ClampMax = 4.0))
@@ -250,11 +254,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsViewEnabled() const { return bViewEnabled; }
 
-	/** True when Channel is currently muted on this widget by any rule in MuteRules, or is a closed-caption channel the profile hides. */
+	/** True when Channel is currently muted on this widget by any rule in MuteRules, or the profile hides it (subtitles or closed captions off). */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Subtitles")
 	bool IsChannelMuted(FGameplayTag Channel) const;
 
-	/** Applies the player's subtitle options to every subtitle widget, live. Process-wide and not saved; apply it from the game's options at startup. */
+	/** Applies the player's subtitle options to every subtitle widget, live, and saves them in GameUserSettings' ini: the next session starts with them. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Subtitles")
 	static void SetSubtitleProfile(const FKzSubtitleProfile& Profile);
 
