@@ -32,6 +32,7 @@
 #include "KzGraphEditor.h"
 #include "Localization/KzL10N.h"
 #include "Localization/SKzDialogueCoveragePanel.h"
+#include "Script/KzScriptImport.h"
 #include "KzDialogueK2Nodes.h"
 
 #include "EdGraphUtilities.h"
@@ -131,6 +132,7 @@ void FKzDialogueEditorModule::OnStartupModule()
 	FEdGraphUtilities::RegisterVisualPinFactory(LinePinFactory);
 
 	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&KzDialogueL10N::RegisterMenus));
+	UToolMenus::RegisterStartupCallback(FSimpleMulticastDelegate::FDelegate::CreateStatic(&KzScriptImport::RegisterMenus));
 
 	// Token renames refactor the lines and archives that reference the old token.
 	NamedTokenRenamedHandle = UKzNamedAsset::OnTokenRenamed.AddStatic(&KzDialogueL10N::RenameNamedTokenReferences);

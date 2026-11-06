@@ -271,7 +271,10 @@ namespace
 
 void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName OldToken)
 {
-	const FName NewToken = Renamed ? Renamed->Token : NAME_None;
+	// A draft outside any package (the script importer's new speaker) has nothing referencing it yet.
+	if (!Renamed || Renamed->GetPackage() == GetTransientPackage()) { return; }
+
+	const FName NewToken = Renamed->Token;
 	if (OldToken.IsNone() || NewToken.IsNone() || OldToken == NewToken) { return; }
 
 	// Case-insensitive, mirroring how tokens resolve (FName lookups ignore case).

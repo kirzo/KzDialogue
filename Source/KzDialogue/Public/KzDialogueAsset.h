@@ -78,6 +78,16 @@ public:
 	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Dialogue")
 	TArray<TSoftObjectPtr<UObject>> TokenReferences;
 
+#if WITH_EDITORONLY_DATA
+	/** Fountain script this dialogue was imported from, for Reimport Script. Empty for a dialogue authored in the editor. */
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Script")
+	FString ScriptSource;
+
+	/** The section of ScriptSource this dialogue comes from. */
+	UPROPERTY(VisibleAnywhere, AdvancedDisplay, Category = "Script")
+	FString ScriptSection;
+#endif
+
 	/** Find a line by its stable id. Returns INDEX_NONE if not found. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Asset")
 	int32 IndexOfLine(const FGuid& LineId) const;

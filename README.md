@@ -146,7 +146,7 @@ A player-chosen character's gender is unknown when the text is translated, so th
 
 * **Mute Rules** hide some channels while another plays, for example barks while the main conversation runs.
 * **Speaker Formatting Rules** add affixes such as `Kirzo:`, per culture if needed.
-* **Can Show Line** filters lines, for example by tag.
+* **Can Show Line** filters lines. By default it hides lines without text; override it to filter by tag, for example.
 * Right-to-left cultures mirror the layout automatically.
 
 To build a view from scratch, bind to the player's `OnRequest*` events, call `ClaimViewResponse()` when you need time, and answer with the matching `Notify*Finished()`.
@@ -170,6 +170,18 @@ Add a **Kz Bark** component to an actor and point its **Bark** at a line or, bet
 2. Set the track's **Dialogue Asset** and **Channel** in the details panel.
 3. Use **+ Section** on the track to pick a line from a searchable list.
 4. The section's length is the line's time on screen. **Suppress Audio** leaves the audio to the sequence's own tracks.
+
+### 📝 Importing scripts
+
+Write the conversations as a [Fountain](https://fountain.io) screenplay and import it: right-click a content folder, **Import Fountain Script...**
+
+* Each `#` section with dialogue becomes a dialogue asset named `DLG_` plus its title in PascalCase (`# LORE CHOICE - THE ORDER'S TRIBULATIONS` gives `DLG_LoreChoiceTheOrdersTribulations`). `[[asset: DLG_Name]]` inside the section pins another name. Dialogue before the first section goes to an asset named after the file.
+* A character name is a speaker's **Token** in uppercase. Spaces and extensions such as `(CONT.)` or `(V.O.)` are ignored, so `CROW ENEMY` finds `CrowEnemy`. Names spoken inside a line are tokens too: `{Duncan}`, `{Duncan:given}`.
+* When no speaker matches a character, a dialog creates its speaker (name parts, gender, folder), uses an existing one, imports its lines as narration or skips them.
+* Parentheticals and `[[notes]]` go to the line's **Translator Notes**. A block with directions only becomes a line without text: subtitles skip it, and it can still hold audio or a pause.
+* Scene headings, action, transitions, the title page and `/* boneyard */` are ignored.
+
+A preview lists every change before anything is applied. **Reimport Script** (right-click the dialogues) updates them from the same file. Unchanged lines stay as they are; an edited line keeps its id, audio and timing, and its voice-over shows as outdated; removed lines go only after the preview lists them. A section that left the script is reported, never deleted. The script only owns each line's speaker, text and notes: everything else is edited in Unreal and survives reimports. The file is matched by name, so every machine can keep it in its own folder; when it is not where it was, the editor asks for it.
 
 ### 🌍 Localization
 
