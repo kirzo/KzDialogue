@@ -704,19 +704,23 @@ void UKzSubtitleWidget::SyncViewToPlayer(UKzDialoguePlayer* InPlayer)
 	if (!bViewEnabled) { return; }
 
 	const EKzDialogueState CurrentState = InPlayer->GetState();
-	if (CurrentState == EKzDialogueState::Entering || CurrentState == EKzDialogueState::Waiting)
-	{
-		FindView(InPlayer, true);
-		ReceiveShow(InPlayer->Channel);
-	}
-	else if (CurrentState == EKzDialogueState::LineEntering ||
+	const bool bShowsLine = CurrentState == EKzDialogueState::LineEntering ||
 		CurrentState == EKzDialogueState::LinePlaying ||
 		CurrentState == EKzDialogueState::LineExiting ||
-		CurrentState == EKzDialogueState::Paused)
+		CurrentState == EKzDialogueState::Paused;
+	if (!bShowsLine && CurrentState != EKzDialogueState::Entering && CurrentState != EKzDialogueState::Waiting) { return; }
+
+	const FKzSubtitleChannelView View = FindView(InPlayer, true);
+	ReceiveShow(InPlayer->Channel);
+	if (bShowsLine)
 	{
-		ReceiveShow(InPlayer->Channel);
-		ApplyLineToView(FindView(InPlayer, true), InPlayer->GetCurrentLine(), InPlayer->Channel);
+		ApplyLineToView(View, InPlayer->GetCurrentLine(), InPlayer->Channel);
 	}
+
+	// The view sits at its hidden baseline (reset by a mute, or never shown): replay its fades unclaimed, the player is not waiting on them
+	UUserWidget* Host = GetAnimHost(InPlayer);
+	if (View.StartFadeIn) { Host->PlayAnimation(View.StartFadeIn); }
+	if (bShowsLine && View.LineFadeIn) { Host->PlayAnimation(View.LineFadeIn); }
 }
 
 // ---------------------------------------------------------------------------------------
