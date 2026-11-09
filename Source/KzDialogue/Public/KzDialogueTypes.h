@@ -748,6 +748,32 @@ struct FKzSpeakingLevelSettings
 	float Contrast = 2.0f;
 };
 
+/** The player's subtitle options, shared by every subtitle widget, applied live and saved (UKzSubtitleWidget::SetSubtitleProfile). */
+USTRUCT(BlueprintType)
+struct KZDIALOGUE_API FKzSubtitleProfile
+{
+	GENERATED_BODY()
+
+	/** Off hides every channel except the closed-caption ones, which follow bShowClosedCaptions. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowSubtitles = true;
+
+	/** Multiplies the designed font size of the speaker and subtitle texts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = 0.5, ClampMax = 4.0))
+	float TextScale = 1.0f;
+
+	/** Alpha of each view's Background. Below 0 keeps the designed one. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = -1.0, ClampMax = 1.0))
+	float BackgroundOpacity = -1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowSpeakerNames = true;
+
+	/** Off hides the channels flagged bClosedCaptions in the dialogue settings. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
+	bool bShowClosedCaptions = true;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueStarted, class UKzDialoguePlayer*, Player);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueFinished, class UKzDialoguePlayer*, Player, EKzDialogueFinishReason, Reason);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueLineEvent, class UKzDialoguePlayer*, Player, const FKzDialogueLine&, Line);

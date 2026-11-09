@@ -16,32 +16,6 @@ class UWidgetAnimation;
 class UKzDialoguePlayer;
 class UKzSubtitleWidget;
 
-/** The player's subtitle options, shared by every subtitle widget, applied live and saved (UKzSubtitleWidget::SetSubtitleProfile). */
-USTRUCT(BlueprintType)
-struct KZDIALOGUE_API FKzSubtitleProfile
-{
-	GENERATED_BODY()
-
-	/** Off hides every channel except the closed-caption ones, which follow bShowClosedCaptions. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
-	bool bShowSubtitles = true;
-
-	/** Multiplies the designed font size of the speaker and subtitle texts. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = 0.5, ClampMax = 4.0))
-	float TextScale = 1.0f;
-
-	/** Alpha of each view's Background. Below 0 keeps the designed one. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles", meta = (ClampMin = -1.0, ClampMax = 1.0))
-	float BackgroundOpacity = -1.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
-	bool bShowSpeakerNames = true;
-
-	/** Off hides the channels flagged bClosedCaptions in the dialogue settings. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Subtitles")
-	bool bShowClosedCaptions = true;
-};
-
 /** Enum to define where the affix will be placed relative to the speaker's name. */
 UENUM(BlueprintType)
 enum class EKzSpeakerAffixPosition : uint8

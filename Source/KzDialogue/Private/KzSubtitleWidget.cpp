@@ -22,12 +22,12 @@ namespace
 	const TCHAR* ProfileSection = TEXT("/Script/KzDialogue.KzSubtitleWidget");
 	const TCHAR* ProfileKey = TEXT("SubtitleProfile");
 
-	/** The player's profile, read from the ini the first time. */
+	/** The player's profile: the project default with the saved changes on top, read the first time. */
 	FKzSubtitleProfile& SubtitleProfile()
 	{
 		static FKzSubtitleProfile Profile = []
 		{
-			FKzSubtitleProfile Saved;
+			FKzSubtitleProfile Saved = UKzDialogueSettings::Get()->DefaultSubtitleProfile;
 			FString Text;
 			if (GConfig && GConfig->GetString(ProfileSection, ProfileKey, Text, GGameUserSettingsIni))
 			{
@@ -82,8 +82,9 @@ void UKzSubtitleWidget::SetSubtitleProfile(const FKzSubtitleProfile& Profile)
 	SubtitleProfile() = Profile;
 	if (GConfig)
 	{
+		// Only what differs from the project default, so a later default change reaches what the player left alone
 		FString Text;
-		FKzSubtitleProfile::StaticStruct()->ExportText(Text, &Profile, nullptr, nullptr, PPF_None, nullptr);
+		FKzSubtitleProfile::StaticStruct()->ExportText(Text, &Profile, &UKzDialogueSettings::Get()->DefaultSubtitleProfile, nullptr, PPF_None, nullptr);
 		GConfig->SetString(ProfileSection, ProfileKey, *Text, GGameUserSettingsIni);
 		GConfig->Flush(false, GGameUserSettingsIni);
 	}

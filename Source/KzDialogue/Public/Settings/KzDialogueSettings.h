@@ -103,6 +103,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Speaking")
 	FKzSpeakingLevelSettings SpeakingDefaults;
 
+	/** The subtitle options before the player changes any. Only the options the player changes are saved, so a new default reaches the rest. */
+	UPROPERTY(Config, EditAnywhere, Category = "Subtitles")
+	FKzSubtitleProfile DefaultSubtitleProfile;
+
 	/**
 	 * Per-channel configuration. Channels not listed here are still accepted at runtime
 	 * with default values, but a warning is logged so the project author can decide

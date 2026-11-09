@@ -147,7 +147,7 @@ A player-chosen character's gender is unknown when the text is translated, so th
 * **Mute Rules** hide some channels while another plays, for example barks while the main conversation runs.
 * **Speaker Formatting Rules** add affixes such as `Kirzo:`, per culture if needed.
 * **Can Show Line** filters lines. By default it hides lines without text; override it to filter by tag, for example.
-* The player's options go in the **subtitle profile** (**Set Subtitle Profile** / **Get Subtitle Profile**): subtitles and closed captions on or off, speaker names, text scale and background opacity. Every subtitle widget applies it live, and it is saved in GameUserSettings' ini, so the next session starts with it.
+* The player's options go in the **subtitle profile** (**Set Subtitle Profile** / **Get Subtitle Profile**): subtitles and closed captions on or off, speaker names, text scale and background opacity. Every subtitle widget applies it live, and it is saved in GameUserSettings' ini, so the next session starts with it. Its defaults are **Default Subtitle Profile** in the KzDialogue project settings; only the options the player changes are saved, so a new default reaches the rest.
 * Right-to-left cultures mirror the layout automatically.
 
 To build a view from scratch, bind to the player's `OnRequest*` events, call `ClaimViewResponse()` when you need time, and answer with the matching `Notify*Finished()`.
