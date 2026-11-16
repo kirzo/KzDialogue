@@ -919,15 +919,6 @@ namespace
 			]);
 	}
 
-	TSharedPtr<SWidget> MakeGoToBody(const UKzEdGraphNode& EdNode)
-	{
-		return MakeEntryBody(EdNode, &FKzDialogueGraphNode_GoTo::Entry, [](const UKzEdGraphNode& Node)
-		{
-			const UEdGraph* Graph = Node.GetGraph();
-			return Graph ? KzDialogueGraphNodeBodies::GatherEntryNames(*Graph) : TArray<FName>();
-		});
-	}
-
 	TSharedPtr<SWidget> MakeSubGraphBody(const UKzEdGraphNode& EdNode)
 	{
 		return MakeEntryBody(EdNode, &FKzDialogueGraphNode_SubGraph::Entry, [](const UKzEdGraphNode& Node)
@@ -1140,7 +1131,6 @@ void KzDialogueGraphNodeBodies::Register()
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeLineBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeChoiceBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeBranchBody));
-	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeGoToBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphNode_SubGraph::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeSubGraphBody));
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphStep::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeOnlyIfBody));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
@@ -1152,7 +1142,6 @@ void KzDialogueGraphNodeBodies::Unregister()
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Line::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Choice::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct());
-	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_GoTo::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_SubGraph::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_SubGraph::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphStep::StaticStruct());

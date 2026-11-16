@@ -514,10 +514,6 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 			StartWait(Wait->Seconds);
 			return;
 		}
-		else if (const FKzDialogueGraphNode_GoTo* GoTo = Data.GetNode<FKzDialogueGraphNode_GoTo>(Node))
-		{
-			Target = Data.FindEntry(GoTo->Entry.Name);
-		}
 		else if (const FKzDialogueGraphNode_SubGraph* SubGraph = Data.GetNode<FKzDialogueGraphNode_SubGraph>(Node))
 		{
 			Target = EnterSubGraph(*SubGraph);
@@ -533,7 +529,7 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else
 		{
-			// An Entry reached through Go To, or any node that only passes on.
+			// An Entry, or any node that only passes on.
 			Target = FindTarget(Node, DefaultOutput);
 		}
 	}

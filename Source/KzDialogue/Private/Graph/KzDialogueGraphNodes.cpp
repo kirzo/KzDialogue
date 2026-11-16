@@ -286,16 +286,6 @@ FSlateIcon FKzDialogueGraphNode_Wait::GetIcon() const
 	return NodeIcon(TEXT("Wait"));
 }
 
-FLinearColor FKzDialogueGraphNode_GoTo::GetColor() const
-{
-	return FlowColor();
-}
-
-FSlateIcon FKzDialogueGraphNode_GoTo::GetIcon() const
-{
-	return NodeIcon(TEXT("GoTo"));
-}
-
 void FKzDialogueGraphNode_SubGraph::GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const
 {
 	FKzDialogueGraphStep::GetOutputPins(Owner, OutPins);

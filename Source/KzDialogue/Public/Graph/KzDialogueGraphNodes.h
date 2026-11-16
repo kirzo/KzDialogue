@@ -286,22 +286,6 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Wait : public FKzDialogueGraphStep
 #endif
 };
 
-/** Jumps to an Entry of this graph, for loops and menus that come back without wires across the graph. */
-USTRUCT(meta = (DisplayName = "Go To", Category = "Flow", Shortcut = "G", Keywords = "jump loop back"))
-struct KZDIALOGUE_API FKzDialogueGraphNode_GoTo : public FKzDialogueGraphStep
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, Category = "Go To")
-	FKzDialogueGraphEntryName Entry = FKzDialogueGraphEntryName(FKzDialogueGraphNode_Entry::DefaultName);
-
-#if WITH_EDITOR
-	virtual void GetOutputPins(const UKzGraph& Graph, TArray<FKzGraphPinDesc>& OutPins) const override {}
-	virtual FLinearColor GetColor() const override;
-	virtual FSlateIcon GetIcon() const override;
-#endif
-};
-
 /** Plays another dialogue graph from one of its entries, then goes on through the output named after the Exit it ended by, or Out. */
 USTRUCT(meta = (DisplayName = "Sub Graph", Category = "Flow", Keywords = "call nested include graph"))
 struct KZDIALOGUE_API FKzDialogueGraphNode_SubGraph : public FKzDialogueGraphStep
