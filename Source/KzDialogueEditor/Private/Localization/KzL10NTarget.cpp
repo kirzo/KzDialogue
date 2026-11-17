@@ -258,7 +258,13 @@ bool KzDialogueL10N::ReadLocTargetInfo(FKzLocTargetInfo& Out, FText& OutError)
 	FConfigFile Config;
 	Config.Read(GatherIniPath);
 
-	Config.GetString(TEXT("CommonSettings"), TEXT("NativeCulture"), Out.NativeCulture);
+	// The dashboard writes NativeCulture only once the target has one, and the archive tools assert without it.
+	if (!Config.GetString(TEXT("CommonSettings"), TEXT("NativeCulture"), Out.NativeCulture) || Out.NativeCulture.IsEmpty())
+	{
+		OutError = FText::Format(LOCTEXT("NoNativeCulture", "Localization target '{0}' has no native culture. Pick one in the Localization Dashboard (the radio button next to a culture) and run Gather Text."),
+			FText::FromString(Out.TargetName));
+		return false;
+	}
 
 	TArray<FString> Cultures;
 	Config.GetArray(TEXT("CommonSettings"), TEXT("CulturesToGenerate"), Cultures);

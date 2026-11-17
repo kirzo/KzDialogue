@@ -365,6 +365,10 @@ void KzDialogueL10N::RenameNamedTokenReferences(UKzNamedAsset* Renamed, FName Ol
 			UE_LOG(LogKzDialogueL10N, Warning, TEXT("Token rename: the archives could not be saved: %s"), *ArchiveError.ToString());
 		}
 	}
+	else
+	{
+		UE_LOG(LogKzDialogueL10N, Log, TEXT("Token rename: archives left as they are: %s"), *ArchiveError.ToString());
+	}
 	ShowNotification(FText::Format(
 		LOCTEXT("TokenRenameDone", "Token '{0}' renamed to '{1}': {2} line(s) in {3} asset(s) rewritten, archives updated. Save the dirty assets and re-run Gather."),
 		FText::FromName(OldToken), FText::FromName(NewToken), RenamedLines, ChangedAssets), true);

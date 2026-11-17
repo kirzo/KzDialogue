@@ -140,7 +140,7 @@ struct KZDIALOGUE_API FKzDialogueLine
 	 * Used by the Sequencer section to reference a specific line,
 	 * surviving reorders inside the asset.
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue|Line")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dialogue|Line", meta = (IgnoreForMemberInitializationTest))
 	FGuid LineId;
 
 	/** Speaker for this line. May be empty (narration). */
