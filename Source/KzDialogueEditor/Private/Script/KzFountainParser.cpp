@@ -24,25 +24,43 @@ namespace
 		return Out;
 	}
 
-	/** Line without its [[notes]], which go to OutNotes. */
-	FString ExtractNotes(const FString& Line, TArray<FString>& OutNotes)
+	/** Line without the spans between Open and Close, whose insides go to OutNotes. */
+	FString ExtractSpans(const FString& Line, const TCHAR* Open, const TCHAR* Close, TArray<FString>& OutNotes)
 	{
+		const int32 OpenLen = FCString::Strlen(Open);
+		const int32 CloseLen = FCString::Strlen(Close);
 		FString Out;
 		int32 Pos = 0;
 		while (Pos < Line.Len())
 		{
-			const int32 Open = Line.Find(TEXT("[["), ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
-			const int32 Close = Open == INDEX_NONE ? INDEX_NONE : Line.Find(TEXT("]]"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open + 2);
-			if (Close == INDEX_NONE)
+			const int32 Start = Line.Find(Open, ESearchCase::CaseSensitive, ESearchDir::FromStart, Pos);
+			const int32 End = Start == INDEX_NONE ? INDEX_NONE : Line.Find(Close, ESearchCase::CaseSensitive, ESearchDir::FromStart, Start + OpenLen);
+			if (End == INDEX_NONE)
 			{
 				Out += Line.Mid(Pos);
 				break;
 			}
-			Out += Line.Mid(Pos, Open - Pos);
-			OutNotes.Add(Line.Mid(Open + 2, Close - Open - 2).TrimStartAndEnd());
-			Pos = Close + 2;
+			Out += Line.Mid(Pos, Start - Pos);
+			OutNotes.Add(Line.Mid(Start + OpenLen, End - Start - OpenLen).TrimStartAndEnd());
+			Pos = End + CloseLen;
 		}
 		return Out.Replace(TEXT("  "), TEXT(" ")).TrimStartAndEnd();
+	}
+
+	/** Spoken text without its directions, whole-line or inline ("THE Crown. (emphatic) THE Crown."), which go to OutNotes. */
+	FString ExtractDirections(const FString& Line, TArray<FString>& OutNotes)
+	{
+		const int32 NotesBefore = OutNotes.Num();
+		FString Out = ExtractSpans(Line, TEXT("("), TEXT(")"), OutNotes);
+		if (OutNotes.Num() == NotesBefore) { return Out; }
+
+		// A direction between em dashes leaves one dash, and one before a period leaves no space before it.
+		Out.ReplaceInline(TEXT("\x2014\x2014"), TEXT("\x2014"));
+		for (const TCHAR* Punctuation : { TEXT("."), TEXT(","), TEXT("?"), TEXT("!") })
+		{
+			Out.ReplaceInline(*FString::Printf(TEXT(" %s"), Punctuation), Punctuation);
+		}
+		return Out;
 	}
 
 	/** Removes '*' emphasis marks; "\*" stays as a literal '*'. */
@@ -88,7 +106,7 @@ namespace
 		return false;
 	}
 
-	/** A character cue: forced with '@', or an uppercase name (extensions aside) that is no scene heading or transition. */
+	/** A character cue: forced with '@', or an uppercase name (extensions aside) that is no heading or transition. */
 	bool ParseCue(const FString& Line, FString& OutCue)
 	{
 		FString Name = Line;
@@ -104,7 +122,7 @@ namespace
 
 		if (!bForced)
 		{
-			if (FCString::Strchr(TEXT("!>.=~["), Name[0]) || IsSceneHeading(Name) || Name.EndsWith(TEXT("TO:"))) { return false; }
+			if (FCString::Strchr(TEXT("!>.=~[#"), Name[0]) || IsSceneHeading(Name) || Name.EndsWith(TEXT("TO:"))) { return false; }
 
 			bool bHasLetter = false;
 			for (const TCHAR C : Name)
@@ -130,6 +148,17 @@ TArray<FKzFountainSection> KzFountain::Parse(const FString& Script, const FStrin
 	if (Lines.Num() > 0 && IsTitlePageKey(Lines[0]))
 	{
 		while (!IsBlank(Index)) { ++Index; }
+	}
+
+	// Cues written the strict way, after a blank line: a later line naming one is a cue even glued to the line before.
+	TSet<FString> KnownCues;
+	for (int32 LineIndex = Index; LineIndex < Lines.Num(); ++LineIndex)
+	{
+		FString Cue;
+		if (IsBlank(LineIndex - 1) && !IsBlank(LineIndex + 1) && ParseCue(Lines[LineIndex].TrimStartAndEnd(), Cue))
+		{
+			KnownCues.Add(NormalizeName(Cue));
+		}
 	}
 
 	TArray<FKzFountainSection> Sections;
@@ -162,27 +191,36 @@ TArray<FKzFountainSection> KzFountain::Parse(const FString& Script, const FStrin
 		}
 
 		TArray<FString> Notes;
-		const FString Content = ExtractNotes(Lines[Index].TrimStartAndEnd(), Notes);
+		const FString Content = ExtractSpans(Lines[Index].TrimStartAndEnd(), TEXT("[["), TEXT("]]"), Notes);
 
-		if (bInBlock)
+		FString Cue;
+		const bool bCue = !IsBlank(Index + 1) && ParseCue(Content, Cue)
+			&& (IsBlank(Index - 1) || KnownCues.Contains(NormalizeName(Cue)) || Lines[Index + 1].TrimStart().StartsWith(TEXT("(")));
+
+		// A heading or a cue glued to a dialogue still ends it.
+		if (bInBlock && !bCue && !Content.StartsWith(TEXT("#")))
 		{
 			NoteParts.Append(Notes);
-			if (Content.StartsWith(TEXT("(")) && Content.EndsWith(TEXT(")")))
+			const FString Text = ExtractDirections(ExtractSpans(Content, TEXT("["), TEXT("]"), NoteParts), NoteParts);
+			if (!Text.IsEmpty())
 			{
-				NoteParts.Add(Content.Mid(1, Content.Len() - 2).TrimStartAndEnd());
-			}
-			else if (!Content.IsEmpty())
-			{
-				TextParts.Add(StripEmphasis(Content.StartsWith(TEXT("~")) ? Content.RightChop(1).TrimStart() : Content));
+				TextParts.Add(StripEmphasis(Text.StartsWith(TEXT("~")) ? Text.RightChop(1).TrimStart() : Text));
 			}
 			continue;
 		}
+		CloseBlock();
 
 		if (Content.StartsWith(TEXT("#")))
 		{
 			int32 Depth = 0;
 			while (Depth < Content.Len() && Content[Depth] == TEXT('#')) { ++Depth; }
-			Sections.AddDefaulted_GetRef().Title = Content.RightChop(Depth).TrimStartAndEnd();
+			const FString Title = Content.RightChop(Depth).TrimStartAndEnd();
+
+			// Scene headings written as sections ("##EXT. SNOW FIELD - DAY") stay inside the section.
+			if (!IsSceneHeading(Title))
+			{
+				Sections.AddDefaulted_GetRef().Title = Title;
+			}
 		}
 
 		TArray<FString> OtherNotes;
@@ -199,8 +237,7 @@ TArray<FKzFountainSection> KzFountain::Parse(const FString& Script, const FStrin
 			}
 		}
 
-		FString Cue;
-		if (IsBlank(Index - 1) && !IsBlank(Index + 1) && !Content.StartsWith(TEXT("#")) && ParseCue(Content, Cue))
+		if (bCue)
 		{
 			CurrentSection().Blocks.AddDefaulted_GetRef().Cue = Cue;
 			NoteParts = OtherNotes;
@@ -251,24 +288,29 @@ bool FKzFountainParseTest::RunTest(const FString& Parameters)
 		TEXT("Title: Test\nAuthor: Me\n\n")
 		TEXT("BOGDAN\nBefore any section.\n\n")
 		TEXT("# CUTSCENE: THE ORDER'S END [[asset: DLG_End]]\n\n")
-		TEXT("EXT. FIELD - DAY\n\nAction /* cut */ here.\n\n")
-		TEXT("DUNCAN (CONT.)\n(dark)\nHello, *{Bogdan}*. [[Pause before.]]\nSecond line.\n\n")
-		TEXT("CROW ENEMIES\n(laughing)\n\n")
-		TEXT("CUT TO:\n\n")
-		TEXT("# EMPTY\n\nJust action.\n");
+		TEXT("##EXT. FIELD - DAY\n\nAction /* cut */ here.\n\n")
+		TEXT("DUNCAN (CONT.)\n(dark)\nHello, *{Bogdan}*. [[Pause before.]]\nSecond (beat) line\x2014(sighs)\x2014") TEXT("done (dryly).\n")
+		TEXT("BOGDAN\n(scared)\nYes.\n[Insert: close-up.]\n\n")
+		TEXT("CROW ENEMIES\n(laughing)\n")
+		TEXT("#EMPTY\n\nJust action.\n");
 
 	const TArray<FKzFountainSection> Sections = KzFountain::Parse(Script, TEXT("Default"));
 	if (!TestEqual(TEXT("Sections"), Sections.Num(), 2)) { return false; }
 	TestEqual(TEXT("Default title"), Sections[0].Title, TEXT("Default"));
 	TestEqual(TEXT("Title"), Sections[1].Title, TEXT("CUTSCENE: THE ORDER'S END"));
 	TestEqual(TEXT("Asset"), Sections[1].AssetName, TEXT("DLG_End"));
-	if (!TestEqual(TEXT("Blocks"), Sections[1].Blocks.Num(), 2)) { return false; }
+	if (!TestEqual(TEXT("Blocks"), Sections[1].Blocks.Num(), 3)) { return false; }
 
 	const FKzFountainBlock& Duncan = Sections[1].Blocks[0];
 	TestEqual(TEXT("Cue"), Duncan.Cue, TEXT("DUNCAN"));
-	TestEqual(TEXT("Text"), Duncan.Text, TEXT("Hello, {Bogdan}. Second line."));
-	TestEqual(TEXT("Notes"), Duncan.Notes, TEXT("dark; Pause before."));
-	TestTrue(TEXT("Directions only"), Sections[1].Blocks[1].Text.IsEmpty() && Sections[1].Blocks[1].Notes == TEXT("laughing"));
+	TestEqual(TEXT("Text"), Duncan.Text, FString(TEXT("Hello, {Bogdan}. Second line\x2014") TEXT("done.")));
+	TestEqual(TEXT("Notes"), Duncan.Notes, TEXT("dark; Pause before.; beat; sighs; dryly"));
+
+	const FKzFountainBlock& Glued = Sections[1].Blocks[1];
+	TestEqual(TEXT("Glued cue"), Glued.Cue, TEXT("BOGDAN"));
+	TestEqual(TEXT("Glued text"), Glued.Text, TEXT("Yes."));
+	TestEqual(TEXT("Insert note"), Glued.Notes, TEXT("scared; Insert: close-up."));
+	TestTrue(TEXT("Directions only"), Sections[1].Blocks[2].Text.IsEmpty() && Sections[1].Blocks[2].Notes == TEXT("laughing"));
 
 	TestEqual(TEXT("PascalCase"), KzFountain::ToPascalCase(TEXT("LORE CHOICE - THE ORDER'S TRIBULATIONS")), FString(TEXT("LoreChoiceTheOrdersTribulations")));
 	TestEqual(TEXT("Normalize"), KzFountain::NormalizeName(TEXT("Crow Enemy")), KzFountain::NormalizeName(TEXT("CROWENEMY")));

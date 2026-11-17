@@ -103,12 +103,6 @@ namespace
 		return Source ? *Source : FString();
 	}
 
-	/** Same script by file name: the path differs between machines. */
-	bool IsSameScript(const FString& A, const FString& B)
-	{
-		return !A.IsEmpty() && FPaths::GetCleanFilename(A).Equals(FPaths::GetCleanFilename(B), ESearchCase::IgnoreCase);
-	}
-
 	FString Describe(const UKzSpeakerAsset* Speaker, const FString& Text, const FString& Notes)
 	{
 		FString Out = (Speaker ? Speaker->Token.ToString() : TEXT("Narration")) + TEXT(": ") + Text;
@@ -160,16 +154,15 @@ namespace
 		for (const FAssetData& Data : Speakers)
 		{
 			FName Token;
-			if (Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), Token) && !Token.IsNone())
-			{
-				Plan.SpeakersByToken.Add(KzFountain::NormalizeName(Token.ToString()), Data);
-			}
-		}
+			if (!Data.GetTagValue(GET_MEMBER_NAME_CHECKED(UKzNamedAsset, Token), Token) || Token.IsNone()) { continue; }
 
-		// New speakers go where the project keeps the others.
-		if (Speakers.Num() > 0)
-		{
-			Plan.SpeakerFolder = Speakers[0].PackagePath.ToString();
+			if (Plan.SpeakersByToken.IsEmpty())
+			{
+				// New speakers go where the project keeps the others: next to them, or each in a folder named after its token (Characters/Bogdan/SPK_Bogdan).
+				const FString Folder = Data.PackagePath.ToString();
+				Plan.SpeakerFolder = FPaths::GetCleanFilename(Folder).Equals(Token.ToString(), ESearchCase::IgnoreCase) ? FPaths::GetPath(Folder) / TEXT("{Token}") : Folder;
+			}
+			Plan.SpeakersByToken.Add(KzFountain::NormalizeName(Token.ToString()), Data);
 		}
 	}
 
@@ -195,7 +188,7 @@ namespace
 		const TSharedRef<IDetailsView> Details = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor").CreateDetailView(DetailsArgs);
 		Details->SetObject(Draft.Get());
 
-		const TSharedRef<SEditableTextBox> FolderBox = SNew(SEditableTextBox).Text(FText::FromString(Plan.SpeakerFolder));
+		const TSharedRef<SEditableTextBox> FolderBox = SNew(SEditableTextBox).Text(FText::FromString(Plan.SpeakerFolder.Replace(TEXT("{Token}"), *Draft->Token.ToString())));
 		const TSharedRef<SWindow> Window = MakeDialog(FText::Format(LOCTEXT("SpeakerTitle", "Unknown Character: {0}"), FText::FromString(Cue)), FVector2D(560.0f, 680.0f));
 
 		auto Close = [State, WeakWindow = TWeakPtr<SWindow>(Window)](EAnswer Answer)
@@ -428,7 +421,10 @@ namespace
 		return Out;
 	}
 
-	/** Matches each section to a dialogue in the folder (by script section, then by name) or a new name, and diffs its lines. */
+	/**
+	 * Matches each section to a dialogue in the folder, by script section and then by name, or gives it a new name, and diffs its lines.
+	 * A folder holds one script: importing another one (a cut version, a renamed file) updates the dialogues already there.
+	 */
 	void PlanAssets(FImportPlan& Plan)
 	{
 		TArray<FAssetData> FolderAssets;
@@ -436,38 +432,54 @@ namespace
 
 		TArray<UKzDialogueAsset*> Unclaimed;
 		TSet<FString> TakenNames;
+		TSet<FString> OtherScripts;
 		for (const FAssetData& Data : FolderAssets)
 		{
 			TakenNames.Add(Data.AssetName.ToString());
-			if (Data.IsInstanceOf(UKzDialogueAsset::StaticClass()))
+			UKzDialogueAsset* Dialogue = Data.IsInstanceOf(UKzDialogueAsset::StaticClass()) ? Cast<UKzDialogueAsset>(Data.GetAsset()) : nullptr;
+			if (!Dialogue) { continue; }
+
+			Unclaimed.Add(Dialogue);
+			const FString Source = FPaths::GetCleanFilename(Dialogue->ScriptSource);
+			if (!Source.IsEmpty() && !Source.Equals(FPaths::GetCleanFilename(Plan.ScriptFile), ESearchCase::IgnoreCase))
 			{
-				if (UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Data.GetAsset())) { Unclaimed.Add(Dialogue); }
+				OtherScripts.Add(Source);
 			}
 		}
+		for (const FString& Other : OtherScripts)
+		{
+			Plan.Warnings.Add(FText::Format(LOCTEXT("OtherScript", "This folder's dialogues come from {0}: this script replaces it."), FText::FromString(Other)));
+		}
 
+		auto Claim = [&Unclaimed](TFunctionRef<bool(const UKzDialogueAsset&)> Matches) -> UKzDialogueAsset*
+		{
+			const int32 Index = Unclaimed.IndexOfByPredicate([&Matches](const UKzDialogueAsset* Dialogue) { return Matches(*Dialogue); });
+			if (Index == INDEX_NONE) { return nullptr; }
+			UKzDialogueAsset* Claimed = Unclaimed[Index];
+			Unclaimed.RemoveAt(Index);
+			return Claimed;
+		};
+
+		// Every section claims its own dialogue first, so a name match never takes one another section owns.
 		for (const FKzFountainSection& Section : Plan.Sections)
 		{
 			FPlannedAsset& Planned = Plan.Assets.AddDefaulted_GetRef();
 			Planned.Section = &Section;
-			const FString Wanted = Section.AssetName.IsEmpty() ? TEXT("DLG_") + KzFountain::ToPascalCase(Section.Title) : Section.AssetName;
+			Planned.Existing = Claim([&Section](const UKzDialogueAsset& Dialogue) { return !Dialogue.ScriptSource.IsEmpty() && Dialogue.ScriptSection == Section.Title; });
+		}
 
-			int32 Index = Unclaimed.IndexOfByPredicate([&](const UKzDialogueAsset* Dialogue)
+		for (FPlannedAsset& Planned : Plan.Assets)
+		{
+			const FKzFountainSection& Section = *Planned.Section;
+			const FString Wanted = Section.AssetName.IsEmpty() ? TEXT("DLG_") + KzFountain::ToPascalCase(Section.Title) : Section.AssetName;
+			if (!Planned.Existing)
 			{
-				return IsSameScript(Dialogue->ScriptSource, Plan.ScriptFile) && Dialogue->ScriptSection == Section.Title;
-			});
-			if (Index == INDEX_NONE)
-			{
-				Index = Unclaimed.IndexOfByPredicate([&](const UKzDialogueAsset* Dialogue)
-				{
-					return Dialogue->GetName() == Wanted && (Dialogue->ScriptSource.IsEmpty() || IsSameScript(Dialogue->ScriptSource, Plan.ScriptFile));
-				});
+				Planned.Existing = Claim([&Wanted](const UKzDialogueAsset& Dialogue) { return Dialogue.GetName() == Wanted; });
 			}
 
-			if (Index != INDEX_NONE)
+			if (Planned.Existing)
 			{
-				Planned.Existing = Unclaimed[Index];
 				Planned.AssetName = Planned.Existing->GetName();
-				Unclaimed.RemoveAt(Index);
 			}
 			else
 			{
@@ -487,7 +499,7 @@ namespace
 			Planned.Lines = DiffLines(Planned.Existing ? Planned.Existing->Lines : TArray<FKzDialogueLine>(), Planned.NewLines);
 		}
 
-		Plan.Orphans = Unclaimed.FilterByPredicate([&Plan](const UKzDialogueAsset* Dialogue) { return IsSameScript(Dialogue->ScriptSource, Plan.ScriptFile); });
+		Plan.Orphans = Unclaimed.FilterByPredicate([](const UKzDialogueAsset* Dialogue) { return !Dialogue->ScriptSource.IsEmpty(); });
 	}
 
 	void GatherWarnings(FImportPlan& Plan)
@@ -697,6 +709,17 @@ namespace
 			Imported.Add(Asset);
 		}
 
+		// Orphans follow the folder's script too, so a Reimport Script on one of them never brings back the file this one replaced.
+		for (UKzDialogueAsset* Orphan : Plan.Orphans)
+		{
+			if (Orphan->ScriptSource != Plan.ScriptFile)
+			{
+				Orphan->Modify();
+				Orphan->ScriptSource = Plan.ScriptFile;
+				Orphan->MarkPackageDirty();
+			}
+		}
+
 		if (Imported.Num() > 0)
 		{
 			GEditor->SyncBrowserToObjects(Imported);
@@ -707,27 +730,28 @@ namespace
 
 	void Reimport(const TArray<FAssetData>& Selected)
 	{
-		TArray<TPair<FString, FString>> Jobs;
+		// One script per folder.
+		TMap<FString, FString> ScriptByFolder;
 		for (const FAssetData& Data : Selected)
 		{
 			const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Data.GetAsset());
-			if (Dialogue && !Dialogue->ScriptSource.IsEmpty())
+			if (Dialogue && !Dialogue->ScriptSource.IsEmpty() && !ScriptByFolder.Contains(Data.PackagePath.ToString()))
 			{
-				Jobs.AddUnique({ Dialogue->ScriptSource, Data.PackagePath.ToString() });
+				ScriptByFolder.Add(Data.PackagePath.ToString(), Dialogue->ScriptSource);
 			}
 		}
 
-		if (Jobs.IsEmpty())
+		if (ScriptByFolder.IsEmpty())
 		{
 			Notify(LOCTEXT("NotImported", "The selected dialogues were not imported from a script."), false);
 			return;
 		}
 
-		for (TPair<FString, FString>& Job : Jobs)
+		for (TPair<FString, FString>& Job : ScriptByFolder)
 		{
-			if (FPaths::FileExists(Job.Key) || PickScript(FText::Format(LOCTEXT("LocateScript", "Locate {0}"), FText::FromString(FPaths::GetCleanFilename(Job.Key))), Job.Key))
+			if (FPaths::FileExists(Job.Value) || PickScript(FText::Format(LOCTEXT("LocateScript", "Locate {0}"), FText::FromString(FPaths::GetCleanFilename(Job.Value))), Job.Value))
 			{
-				KzScriptImport::Import(Job.Key, Job.Value);
+				KzScriptImport::Import(Job.Value, Job.Key);
 			}
 		}
 	}
