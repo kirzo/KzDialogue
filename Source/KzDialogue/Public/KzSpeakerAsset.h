@@ -14,7 +14,8 @@
  * simply another speaker asset listed in the world component's ExtraPersonas.
  *
  * Naming: DisplayName wins when set. Otherwise the structured parts are composed with
- * the per-culture format from UKzDialogueSettings (surname-first cultures, honorifics).
+ * the per-culture format from UKzDialogueSettings (surname-first cultures, honorifics),
+ * without the family name when bFamilyInDefaultName is off.
  * Every name field is a localizable text anchored to a stable GUID-derived key, so a
  * character's name is translated once here instead of per line. Structured parts may
  * also reference a shared UKzWordAsset (family names, honorifics: common vocabulary),
@@ -68,6 +69,16 @@ public:
 	/** Informal address ("Bob" for Robert): how other characters call this one in dialogue, via "{Token:nick}". Not part of the default composed name; the {Nick} format arg exists for projects that want it composed. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText NickName;
+
+	/** Whether the default name, shown above subtitles and by "{Token}", has the family name. Off: "Sir Duncan" by default, and "{Duncan:fullname}" where the text says "Sir Duncan Braegon". */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
+	bool bFamilyInDefaultName = true;
+
+#if WITH_EDITORONLY_DATA
+	/** Other character names a script gives this speaker besides its token ("DE MOLAY" for Jacques). The script importer matches them like the token: case, spaces and extensions such as "(CONT.)" ignored. */
+	UPROPERTY(EditAnywhere, Category = "Speaker|Script")
+	TArray<FString> ScriptNames;
+#endif
 
 	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")

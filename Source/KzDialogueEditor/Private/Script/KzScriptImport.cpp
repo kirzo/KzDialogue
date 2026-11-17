@@ -89,9 +89,13 @@ namespace
 		FString Folder;
 		TArray<FKzFountainSection> Sections;
 		TMap<FString, FAssetData> SpeakersByToken;
+		TMap<FString, UKzSpeakerAsset*> SpeakersByScriptName;
 		FString SpeakerFolder = TEXT("/Game/Dialogue/Speakers");
 		TMap<FString, FCueResolution> Cues;
 		TArray<FNewSpeaker> NewSpeakers;
+
+		/** Character names to add to a speaker's ScriptNames: the cues the user matched to it by hand. */
+		TArray<TPair<UKzSpeakerAsset*, FString>> NewScriptNames;
 		TArray<FPlannedAsset> Assets;
 		TArray<UKzDialogueAsset*> Orphans;
 		TArray<FText> Warnings;
@@ -163,6 +167,16 @@ namespace
 				Plan.SpeakerFolder = FPaths::GetCleanFilename(Folder).Equals(Token.ToString(), ESearchCase::IgnoreCase) ? FPaths::GetPath(Folder) / TEXT("{Token}") : Folder;
 			}
 			Plan.SpeakersByToken.Add(KzFountain::NormalizeName(Token.ToString()), Data);
+		}
+
+		// Script names live on the asset, not in the registry: speakers are small, so they load.
+		for (const FAssetData& Data : Speakers)
+		{
+			UKzSpeakerAsset* Speaker = Cast<UKzSpeakerAsset>(Data.GetAsset());
+			for (const FString& Name : Speaker ? Speaker->ScriptNames : TArray<FString>())
+			{
+				Plan.SpeakersByScriptName.Add(KzFountain::NormalizeName(Name), Speaker);
+			}
 		}
 	}
 
@@ -240,7 +254,7 @@ namespace
 			[
 				SNew(STextBlock)
 				.AutoWrapText(true)
-				.Text(FText::Format(LOCTEXT("SpeakerPrompt", "No speaker's token matches the character {0}. Create its speaker, use an existing one, or choose how to import its lines."), FText::FromString(Cue)))
+				.Text(FText::Format(LOCTEXT("SpeakerPrompt", "No speaker's token or script name matches the character {0}. Create its speaker, use an existing one (the character becomes one of its script names), or choose how to import its lines."), FText::FromString(Cue)))
 			]
 			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(8.0f, 0.0f)
 			[
@@ -284,6 +298,7 @@ namespace
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("UseSpeaker", "Use Speaker"))
+					.ToolTipText(LOCTEXT("UseSpeakerTip", "Import its lines with this speaker and add the character to its Script Names, so the next import finds it."))
 					.IsEnabled_Lambda([State] { return State->Picked.IsValid(); })
 					.OnClicked_Lambda([Close] { return Close(EAnswer::Existing); })
 				]
@@ -323,10 +338,10 @@ namespace
 		case EAnswer::Skip: Out.bSkip = true; break;
 		}
 
+		// A speaker matched by hand keeps the cue as one of its script names, so the next import finds it.
 		if (Out.Speaker && KzFountain::NormalizeName(Out.Speaker->Token.ToString()) != KzFountain::NormalizeName(Cue))
 		{
-			Plan.Warnings.Add(FText::Format(LOCTEXT("CueMismatch", "{0} is imported as the speaker {1}: write its character name as {2} so the next import finds it."),
-				FText::FromString(Cue), FText::FromString(Out.Speaker->Token.ToString()), FText::FromString(Out.Speaker->Token.ToString().ToUpper())));
+			Plan.NewScriptNames.Add({ Out.Speaker, Cue });
 		}
 		return true;
 	}
@@ -344,6 +359,10 @@ namespace
 				if (const FAssetData* Found = Plan.SpeakersByToken.Find(Key))
 				{
 					Resolution.Speaker = Cast<UKzSpeakerAsset>(Found->GetAsset());
+				}
+				else if (UKzSpeakerAsset* const* ByScriptName = Plan.SpeakersByScriptName.Find(Key))
+				{
+					Resolution.Speaker = *ByScriptName;
 				}
 				else if (!AskForSpeaker(Block.Cue, Plan, Resolution))
 				{
@@ -568,6 +587,10 @@ namespace
 		{
 			AddRow(FString::Printf(TEXT("+ %s (token %s)"), *New.PackageName, *New.Speaker->Token.ToString()), Added, 0.0f, true);
 		}
+		for (const TPair<UKzSpeakerAsset*, FString>& ScriptName : Plan.NewScriptNames)
+		{
+			AddRow(FString::Printf(TEXT("+ %s: script name of the speaker %s"), *ScriptName.Value, *ScriptName.Key->Token.ToString()), Added, 0.0f, true);
+		}
 
 		for (const FPlannedAsset& Planned : Plan.Assets)
 		{
@@ -661,6 +684,13 @@ namespace
 			Speaker->PostEditChange();
 			FAssetRegistryModule::AssetCreated(Speaker);
 			Speaker->MarkPackageDirty();
+		}
+
+		for (const TPair<UKzSpeakerAsset*, FString>& ScriptName : Plan.NewScriptNames)
+		{
+			ScriptName.Key->Modify();
+			ScriptName.Key->ScriptNames.AddUnique(ScriptName.Value);
+			ScriptName.Key->MarkPackageDirty();
 		}
 
 		IAssetTools& AssetTools = FAssetToolsModule::GetModule().Get();
@@ -781,7 +811,7 @@ void KzScriptImport::Import(const FString& ScriptFile, const FString& Folder)
 	PlanAssets(Plan);
 	GatherWarnings(Plan);
 
-	const bool bNothingToShow = Plan.NewSpeakers.IsEmpty() && Plan.Orphans.IsEmpty() && Plan.Warnings.IsEmpty()
+	const bool bNothingToShow = Plan.NewSpeakers.IsEmpty() && Plan.NewScriptNames.IsEmpty() && Plan.Orphans.IsEmpty() && Plan.Warnings.IsEmpty()
 		&& !Plan.Assets.ContainsByPredicate([&Plan](const FPlannedAsset& Planned) { return !IsUpToDate(Planned, Plan); });
 	if (bNothingToShow)
 	{
