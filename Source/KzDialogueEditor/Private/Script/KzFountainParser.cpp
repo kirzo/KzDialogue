@@ -47,7 +47,7 @@ namespace
 		return Out.Replace(TEXT("  "), TEXT(" ")).TrimStartAndEnd();
 	}
 
-	/** Spoken text without its directions, whole-line or inline ("THE Crown. (emphatic) THE Crown."), which go to OutNotes. */
+	/** Spoken text without its directions, whole-line or inline ("It was HIM. (emphatic) HIM."), which go to OutNotes. */
 	FString ExtractDirections(const FString& Line, TArray<FString>& OutNotes)
 	{
 		const int32 NotesBefore = OutNotes.Num();
@@ -216,7 +216,7 @@ TArray<FKzFountainSection> KzFountain::Parse(const FString& Script, const FStrin
 			while (Depth < Content.Len() && Content[Depth] == TEXT('#')) { ++Depth; }
 			const FString Title = Content.RightChop(Depth).TrimStartAndEnd();
 
-			// Scene headings written as sections ("##EXT. SNOW FIELD - DAY") stay inside the section.
+			// Scene headings written as sections ("##EXT. FOREST - DAY") stay inside the section.
 			if (!IsSceneHeading(Title))
 			{
 				Sections.AddDefaulted_GetRef().Title = Title;
@@ -286,34 +286,34 @@ bool FKzFountainParseTest::RunTest(const FString& Parameters)
 {
 	const FString Script =
 		TEXT("Title: Test\nAuthor: Me\n\n")
-		TEXT("BOGDAN\nBefore any section.\n\n")
-		TEXT("# CUTSCENE: THE ORDER'S END [[asset: DLG_End]]\n\n")
+		TEXT("KIRZO\nBefore any section.\n\n")
+		TEXT("# CUTSCENE: THE KING'S END [[asset: DLG_End]]\n\n")
 		TEXT("##EXT. FIELD - DAY\n\nAction /* cut */ here.\n\n")
-		TEXT("DUNCAN (CONT.)\n(dark)\nHello, *{Bogdan}*. [[Pause before.]]\nSecond (beat) line\x2014(sighs)\x2014") TEXT("done (dryly).\n")
-		TEXT("BOGDAN\n(scared)\nYes.\n[Insert: close-up.]\n\n")
-		TEXT("CROW ENEMIES\n(laughing)\n")
+		TEXT("MARA (CONT.)\n(dark)\nHello, *{Kirzo}*. [[Pause before.]]\nSecond (beat) line\x2014(sighs)\x2014") TEXT("done (dryly).\n")
+		TEXT("KIRZO\n(scared)\nYes.\n[Insert: close-up.]\n\n")
+		TEXT("GUARDS\n(laughing)\n")
 		TEXT("#EMPTY\n\nJust action.\n");
 
 	const TArray<FKzFountainSection> Sections = KzFountain::Parse(Script, TEXT("Default"));
 	if (!TestEqual(TEXT("Sections"), Sections.Num(), 2)) { return false; }
 	TestEqual(TEXT("Default title"), Sections[0].Title, TEXT("Default"));
-	TestEqual(TEXT("Title"), Sections[1].Title, TEXT("CUTSCENE: THE ORDER'S END"));
+	TestEqual(TEXT("Title"), Sections[1].Title, TEXT("CUTSCENE: THE KING'S END"));
 	TestEqual(TEXT("Asset"), Sections[1].AssetName, TEXT("DLG_End"));
 	if (!TestEqual(TEXT("Blocks"), Sections[1].Blocks.Num(), 3)) { return false; }
 
-	const FKzFountainBlock& Duncan = Sections[1].Blocks[0];
-	TestEqual(TEXT("Cue"), Duncan.Cue, TEXT("DUNCAN"));
-	TestEqual(TEXT("Text"), Duncan.Text, FString(TEXT("Hello, {Bogdan}. Second line\x2014") TEXT("done.")));
-	TestEqual(TEXT("Notes"), Duncan.Notes, TEXT("dark; Pause before.; beat; sighs; dryly"));
+	const FKzFountainBlock& Mara = Sections[1].Blocks[0];
+	TestEqual(TEXT("Cue"), Mara.Cue, TEXT("MARA"));
+	TestEqual(TEXT("Text"), Mara.Text, FString(TEXT("Hello, {Kirzo}. Second line\x2014") TEXT("done.")));
+	TestEqual(TEXT("Notes"), Mara.Notes, TEXT("dark; Pause before.; beat; sighs; dryly"));
 
 	const FKzFountainBlock& Glued = Sections[1].Blocks[1];
-	TestEqual(TEXT("Glued cue"), Glued.Cue, TEXT("BOGDAN"));
+	TestEqual(TEXT("Glued cue"), Glued.Cue, TEXT("KIRZO"));
 	TestEqual(TEXT("Glued text"), Glued.Text, TEXT("Yes."));
 	TestEqual(TEXT("Insert note"), Glued.Notes, TEXT("scared; Insert: close-up."));
 	TestTrue(TEXT("Directions only"), Sections[1].Blocks[2].Text.IsEmpty() && Sections[1].Blocks[2].Notes == TEXT("laughing"));
 
-	TestEqual(TEXT("PascalCase"), KzFountain::ToPascalCase(TEXT("LORE CHOICE - THE ORDER'S TRIBULATIONS")), FString(TEXT("LoreChoiceTheOrdersTribulations")));
-	TestEqual(TEXT("Normalize"), KzFountain::NormalizeName(TEXT("Crow Enemy")), KzFountain::NormalizeName(TEXT("CROWENEMY")));
+	TestEqual(TEXT("PascalCase"), KzFountain::ToPascalCase(TEXT("MEETING - THE KING'S ROAD")), FString(TEXT("MeetingTheKingsRoad")));
+	TestEqual(TEXT("Normalize"), KzFountain::NormalizeName(TEXT("Old Guard")), KzFountain::NormalizeName(TEXT("OLDGUARD")));
 	return true;
 }
 

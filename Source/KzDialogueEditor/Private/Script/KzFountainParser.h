@@ -31,9 +31,9 @@ namespace KzFountain
 	/** Dialogue sections of a Fountain script. Dialogue before the first section goes to one titled DefaultTitle. Sections without dialogue are dropped. */
 	TArray<FKzFountainSection> Parse(const FString& Script, const FString& DefaultTitle);
 
-	/** A cue or token reduced for matching: uppercase letters and digits only ("Crow Enemy" and "CROWENEMY" match). */
+	/** A cue or token reduced for matching: uppercase letters and digits only ("Old Guard" and "OLDGUARD" match). */
 	FString NormalizeName(const FString& Name);
 
-	/** "LORE CHOICE - THE ORDER'S TRIBULATIONS" -> "LoreChoiceTheOrdersTribulations". */
+	/** "MEETING - THE KING'S ROAD" -> "MeetingTheKingsRoad". */
 	FString ToPascalCase(const FString& Text);
 }

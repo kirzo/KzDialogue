@@ -17,7 +17,7 @@ class UKzSpeakerAsset;
 /**
  * FText::Format for dialogue and token texts. A text argument landing at the start of a sentence (start of the text, or after
  * '.', '!' or '?' but not an ellipsis, past opening quotes, brackets, inverted marks and dashes) gets a capital first letter:
- * "{Jacques:family} said it." shows "De Molay said it." Settings: bCapitalizeArgumentsAtSentenceStart.
+ * "{Kirzo:family} said it." shows "Van Dijk said it." Settings: bCapitalizeArgumentsAtSentenceStart.
  */
 KZDIALOGUE_API FText KzFormatText(const FText& Pattern, const FFormatNamedArguments& Arguments);
 

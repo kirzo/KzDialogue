@@ -162,7 +162,7 @@ namespace
 
 			if (Plan.SpeakersByToken.IsEmpty())
 			{
-				// New speakers go where the project keeps the others: next to them, or each in a folder named after its token (Characters/Bogdan/SPK_Bogdan).
+				// New speakers go where the project keeps the others: next to them, or each in a folder named after its token (Characters/Kirzo/SPK_Kirzo).
 				const FString Folder = Data.PackagePath.ToString();
 				Plan.SpeakerFolder = FPaths::GetCleanFilename(Folder).Equals(Token.ToString(), ESearchCase::IgnoreCase) ? FPaths::GetPath(Folder) / TEXT("{Token}") : Folder;
 			}

@@ -74,7 +74,7 @@ FText UKzSpeakerAsset::ResolveName(FName Part, const FKzNamedTokenOverride* Over
 		// Source-based emptiness: a keyed empty DisplayName can display a stale translation
 		// and would otherwise shadow the structured composition.
 		if (!KzIsTextSourceEmpty(DisplayName)) { return DisplayName; }
-		return ComposeStructuredName(true, true, bFamilyInDefaultName, Overrides);
+		return ComposeStructuredName(true, true, false, Overrides);
 	}
 	if (Part == TEXT("given")) { return GivenName.Resolve(EffectiveGender); }
 	if (Part == TEXT("family")) { return FamilyName.Resolve(EffectiveGender); }

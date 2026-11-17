@@ -63,7 +63,7 @@ FText KzFormatText(const FText& Pattern, const FFormatNamedArguments& Arguments)
 		return FText::Format(FTextFormat(Pattern), Arguments);
 	}
 
-	// Only an argument starting in lowercase ("de Molay") can need it: every other text keeps its plain format.
+	// Only an argument starting in lowercase ("van Dijk") can need it: every other text keeps its plain format.
 	bool bAnyLowercase = false;
 	FFormatNamedArguments Marked;
 	for (const TPair<FString, FFormatArgumentValue>& Argument : Arguments)
@@ -248,14 +248,14 @@ bool FKzFormatTextCapitalizeTest::RunTest(const FString& Parameters)
 	if (!UKzDialogueSettings::Get()->bCapitalizeArgumentsAtSentenceStart) { return true; }
 
 	FFormatNamedArguments Arguments;
-	Arguments.Add(TEXT("Name"), FText::AsCultureInvariant(TEXT("de Molay")));
+	Arguments.Add(TEXT("Name"), FText::AsCultureInvariant(TEXT("van Dijk")));
 	auto Format = [&Arguments](const TCHAR* Pattern) { return KzFormatText(FText::AsCultureInvariant(Pattern), Arguments).ToString(); };
 
-	TestEqual(TEXT("Text start"), Format(TEXT("{Name} said it.")), TEXT("De Molay said it."));
-	TestEqual(TEXT("After a period"), Format(TEXT("Read. {Name} said it.")), TEXT("Read. De Molay said it."));
-	TestEqual(TEXT("Mid sentence"), Format(TEXT("Orders of {Name}.")), TEXT("Orders of de Molay."));
-	TestEqual(TEXT("After an ellipsis"), Format(TEXT("Our... {Name}.")), TEXT("Our... de Molay."));
-	TestEqual(TEXT("Opening quote"), Format(TEXT("Well. \"{Name}!\"")), TEXT("Well. \"De Molay!\""));
+	TestEqual(TEXT("Text start"), Format(TEXT("{Name} said it.")), TEXT("Van Dijk said it."));
+	TestEqual(TEXT("After a period"), Format(TEXT("Read. {Name} said it.")), TEXT("Read. Van Dijk said it."));
+	TestEqual(TEXT("Mid sentence"), Format(TEXT("Ask {Name}.")), TEXT("Ask van Dijk."));
+	TestEqual(TEXT("After an ellipsis"), Format(TEXT("Our... {Name}.")), TEXT("Our... van Dijk."));
+	TestEqual(TEXT("Opening quote"), Format(TEXT("Well. \"{Name}!\"")), TEXT("Well. \"Van Dijk!\""));
 	return true;
 }
 

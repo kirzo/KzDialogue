@@ -15,7 +15,7 @@
  *
  * Naming: DisplayName wins when set. Otherwise the structured parts are composed with
  * the per-culture format from UKzDialogueSettings (surname-first cultures, honorifics),
- * without the family name when bFamilyInDefaultName is off.
+ * leaving the family name out: "Dr. Kirzo" by default, "{Kirzo:fullname}" for "Dr. Kirzo van Dijk".
  * Every name field is a localizable text anchored to a stable GUID-derived key, so a
  * character's name is translated once here instead of per line. Structured parts may
  * also reference a shared UKzWordAsset (family names, honorifics: common vocabulary),
@@ -50,7 +50,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText GivenName;
 
-	/** Family name (surname). Cultures like ja/zh/hu order it first via the settings' name format. A shared word asset lets siblings localize the surname once. */
+	/** Family name (surname), left out of the default name: "{Token:fullname}" and "{Token:family}" say it. Cultures like ja/zh/hu order it first via the settings' name format. A shared word asset lets siblings localize the surname once. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText FamilyName;
 
@@ -70,17 +70,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
 	FKzWordText NickName;
 
-	/** Whether the default name, shown above subtitles and by "{Token}", has the family name. Off: "Sir Duncan" by default, and "{Duncan:fullname}" where the text says "Sir Duncan Braegon". */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Speaker|Structured Name")
-	bool bFamilyInDefaultName = true;
-
 #if WITH_EDITORONLY_DATA
-	/** Other character names a script gives this speaker besides its token ("DE MOLAY" for Jacques). The script importer matches them like the token: case, spaces and extensions such as "(CONT.)" ignored. */
+	/** Other character names scripts give this speaker besides its token, such as a title or a nickname ("THE STRANGER"). The script importer matches them like the token, ignoring case, spaces and extensions such as "(CONT.)". */
 	UPROPERTY(EditAnywhere, Category = "Speaker|Script")
 	TArray<FString> ScriptNames;
 #endif
 
-	/** Localized name for the active culture: DisplayName when set, else the structured parts composed with the per-culture format, else empty. */
+	/** Localized name for the active culture: DisplayName when set, else the structured parts without the family name composed with the per-culture format, else empty. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Speaker")
 	FText GetResolvedDisplayName() const;
 

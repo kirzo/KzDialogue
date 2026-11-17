@@ -99,7 +99,7 @@ public:
 	/** Active-culture name format: the per-culture override matching the priority chain, DefaultSpeakerNameFormat otherwise. */
 	const FString& GetActiveSpeakerNameFormat() const;
 
-	/** A token or text argument starting a sentence gets a capital first letter: "{Jacques:family} said it." shows "De Molay said it." Sentences start the text or follow '.', '!' or '?' (not an ellipsis). */
+	/** A token or text argument starting a sentence gets a capital first letter: "{Kirzo:family} said it." shows "Van Dijk said it." Sentences start the text or follow '.', '!' or '?' (not an ellipsis). */
 	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
 	bool bCapitalizeArgumentsAtSentenceStart = true;
 
