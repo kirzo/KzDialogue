@@ -107,6 +107,21 @@ namespace
 		return Source ? *Source : FString();
 	}
 
+	const TCHAR* const DialoguePrefix = TEXT("DLG_");
+
+	/** Each dialogue gets a folder of its own, for its voice-over too: "Folder/MeetingTheKingsRoad/DLG_MeetingTheKingsRoad". */
+	FString DialogueFolderName(const FString& AssetName)
+	{
+		return AssetName.StartsWith(DialoguePrefix) ? AssetName.RightChop(FCString::Strlen(DialoguePrefix)) : AssetName;
+	}
+
+	/** The folder a dialogue was imported into: the one holding its own folder. */
+	FString ImportFolderOf(const FAssetData& Data)
+	{
+		const FString Path = Data.PackagePath.ToString();
+		return FPaths::GetCleanFilename(Path) == DialogueFolderName(Data.AssetName.ToString()) ? FPaths::GetPath(Path) : Path;
+	}
+
 	FString Describe(const UKzSpeakerAsset* Speaker, const FString& Text, const FString& Notes)
 	{
 		FString Out = (Speaker ? Speaker->Token.ToString() : TEXT("Narration")) + TEXT(": ") + Text;
@@ -441,13 +456,13 @@ namespace
 	}
 
 	/**
-	 * Matches each section to a dialogue in the folder, by script section and then by name, or gives it a new name, and diffs its lines.
+	 * Matches each section to a dialogue anywhere under the folder, by script section and then by name, or gives it a new name, and diffs its lines.
 	 * A folder holds one script: importing another one (a cut version, a renamed file) updates the dialogues already there.
 	 */
 	void PlanAssets(FImportPlan& Plan)
 	{
 		TArray<FAssetData> FolderAssets;
-		IAssetRegistry::GetChecked().GetAssetsByPath(FName(*Plan.Folder), FolderAssets);
+		IAssetRegistry::GetChecked().GetAssetsByPath(FName(*Plan.Folder), FolderAssets, /*bRecursive=*/true);
 
 		TArray<UKzDialogueAsset*> Unclaimed;
 		TSet<FString> TakenNames;
@@ -490,7 +505,7 @@ namespace
 		for (FPlannedAsset& Planned : Plan.Assets)
 		{
 			const FKzFountainSection& Section = *Planned.Section;
-			const FString Wanted = Section.AssetName.IsEmpty() ? TEXT("DLG_") + KzFountain::ToPascalCase(Section.Title) : Section.AssetName;
+			const FString Wanted = Section.AssetName.IsEmpty() ? DialoguePrefix + KzFountain::ToPascalCase(Section.Title) : Section.AssetName;
 			if (!Planned.Existing)
 			{
 				Planned.Existing = Claim([&Wanted](const UKzDialogueAsset& Dialogue) { return Dialogue.GetName() == Wanted; });
@@ -709,7 +724,7 @@ namespace
 			}
 			else
 			{
-				Asset = Cast<UKzDialogueAsset>(AssetTools.CreateAsset(Planned.AssetName, Plan.Folder, UKzDialogueAsset::StaticClass(), NewObject<UKzDialogueAssetFactory>()));
+				Asset = Cast<UKzDialogueAsset>(AssetTools.CreateAsset(Planned.AssetName, Plan.Folder / DialogueFolderName(Planned.AssetName), UKzDialogueAsset::StaticClass(), NewObject<UKzDialogueAssetFactory>()));
 				if (!Asset) { continue; }
 				Asset->DisplayName = Planned.Section->Title;
 				++Created;
@@ -765,9 +780,9 @@ namespace
 		for (const FAssetData& Data : Selected)
 		{
 			const UKzDialogueAsset* Dialogue = Cast<UKzDialogueAsset>(Data.GetAsset());
-			if (Dialogue && !Dialogue->ScriptSource.IsEmpty() && !ScriptByFolder.Contains(Data.PackagePath.ToString()))
+			if (Dialogue && !Dialogue->ScriptSource.IsEmpty() && !ScriptByFolder.Contains(ImportFolderOf(Data)))
 			{
-				ScriptByFolder.Add(Data.PackagePath.ToString(), Dialogue->ScriptSource);
+				ScriptByFolder.Add(ImportFolderOf(Data), Dialogue->ScriptSource);
 			}
 		}
 
