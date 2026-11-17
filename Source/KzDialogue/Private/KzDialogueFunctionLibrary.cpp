@@ -272,7 +272,7 @@ FText UKzDialogueFunctionLibrary::ResolveTextTokens(const UObject* WorldContextO
 	}
 	if (Arguments.Num() == 0) { return Text; }
 
-	return FText::Format(FTextFormat(Text), Arguments);
+	return KzFormatText(Text, Arguments);
 }
 
 FText UKzDialogueFunctionLibrary::ResolveTokenText(const UObject* WorldContextObject, const FKzTokenText& TokenText)

@@ -99,6 +99,10 @@ public:
 	/** Active-culture name format: the per-culture override matching the priority chain, DefaultSpeakerNameFormat otherwise. */
 	const FString& GetActiveSpeakerNameFormat() const;
 
+	/** A token or text argument starting a sentence gets a capital first letter: "{Jacques:family} said it." shows "De Molay said it." Sentences start the text or follow '.', '!' or '?' (not an ellipsis). */
+	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
+	bool bCapitalizeArgumentsAtSentenceStart = true;
+
 	/** Default mouth/jaw "speaking level" tuning derived from a line's audio. Speakers can override per character. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speaking")
 	FKzSpeakingLevelSettings SpeakingDefaults;

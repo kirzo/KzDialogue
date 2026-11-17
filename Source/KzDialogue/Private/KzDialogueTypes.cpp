@@ -9,6 +9,7 @@
 #include "HAL/IConsoleManager.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/TextLocalizationManager.h"
+#include "Misc/AutomationTest.h"
 
 #if !UE_BUILD_SHIPPING
 static TAutoConsoleVariable<bool> CVarMarkMissingTranslations(
@@ -35,9 +36,73 @@ static bool IsMissingTranslation(const FText& Text)
 }
 #endif
 
+namespace
+{
+	/** Marks where a lowercase text argument begins inside a formatted string. Private use, never in authored text. */
+	constexpr TCHAR ArgumentMark = 0xE000;
+
+	bool IsSentenceStart(const FString& Before)
+	{
+		int32 Index = Before.Len() - 1;
+		while (Index >= 0 && (FChar::IsWhitespace(Before[Index]) || FCString::Strchr(TEXT("\"'([\x201C\x2018\x00AB\x00BF\x00A1\x2014"), Before[Index])))
+		{
+			--Index;
+		}
+		if (Index < 0) { return true; }
+
+		const TCHAR Last = Before[Index];
+		return Last == TEXT('!') || Last == TEXT('?') || (Last == TEXT('.') && (Index == 0 || Before[Index - 1] != TEXT('.')));
+	}
+}
+
+FText KzFormatText(const FText& Pattern, const FFormatNamedArguments& Arguments)
+{
+	const UKzDialogueSettings* Settings = UKzDialogueSettings::Get();
+	if (!Settings || !Settings->bCapitalizeArgumentsAtSentenceStart)
+	{
+		return FText::Format(FTextFormat(Pattern), Arguments);
+	}
+
+	// Only an argument starting in lowercase ("de Molay") can need it: every other text keeps its plain format.
+	bool bAnyLowercase = false;
+	FFormatNamedArguments Marked;
+	for (const TPair<FString, FFormatArgumentValue>& Argument : Arguments)
+	{
+		const FString Value = Argument.Value.GetType() == EFormatArgumentType::Text ? Argument.Value.GetTextValue().ToString() : FString();
+		if (!Value.IsEmpty() && FChar::IsLower(Value[0]))
+		{
+			bAnyLowercase = true;
+			Marked.Add(Argument.Key, FText::AsCultureInvariant(FString::Chr(ArgumentMark) + Value));
+		}
+		else
+		{
+			Marked.Add(Argument.Key, Argument.Value);
+		}
+	}
+	if (!bAnyLowercase)
+	{
+		return FText::Format(FTextFormat(Pattern), Arguments);
+	}
+
+	const FString Formatted = FText::Format(FTextFormat(Pattern), Marked).ToString();
+	FString Out;
+	for (int32 Index = 0; Index < Formatted.Len(); ++Index)
+	{
+		if (Formatted[Index] != ArgumentMark)
+		{
+			Out += Formatted[Index];
+		}
+		else if (Index + 1 < Formatted.Len() && IsSentenceStart(Out))
+		{
+			Out += FText::AsCultureInvariant(Formatted.Mid(++Index, 1)).ToUpper().ToString();
+		}
+	}
+	return FText::AsCultureInvariant(Out);
+}
+
 FText FKzDialogueLine::GetFormattedText() const
 {
-	return FormatArguments.Num() > 0 ? FText::Format(FTextFormat(Text), FormatArguments) : Text;
+	return FormatArguments.Num() > 0 ? KzFormatText(Text, FormatArguments) : Text;
 }
 
 FText FKzDialogueLine::GetDisplayText() const
@@ -173,3 +238,25 @@ void FKzDialogueLineList::GetLineRefs(TArray<FKzDialogueLineRef>& OutRefs) const
 		OutRefs.Add(MoveTemp(Ref));
 	}
 }
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FKzFormatTextCapitalizeTest, "KzDialogue.Text.CapitalizeArguments", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
+
+bool FKzFormatTextCapitalizeTest::RunTest(const FString& Parameters)
+{
+	if (!UKzDialogueSettings::Get()->bCapitalizeArgumentsAtSentenceStart) { return true; }
+
+	FFormatNamedArguments Arguments;
+	Arguments.Add(TEXT("Name"), FText::AsCultureInvariant(TEXT("de Molay")));
+	auto Format = [&Arguments](const TCHAR* Pattern) { return KzFormatText(FText::AsCultureInvariant(Pattern), Arguments).ToString(); };
+
+	TestEqual(TEXT("Text start"), Format(TEXT("{Name} said it.")), TEXT("De Molay said it."));
+	TestEqual(TEXT("After a period"), Format(TEXT("Read. {Name} said it.")), TEXT("Read. De Molay said it."));
+	TestEqual(TEXT("Mid sentence"), Format(TEXT("Orders of {Name}.")), TEXT("Orders of de Molay."));
+	TestEqual(TEXT("After an ellipsis"), Format(TEXT("Our... {Name}.")), TEXT("Our... de Molay."));
+	TestEqual(TEXT("Opening quote"), Format(TEXT("Well. \"{Name}!\"")), TEXT("Well. \"De Molay!\""));
+	return true;
+}
+
+#endif
