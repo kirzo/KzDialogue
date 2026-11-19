@@ -126,6 +126,10 @@ struct KZDIALOGUE_API FKzDialogueChoiceOption
 	UPROPERTY(EditAnywhere, Category = "Option")
 	bool bDefault = false;
 
+	/** What kind of option it is, for the choice widget to style its row: one that moves the story on, one that leaves the conversation... */
+	UPROPERTY(EditAnywhere, Category = "Option", meta = (Categories = "Dialogue.Option"))
+	FGameplayTagContainer Tags;
+
 	/** Names the option's output, so its link survives reordering. */
 	UPROPERTY()
 	FGuid Id;

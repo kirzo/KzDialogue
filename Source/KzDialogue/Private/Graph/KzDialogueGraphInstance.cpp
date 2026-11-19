@@ -628,6 +628,9 @@ bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& C
 		Offered.Index = Index;
 		Offered.bAvailable = bAvailable;
 		Offered.bDefault = Option.bDefault;
+		Offered.Tags = Option.Tags;
+		Offered.bVisited = WasVisited(Option.Id, false);
+		Offered.bEverVisited = WasVisited(Option.Id, true);
 		if (Subsystem)
 		{
 			Subsystem->ResolveLineRef(Option.Line, Offered.Line);
@@ -813,6 +816,9 @@ void UKzDialogueGraphInstance::FillNetEntry(FKzDialogueNetGraphEntry& Entry) con
 		NetOption.Index = Option.Index;
 		NetOption.bAvailable = Option.bAvailable;
 		NetOption.bDefault = Option.bDefault;
+		NetOption.bVisited = Option.bVisited;
+		NetOption.bEverVisited = Option.bEverVisited;
+		NetOption.Tags = Option.Tags;
 		NetOption.Line = FKzDialogueNetLine(Option.Line);
 	}
 }
@@ -858,6 +864,9 @@ void UKzDialogueGraphInstance::ApplyNetEntry(const FKzDialogueNetGraphEntry& Ent
 		Offered.Index = NetOption.Index;
 		Offered.bAvailable = NetOption.bAvailable;
 		Offered.bDefault = NetOption.bDefault;
+		Offered.bVisited = NetOption.bVisited;
+		Offered.bEverVisited = NetOption.bEverVisited;
+		Offered.Tags = NetOption.Tags;
 		NetOption.Line.Resolve(Offered.Line);
 	}
 	Step = EStep::Choosing;

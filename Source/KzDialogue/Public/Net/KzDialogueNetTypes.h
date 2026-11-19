@@ -182,6 +182,15 @@ struct KZDIALOGUE_API FKzDialogueNetOption
 	bool bDefault = false;
 
 	UPROPERTY()
+	bool bVisited = false;
+
+	UPROPERTY()
+	bool bEverVisited = false;
+
+	UPROPERTY()
+	FGameplayTagContainer Tags;
+
+	UPROPERTY()
 	FKzDialogueNetLine Line;
 };
 

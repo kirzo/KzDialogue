@@ -10,6 +10,7 @@
 
 class UPanelWidget;
 class UTextBlock;
+class UWidgetAnimation;
 class UKzChoiceWidget;
 class UKzDialogueChoiceListener;
 
@@ -63,6 +64,16 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Unhighlighted"))
 	void ReceiveUnhighlighted();
 
+	/** The option was chosen: the place for its sound. Its Chosen Animation, if any, already plays. */
+	UFUNCTION(BlueprintImplementableEvent, meta = (DisplayName = "On Chosen"))
+	void ReceiveChosen();
+
+	/** Played when the option is chosen; the conversation goes on when it ends, and the options take no input meanwhile. Optional. */
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "Dialogue|Choices", meta = (BindWidgetAnimOptional))
+	TObjectPtr<UWidgetAnimation> ChosenAnimation;
+
+	friend class UKzChoiceWidget;
+
 	virtual void NativeConstruct() override;
 	virtual void NativeOnMouseEnter(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
@@ -89,7 +100,7 @@ class KZDIALOGUE_API UKzChoiceWidget : public UUserWidget
 	GENERATED_BODY()
 
 public:
-	/** Chooses one of the options shown, by its Index. False when none are shown or that option is not available. */
+	/** Chooses one of the options shown, by its Index, after its row's Chosen Animation. False when none are shown, that option is not available, or one is already being chosen. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
 	bool ChooseOption(int32 Index);
 
@@ -189,6 +200,11 @@ private:
 	UFUNCTION()
 	void HandleHideOptions(UKzDialogueGraphInstance* Instance);
 
+	UFUNCTION()
+	void HandleChosenAnimationFinished();
+
+	UKzChoiceOption* FindRow(int32 Index) const;
+
 	/** Moves the mark by Step places, wrapping with Loop Navigation. */
 	void MoveHighlight(int32 Step);
 
@@ -208,4 +224,7 @@ private:
 
 	/** Place in ShownOptions of the marked option. */
 	int32 HighlightedPosition = INDEX_NONE;
+
+	/** The Index of the option whose Chosen Animation plays, to choose when it ends. */
+	int32 PendingChoice = INDEX_NONE;
 };

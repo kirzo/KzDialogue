@@ -5,6 +5,7 @@
 #include "KzSubtitleWidget.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "Animation/WidgetAnimation.h"
 #include "InputCoreTypes.h"
 
 // ---------------------------------------------------------------------------------------
@@ -132,7 +133,47 @@ void UKzChoiceWidget::NativeDestruct()
 
 bool UKzChoiceWidget::ChooseOption(int32 Index)
 {
-	return Listener && Listener->ChooseOption(Index);
+	const FKzDialogueGraphOption* Shown = ShownOptions.FindByPredicate([Index](const FKzDialogueGraphOption& Option) { return Option.Index == Index; });
+	if (!Listener || PendingChoice != INDEX_NONE || !Shown || !Shown->bAvailable)
+	{
+		return false;
+	}
+
+	UKzChoiceOption* Row = FindRow(Index);
+	if (!Row || !Row->ChosenAnimation)
+	{
+		if (Row) { Row->ReceiveChosen(); }
+		return Listener->ChooseOption(Index);
+	}
+
+	// The conversation goes on once the row has shown it was chosen.
+	PendingChoice = Index;
+	Row->ReceiveChosen();
+	FWidgetAnimationDynamicEvent Finished;
+	Finished.BindDynamic(this, &UKzChoiceWidget::HandleChosenAnimationFinished);
+	Row->BindToAnimationFinished(Row->ChosenAnimation, Finished);
+	Row->PlayAnimation(Row->ChosenAnimation);
+	return true;
+}
+
+void UKzChoiceWidget::HandleChosenAnimationFinished()
+{
+	const int32 Index = PendingChoice;
+	PendingChoice = INDEX_NONE;
+	if (UKzChoiceOption* Row = FindRow(Index))
+	{
+		Row->UnbindAllFromAnimationFinished(Row->ChosenAnimation);
+	}
+	if (Listener && Index != INDEX_NONE)
+	{
+		Listener->ChooseOption(Index);
+	}
+}
+
+UKzChoiceOption* UKzChoiceWidget::FindRow(int32 Index) const
+{
+	const TObjectPtr<UKzChoiceOption>* Found = OptionWidgets.FindByPredicate([Index](const UKzChoiceOption* Row) { return Row && Row->GetOption().Index == Index; });
+	return Found ? Found->Get() : nullptr;
 }
 
 void UKzChoiceWidget::Next()
@@ -183,9 +224,7 @@ TArray<UKzChoiceOption*> UKzChoiceWidget::GetOptionWidgets() const
 
 UKzChoiceOption* UKzChoiceWidget::GetDefaultOptionWidget() const
 {
-	const int32 Index = GetDefaultOption(ShownOptions);
-	const TObjectPtr<UKzChoiceOption>* Found = OptionWidgets.FindByPredicate([Index](const UKzChoiceOption* Row) { return Row && Row->GetOption().Index == Index; });
-	return Found ? Found->Get() : nullptr;
+	return FindRow(GetDefaultOption(ShownOptions));
 }
 
 int32 UKzChoiceWidget::GetDefaultOption_Implementation(const TArray<FKzDialogueGraphOption>& Options) const
@@ -202,6 +241,7 @@ void UKzChoiceWidget::HandleShowOptions(UKzDialogueGraphInstance* Instance, cons
 	ShownInstance = Instance;
 	ShownOptions = Options;
 	HighlightedPosition = INDEX_NONE;
+	PendingChoice = INDEX_NONE;
 
 	if (OptionsPanel && OptionClass)
 	{
@@ -232,6 +272,7 @@ void UKzChoiceWidget::HandleHideOptions(UKzDialogueGraphInstance* Instance)
 	ShownOptions.Reset();
 	ShownInstance.Reset();
 	HighlightedPosition = INDEX_NONE;
+	PendingChoice = INDEX_NONE;
 	ReceiveHideOptions(Instance);
 	OnOptionsHidden.Broadcast(Instance);
 }
@@ -255,7 +296,8 @@ void UKzChoiceWidget::MoveHighlight(int32 Step)
 
 void UKzChoiceWidget::SetHighlightedPosition(int32 Position)
 {
-	if (Position == HighlightedPosition || !ShownOptions.IsValidIndex(Position))
+	// The mark stays on the option being chosen.
+	if (Position == HighlightedPosition || !ShownOptions.IsValidIndex(Position) || PendingChoice != INDEX_NONE)
 	{
 		return;
 	}

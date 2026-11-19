@@ -63,6 +63,18 @@ struct KZDIALOGUE_API FKzDialogueGraphOption
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
 	bool bDefault = false;
 
+	/** The option's Tags in the Choice: what kind of option it is, to style its row. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
+	FGameplayTagContainer Tags;
+
+	/** Chosen before in this play: a topic already heard in this conversation. */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
+	bool bVisited = false;
+
+	/** Chosen before in any play of the graph, as the dialogue memory remembers it (and the save keeps it). */
+	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
+	bool bEverVisited = false;
+
 	/** What SelectOption takes for it. */
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue Graph")
 	int32 Index = INDEX_NONE;
