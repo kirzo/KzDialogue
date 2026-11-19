@@ -165,6 +165,14 @@ Each line can carry a timeline of notifies, edited in the line's details with au
 
 Add a **Kz Bark** component to an actor and point its **Bark** at a line or, better, an alias. It barks every **Min Interval** to **Max Interval** seconds on its channel, and keeps going after a bark is interrupted. Control it with `StartBarking`, `StopBarking`, `PauseBarking`, `ResumeBarking` and `BarkNow`.
 
+### 🔀 Dialogue graphs and choices
+
+A **Dialogue Graph** walks nodes from an entry: **Line**, **Choice**, **Branch**, **Random**, **Event**, **Action**, **Wait**, **Sub Graph** and **Exit**. Start it with **Start Dialogue Graph**; it ends through the Exit it reached, whose name gameplay receives.
+
+* A **Choice** offers options, each with its condition, a **Default** to mark first and **Tags** saying what kind of option it is (one that moves the story on, one that leaves), and goes on through the one chosen. An option leading back to the Choice makes a menu of topics.
+* `KzChoiceWidget` shows the options of its channels, a row (`KzChoiceOption`) each, navigated with **Previous Option**, **Next Option** and **Accept**. Each row gets its option with its Tags and whether it was chosen before, in this play (`bVisited`) or ever (`bEverVisited`), to style it. A row's **Chosen Animation** plays when it is chosen, and the conversation goes on when it ends.
+* **Skip** jumps to the next Choice, or to the end: lines go by unshown but count as seen, Waits do not wait, and Events and Actions still run, with **Is Skipping** for listeners to cut short what they start.
+
 ### 🎞️ Sequencer
 
 1. In a Level Sequence, **+ Track > Dialogue Track**.
