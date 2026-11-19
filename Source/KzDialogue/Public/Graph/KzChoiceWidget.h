@@ -108,6 +108,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
 	void Next();
 
+	/** Skips the conversation up to its next Choice, or to its end, as the graph's Skip does. False when there is nothing to skip. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
+	bool Skip();
+
 	/** Moves the mark to the option before; with Loop Navigation it wraps around. Unavailable options are marked too, as in KzUI. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
 	void PreviousOption();

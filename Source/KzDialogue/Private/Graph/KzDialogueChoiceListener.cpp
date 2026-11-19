@@ -102,6 +102,12 @@ void UKzDialogueChoiceListener::Next()
 	}
 }
 
+bool UKzDialogueChoiceListener::Skip()
+{
+	UKzDialogueGraphInstance* Instance = CurrentInstance.Get();
+	return Instance && Instance->Skip();
+}
+
 TArray<FKzDialogueGraphOption> UKzDialogueChoiceListener::GetOptions() const
 {
 	const UKzDialogueGraphInstance* Instance = ChoosingInstance.Get();

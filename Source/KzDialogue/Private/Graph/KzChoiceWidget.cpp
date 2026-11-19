@@ -184,6 +184,11 @@ void UKzChoiceWidget::Next()
 	}
 }
 
+bool UKzChoiceWidget::Skip()
+{
+	return Listener && Listener->Skip();
+}
+
 void UKzChoiceWidget::PreviousOption()
 {
 	MoveHighlight(-1);

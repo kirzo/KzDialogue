@@ -212,6 +212,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
 	void Next();
 
+	/**
+	 * Skips the rest of the conversation up to the next Choice, or to the end. Lines go by unshown but count as seen, Waits do not wait,
+	 * and Events and Actions still run: an Event listener checks Is Skipping to cut short what it starts. The options come with no line held
+	 * on screen. False when there is nothing to skip (a Choice waits, the play is not running) or on a copy of a server's play.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
+	bool Skip();
+
+	/** A Skip is walking the graph. */
+	UFUNCTION(BlueprintPure, Category = "Dialogue|Graph")
+	bool IsSkipping() const { return bSkipping; }
+
 	/** Releases a Wait whose Continue Tag matches Tag; a Wait without one takes any. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
 	void Continue(FGameplayTag Tag);
@@ -393,6 +405,11 @@ private:
 
 	bool bStarted = false;
 	bool bFinished = false;
+
+	bool bSkipping = false;
+
+	/** A Skip reached the Choice offered: the player lets go of the line it cut short instead of holding it as the question. */
+	bool bSkippedToChoice = false;
 
 	bool bProxy = false;
 	int32 NetPlayId = 0;

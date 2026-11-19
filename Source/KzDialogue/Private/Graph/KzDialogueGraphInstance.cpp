@@ -276,6 +276,37 @@ void UKzDialogueGraphInstance::Next()
 	}
 }
 
+bool UKzDialogueGraphInstance::Skip()
+{
+	if (bProxy)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Skip refused on a copy of a server's dialogue graph play; the server decides it."));
+		return false;
+	}
+	if (!IsRunning() || Step == EStep::Choosing || Step == EStep::Ended)
+	{
+		return false;
+	}
+
+	bSkipping = true;
+	if (Step == EStep::Waiting)
+	{
+		HandleWaitElapsed();
+	}
+	else if (Step == EStep::Ready)
+	{
+		// A line already found but not shown yet goes by too.
+		if (UKzDialogueMemorySubsystem* Memory = GetMemory()) { Memory->RecordLinePresented(PendingLine); }
+		Step = EStep::Passed;
+		Leave(DefaultOutput);
+	}
+	else if (Player && bPlaying)
+	{
+		Player->SkipLine();
+	}
+	return true;
+}
+
 void UKzDialogueGraphInstance::Continue(FGameplayTag Tag)
 {
 	if (bProxy)
@@ -403,7 +434,7 @@ FKzDialogueLine UKzDialogueGraphInstance::PeekLine() const
 bool UKzDialogueGraphInstance::HoldsLine()
 {
 	HasLine();
-	return Step == EStep::Choosing;
+	return Step == EStep::Choosing && !bSkippedToChoice;
 }
 
 void UKzDialogueGraphInstance::Leave(FName Output)
@@ -440,16 +471,25 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		{
 			if (Subsystem && Subsystem->ResolveLineRef(Line->Line, PendingLine))
 			{
-				Step = EStep::Ready;
-				return;
+				if (!bSkipping)
+				{
+					Step = EStep::Ready;
+					return;
+				}
+				if (UKzDialogueMemorySubsystem* Memory = GetMemory()) { Memory->RecordLinePresented(PendingLine); }
 			}
-			UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s': a Line node resolves to nothing; skipping it."), *Graph->GetName());
+			else
+			{
+				UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s': a Line node resolves to nothing; skipping it."), *Graph->GetName());
+			}
 			Target = FindTarget(Node, DefaultOutput);
 		}
 		else if (const FKzDialogueGraphNode_Choice* Choice = Data.GetNode<FKzDialogueGraphNode_Choice>(Node))
 		{
 			if (OfferOptions(*Choice, Choice->TimeLimit))
 			{
+				bSkippedToChoice = bSkipping;
+				bSkipping = false;
 				return;
 			}
 			// Nothing to offer: the way out is the one for no answer.
@@ -511,8 +551,12 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else if (const FKzDialogueGraphNode_Wait* Wait = Data.GetNode<FKzDialogueGraphNode_Wait>(Node))
 		{
-			StartWait(Wait->Seconds);
-			return;
+			if (!bSkipping)
+			{
+				StartWait(Wait->Seconds);
+				return;
+			}
+			Target = FindTarget(Node, DefaultOutput);
 		}
 		else if (const FKzDialogueGraphNode_SubGraph* SubGraph = Data.GetNode<FKzDialogueGraphNode_SubGraph>(Node))
 		{
@@ -662,6 +706,7 @@ void UKzDialogueGraphInstance::WithdrawOptions()
 	{
 		GetWorld()->GetTimerManager().ClearTimer(StepTimer);
 	}
+	bSkippedToChoice = false;
 	if (!Options.IsEmpty())
 	{
 		Options.Reset();
@@ -693,6 +738,7 @@ void UKzDialogueGraphInstance::EndWalk(FName Exit)
 {
 	ExitName = Exit;
 	Step = EStep::Ended;
+	bSkipping = false;
 	WithdrawOptions();
 }
 

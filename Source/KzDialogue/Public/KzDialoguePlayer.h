@@ -212,6 +212,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void Next();
 
+	/** Ends the showing line now, even halfway through its reveal, as a skip does. Not on a copy of a server's dialogue. */
+	void SkipLine();
+
 	/** Lets go of a line the provider held on screen (HoldsLine), which then leaves as if its time had run out. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Player")
 	void ReleaseHeldLine();

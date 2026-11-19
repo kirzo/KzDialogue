@@ -48,6 +48,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
 	void Next();
 
+	/** Skips the conversation up to its next Choice, or to its end, as the graph's Skip does. False when there is nothing to skip. */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
+	bool Skip();
+
 	/** The options shown; empty when none are. */
 	UFUNCTION(BlueprintPure, Category = "Dialogue|Choices")
 	TArray<FKzDialogueGraphOption> GetOptions() const;

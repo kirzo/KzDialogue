@@ -260,6 +260,14 @@ void UKzDialoguePlayer::Next()
 	LeaveLine();
 }
 
+void UKzDialoguePlayer::SkipLine()
+{
+	if (!bPaused && !bHoldingLine && !bProxy)
+	{
+		LeaveLine();
+	}
+}
+
 void UKzDialoguePlayer::LeaveLine()
 {
 	if (State == EKzDialogueState::LineEntering && !bLinePresented)
