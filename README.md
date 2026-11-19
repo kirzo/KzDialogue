@@ -169,9 +169,9 @@ Add a **Kz Bark** component to an actor and point its **Bark** at a line or, bet
 
 A **Dialogue Graph** walks nodes from an entry: **Line**, **Choice**, **Branch**, **Random**, **Event**, **Action**, **Wait**, **Sub Graph** and **Exit**. Start it with **Start Dialogue Graph**; it ends through the Exit it reached, whose name gameplay receives.
 
-* A **Choice** offers options, each with its condition, a **Default** to mark first and **Tags** saying what kind of option it is (one that moves the story on, one that leaves), and goes on through the one chosen. An option leading back to the Choice makes a menu of topics.
+* A **Choice** offers options, each with its condition, a **Default** to mark first and **Tags** saying what kind of option it is (one that moves the story on, one that leaves), and goes on through the one chosen. An option leading back to the Choice makes a menu of topics. Its **Idle Line**, a line or an alias, is said while the options wait (after **Idle Delay**, then every **Idle Interval**); the options stay, and choosing cuts it short.
 * `KzChoiceWidget` shows the options of its channels, a row (`KzChoiceOption`) each, navigated with **Previous Option**, **Next Option** and **Accept**. Each row gets its option with its Tags and whether it was chosen before, in this play (`bVisited`) or ever (`bEverVisited`), to style it. A row's **Chosen Animation** plays when it is chosen, and the conversation goes on when it ends.
-* **Skip** jumps to the next Choice, or to the end: lines go by unshown but count as seen, Waits do not wait, and Events and Actions still run, with **Is Skipping** for listeners to cut short what they start.
+* **Skip** jumps to the next Choice, or to the end: lines go by unshown but count as seen, Waits do not wait, and Events and Actions still run, with **Is Skipping** for listeners to cut short what they start. **On Skipped** (on the play, and **On Dialogue Graph Skipped** on the subsystem) fires as a Skip starts, to cut what is already running, such as a cinematic an Event started.
 
 ### 🎞️ Sequencer
 

@@ -168,6 +168,7 @@ struct KZDIALOGUE_API FKzDialogueGraphState
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphOptions, UKzDialogueGraphInstance*, Instance, const TArray<FKzDialogueGraphOption>&, Options);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueGraphOptionsWithdrawn, UKzDialogueGraphInstance*, Instance);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphEvent, UKzDialogueGraphInstance*, Instance, FGameplayTag, Event);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueGraphSkipped, UKzDialogueGraphInstance*, Instance);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FKzOnDialogueGraphEnded, UKzDialogueGraphInstance*, Instance, FName, Exit, bool, bInterrupted);
 
 /**
@@ -266,6 +267,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Graph")
 	FKzOnDialogueGraphEvent OnEvent;
 
+	/** A Skip starts, before it walks on: the moment to cut short what the play started and still runs, such as a cinematic. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Graph")
+	FKzOnDialogueGraphSkipped OnSkipped;
+
 	/** The play ended, through the Exit with that name (none without one), or interrupted. */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Graph")
 	FKzOnDialogueGraphEnded OnEnded;
@@ -352,6 +357,12 @@ private:
 	void HandleChoiceTimeout();
 	void HandleWaitElapsed();
 
+	/** Counts down to the idle line of the Choice offered, when it has one. */
+	void StartIdleTimer(float Seconds);
+
+	/** Hands the Choice's idle line to the player as its next line, the options staying offered. */
+	void HandleIdleTimer();
+
 	UFUNCTION()
 	void HandleDialogueStarted(UKzDialoguePlayer* InPlayer);
 
@@ -410,6 +421,14 @@ private:
 
 	/** A Skip reached the Choice offered: the player lets go of the line it cut short instead of holding it as the question. */
 	bool bSkippedToChoice = false;
+
+	FTimerHandle IdleTimer;
+
+	/** The Choice's idle line waits in PendingLine for the player to take it. */
+	bool bIdleLineDue = false;
+
+	/** The player is saying the Choice's idle line. */
+	bool bSayingIdleLine = false;
 
 	bool bProxy = false;
 	int32 NetPlayId = 0;

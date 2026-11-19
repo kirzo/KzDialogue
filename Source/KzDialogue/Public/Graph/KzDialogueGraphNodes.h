@@ -150,6 +150,18 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Choice : public FKzDialogueGraphStep
 	UPROPERTY(EditAnywhere, Category = "Choice", meta = (ClampMin = "0", Units = "Seconds"))
 	float TimeLimit = 0.0f;
 
+	/** Said while the options wait for an answer, after Idle Delay and then every Idle Interval: a line, or an alias for a different one each time. The options stay; choosing cuts it short. Empty says nothing. */
+	UPROPERTY(EditAnywhere, Category = "Choice|Idle", meta = (InlineLine))
+	FKzDialogueLineRef IdleLine;
+
+	/** Seconds the options wait before the first idle line. */
+	UPROPERTY(EditAnywhere, Category = "Choice|Idle", meta = (ClampMin = "0", Units = "Seconds"))
+	float IdleDelay = 10.0f;
+
+	/** Seconds after an idle line ends before the next one. Zero says it once. */
+	UPROPERTY(EditAnywhere, Category = "Choice|Idle", meta = (ClampMin = "0", Units = "Seconds"))
+	float IdleInterval = 15.0f;
+
 	static FName GetOptionOutput(const FKzDialogueChoiceOption& Option) { return FName(Option.Id.ToString(EGuidFormats::Digits)); }
 
 #if WITH_EDITOR

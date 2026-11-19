@@ -289,6 +289,17 @@ bool UKzDialogueGraphInstance::Skip()
 	}
 
 	bSkipping = true;
+	OnSkipped.Broadcast(this);
+	if (UKzDialogueSubsystem* Subsystem = GetSubsystem())
+	{
+		Subsystem->OnDialogueGraphSkipped.Broadcast(this);
+	}
+	// A listener may have stopped the play.
+	if (bFinished || Step == EStep::Ended)
+	{
+		return true;
+	}
+
 	if (Step == EStep::Waiting)
 	{
 		HandleWaitElapsed();
@@ -389,6 +400,10 @@ UWorld* UKzDialogueGraphInstance::GetWorld() const
 
 bool UKzDialogueGraphInstance::HasLine()
 {
+	if (Step == EStep::Choosing)
+	{
+		return bIdleLineDue;
+	}
 	if (Step == EStep::Passed && ResumedTimeLeft >= 0.0f)
 	{
 		TakeUpResumedNode();
@@ -402,6 +417,12 @@ bool UKzDialogueGraphInstance::HasLine()
 
 FKzDialogueLine UKzDialogueGraphInstance::TakeLine()
 {
+	if (Step == EStep::Choosing && bIdleLineDue)
+	{
+		bIdleLineDue = false;
+		bSayingIdleLine = true;
+		return MoveTemp(PendingLine);
+	}
 	if (!HasLine())
 	{
 		return FKzDialogueLine();
@@ -434,6 +455,16 @@ FKzDialogueLine UKzDialogueGraphInstance::PeekLine() const
 bool UKzDialogueGraphInstance::HoldsLine()
 {
 	HasLine();
+	if (bSayingIdleLine && Step == EStep::Choosing)
+	{
+		// The idle line ended with the options still waiting: count down to the next one.
+		bSayingIdleLine = false;
+		const FKzDialogueGraphNode_Choice* Choice = Graph->GetData().GetNode<FKzDialogueGraphNode_Choice>(Node);
+		if (Choice && Choice->IdleInterval > 0.0f)
+		{
+			StartIdleTimer(Choice->IdleInterval);
+		}
+	}
 	return Step == EStep::Choosing && !bSkippedToChoice;
 }
 
@@ -695,6 +726,7 @@ bool UKzDialogueGraphInstance::OfferOptions(const FKzDialogueGraphNode_Choice& C
 	}
 	++NetOfferSerial;
 	ChoiceEndTime = TimeLimit > 0.0f && Subsystem ? Subsystem->GetServerTime() + TimeLimit : 0.0;
+	StartIdleTimer(Choice.IdleDelay);
 	PublishNet();
 	OnOptionsOffered.Broadcast(this, Options);
 	return true;
@@ -705,8 +737,10 @@ void UKzDialogueGraphInstance::WithdrawOptions()
 	if (GetWorld())
 	{
 		GetWorld()->GetTimerManager().ClearTimer(StepTimer);
+		GetWorld()->GetTimerManager().ClearTimer(IdleTimer);
 	}
 	bSkippedToChoice = false;
+	bIdleLineDue = false;
 	if (!Options.IsEmpty())
 	{
 		Options.Reset();
@@ -748,6 +782,43 @@ void UKzDialogueGraphInstance::Proceed()
 	{
 		return;
 	}
+	if (bSayingIdleLine)
+	{
+		// The idle line gives way to what the answer leads to.
+		bSayingIdleLine = false;
+		Player->SkipLine();
+		return;
+	}
+	if (Player->IsHoldingLine())
+	{
+		Player->ReleaseHeldLine();
+	}
+	else if (Player->GetState() == EKzDialogueState::Waiting)
+	{
+		Player->ResumeWaiting();
+	}
+}
+
+void UKzDialogueGraphInstance::StartIdleTimer(float Seconds)
+{
+	const FKzDialogueGraphNode_Choice* Choice = Graph ? Graph->GetData().GetNode<FKzDialogueGraphNode_Choice>(Node) : nullptr;
+	if (Choice && Choice->IdleLine.IsValid() && GetWorld())
+	{
+		GetWorld()->GetTimerManager().SetTimer(IdleTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleIdleTimer), FMath::Max(Seconds, 0.01f), false);
+	}
+}
+
+void UKzDialogueGraphInstance::HandleIdleTimer()
+{
+	const FKzDialogueGraphNode_Choice* Choice = Step == EStep::Choosing ? Graph->GetData().GetNode<FKzDialogueGraphNode_Choice>(Node) : nullptr;
+	UKzDialogueSubsystem* Subsystem = GetSubsystem();
+	if (!Choice || !Subsystem || !Player || !bPlaying || !Subsystem->ResolveLineRef(Choice->IdleLine, PendingLine))
+	{
+		return;
+	}
+
+	// The player takes it as its next line, the options staying offered: the question held on screen leaves for it.
+	bIdleLineDue = true;
 	if (Player->IsHoldingLine())
 	{
 		Player->ReleaseHeldLine();

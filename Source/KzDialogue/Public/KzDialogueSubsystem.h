@@ -31,6 +31,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnQueuedDialogueRequest, FGamepl
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnDialogueGraphStarted, UKzDialogueGraphInstance*, Instance);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FKzOnDialogueGraphEventSent, UKzDialogueGraphInstance*, Instance, FGameplayTag, Event);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FKzOnAnyDialogueGraphSkipped, UKzDialogueGraphInstance*, Instance);
 
 /** A request waiting for its busy channel (FKzDialogueChannelDefinition::BusyPolicy), already resolved to a provider. */
 USTRUCT()
@@ -188,6 +189,10 @@ public:
 	/** An Event node of any dialogue graph fired, for listeners of every graph (quests, achievements). */
 	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
 	FKzOnDialogueGraphEventSent OnDialogueGraphEvent;
+
+	/** A Skip of any dialogue graph starts, for whoever plays what its Events started (a cinematic) to cut it short. */
+	UPROPERTY(BlueprintAssignable, Category = "Dialogue|Subsystem")
+	FKzOnAnyDialogueGraphSkipped OnDialogueGraphSkipped;
 
 	/** Resolves a line, or one pick of an alias (which counts against its selection and cooldown), with its timeline. False when it resolves to nothing. */
 	bool ResolveLineRef(const FKzDialogueLineRef& Ref, FKzDialogueLine& OutLine);
