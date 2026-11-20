@@ -55,7 +55,16 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 		Set(*FString::Printf(TEXT("ClassIcon.%s"), Pair[0]), new FSlateVectorImageBrush(EngineAssetIcons / Pair[1] + TEXT(".svg"), IconSize));
 	}
 
-	Set("Kz.Dialogue.Node.Sequence", new FSlateVectorImageBrush(EngineAssetIcons / TEXT("LevelSequenceActor_16.svg"), IconSize));
+	// KzDialogueScriptable's tasks, from its own Resources: what they play, with Play Level Sequence's play badge
+	if (const TSharedPtr<IPlugin> Scriptable = IPluginManager::Get().FindEnabledPlugin(TEXT("KzDialogueScriptable")))
+	{
+		for (const TCHAR* const Task : { TEXT("ScriptableTask_PlayDialogueLine"), TEXT("ScriptableTask_PlayDialogueAsset"), TEXT("ScriptableTask_PlayDialogueGraph") })
+		{
+			Set(*FString::Printf(TEXT("ClassIcon.%s"), Task), new FSlateVectorImageBrush(Scriptable->GetBaseDir() / TEXT("Resources/Icons") / Task + TEXT(".svg"), IconSize));
+		}
+	}
+
+	Set("Kz.Dialogue.Node.Sequence",new FSlateVectorImageBrush(EngineAssetIcons / TEXT("LevelSequenceActor_16.svg"), IconSize));
 
 	// Dialogue graph nodes, next to their titles; Random takes the Chance dice and Sub Graph the graph asset's icon
 	for (const TCHAR* const Node : { TEXT("Entry"), TEXT("Line"), TEXT("Choice"), TEXT("Branch"), TEXT("Event"), TEXT("Action"), TEXT("Wait"), TEXT("Exit") })
