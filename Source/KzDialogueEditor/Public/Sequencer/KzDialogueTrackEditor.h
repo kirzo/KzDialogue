@@ -9,7 +9,7 @@
 /**
  * Track editor for UMovieSceneKzDialogueTrack. Adds:
  *   - Add Track menu entry under "Tracks" in the Sequencer
- *   - Section creation: pick a line from the asset bound to the track
+ *   - Section creation: pick a line from the asset bound to the track, or Add All Lines from the track's context menu
  *   - Outliner icon and native-style "+ Section" button
  */
 class FKzDialogueTrackEditor : public FMovieSceneTrackEditor
@@ -33,6 +33,12 @@ public:
 private:
 	void HandleAddTrackMenuEntry();
 	void HandleAddSection(FKzDialogueAssetReference Reference, float DefaultDurationSeconds, class UMovieSceneKzDialogueTrack* Track);
+	void HandleAddAllLines(class UMovieSceneKzDialogueTrack* Track);
+
+	FFrameNumber GetPlayhead(const class UMovieScene& MovieScene) const;
+
+	/** Adds a section for the line from Start, Seconds long, and returns where it ends. */
+	FFrameNumber AddLineSection(class UMovieSceneKzDialogueTrack* Track, const FGuid& LineId, FFrameNumber Start, float Seconds);
 
 	TSharedRef<SWidget> BuildAddSectionMenu(class UMovieSceneKzDialogueTrack* Track);
 };

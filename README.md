@@ -180,7 +180,7 @@ A **Dialogue Graph** walks nodes from an entry: **Line**, **Choice**, **Branch**
 
 1. In a Level Sequence, **+ Track > Dialogue Track**.
 2. Set the track's **Dialogue Asset** and **Channel** in the details panel.
-3. Use **+ Section** on the track to pick a line from a searchable list.
+3. Use **+ Section** on the track to pick a line from a searchable list, or right-click the track, **Add All Lines**, to lay out the lines not on it yet one after another from the playhead.
 4. The section's length is the line's time on screen. **Suppress Audio** leaves the audio to the sequence's own tracks.
 
 ### 📝 Importing scripts

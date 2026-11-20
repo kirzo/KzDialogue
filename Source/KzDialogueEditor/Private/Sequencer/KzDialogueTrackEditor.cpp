@@ -8,6 +8,8 @@
 #include "Sequencer/MovieSceneKzDialogueTrack.h"
 #include "Sequencer/MovieSceneKzDialogueSection.h"
 
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Sound/SoundBase.h"
 #include "ISequencer.h"
 #include "ISequencerSection.h"
 #include "SequencerUtilities.h"
@@ -87,6 +89,14 @@ void FKzDialogueTrackEditor::BuildTrackContextMenu(FMenuBuilder& MenuBuilder, UM
 	UMovieSceneKzDialogueTrack* DialogueTrack = Cast<UMovieSceneKzDialogueTrack>(Track);
 	if (!DialogueTrack) { return; }
 
+	MenuBuilder.AddMenuEntry(
+		LOCTEXT("AddAllLines", "Add All Lines"),
+		LOCTEXT("AddAllLinesTip", "Lays the asset's lines that are not on the track yet one after another from the playhead, each as long as it lasts, and stretches the playback range to fit them."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateSP(this, &FKzDialogueTrackEditor::HandleAddAllLines, DialogueTrack),
+			FCanExecuteAction::CreateLambda([DialogueTrack] { return IsValid(DialogueTrack->DialogueAsset); })));
+
 	MenuBuilder.AddSubMenu(
 		LOCTEXT("AddSectionSub", "Add Line Section"),
 		LOCTEXT("AddSectionSubTip", "Add a section for a specific line from the asset"),
@@ -134,30 +144,74 @@ void FKzDialogueTrackEditor::HandleAddSection(FKzDialogueAssetReference Referenc
 	if (!IsValid(Track) || !Track->GetTypedOuter<UMovieScene>()) { return; }
 	if (Reference.bIsAlias) { return; } // sequencer rejects aliases
 
-	const FGuid LineId = Reference.Id;
-
-	UMovieScene* MovieScene = Track->GetTypedOuter<UMovieScene>();
-	const FFrameRate TickResolution = MovieScene->GetTickResolution();
-
-	TSharedPtr<ISequencer> SequencerPin = GetSequencer();
-	const FFrameNumber StartFrame = SequencerPin.IsValid()
-		? SequencerPin->GetLocalTime().Time.FrameNumber
-		: MovieScene->GetPlaybackRange().GetLowerBoundValue();
-
-	const FFrameNumber EndFrame = StartFrame + (DefaultDurationSeconds * TickResolution).RoundToFrame();
-
 	const FScopedTransaction Transaction(LOCTEXT("AddSectionTrans", "Add Dialogue Section"));
 	Track->Modify();
+	AddLineSection(Track, Reference.Id, GetPlayhead(*Track->GetTypedOuter<UMovieScene>()), DefaultDurationSeconds);
 
-	UMovieSceneKzDialogueSection* Section = NewObject<UMovieSceneKzDialogueSection>(Track, NAME_None, RF_Transactional);
-	Section->LineId = LineId;
-	Section->SetRange(TRange<FFrameNumber>(StartFrame, EndFrame));
-	Track->AddSection(*Section);
-
-	if (SequencerPin.IsValid())
+	if (TSharedPtr<ISequencer> SequencerPin = GetSequencer())
 	{
 		SequencerPin->NotifyMovieSceneDataChanged(EMovieSceneDataChangeType::MovieSceneStructureItemAdded);
 	}
+}
+
+void FKzDialogueTrackEditor::HandleAddAllLines(UMovieSceneKzDialogueTrack* Track)
+{
+	UMovieScene* MovieScene = IsValid(Track) ? Track->GetTypedOuter<UMovieScene>() : nullptr;
+	if (!MovieScene || !IsValid(Track->DialogueAsset)) { return; }
+
+	TSet<FGuid> OnTrack;
+	for (UMovieSceneSection* Section : Track->GetAllSections())
+	{
+		if (const UMovieSceneKzDialogueSection* DialogueSection = Cast<UMovieSceneKzDialogueSection>(Section))
+		{
+			OnTrack.Add(DialogueSection->LineId);
+		}
+	}
+
+	const FScopedTransaction Transaction(LOCTEXT("AddAllLinesTrans", "Add All Dialogue Lines"));
+	Track->Modify();
+
+	FFrameNumber Start = GetPlayhead(*MovieScene);
+	for (const FKzDialogueLine& Line : Track->DialogueAsset->Lines)
+	{
+		if (OnTrack.Contains(Line.LineId)) { continue; }
+
+		float AudioDuration = 0.f;
+		if (!Line.Audio.IsNull())
+		{
+			IAssetRegistry::GetChecked().GetAssetByObjectPath(Line.Audio.ToSoftObjectPath()).GetTagValue(GET_MEMBER_NAME_CHECKED(USoundBase, Duration), AudioDuration);
+		}
+		Start = AddLineSection(Track, Line.LineId, Start, Line.ResolveTotalDuration(AudioDuration));
+	}
+
+	const TRange<FFrameNumber> PlaybackRange = MovieScene->GetPlaybackRange();
+	if (Start > PlaybackRange.GetUpperBoundValue())
+	{
+		MovieScene->Modify();
+		MovieScene->SetPlaybackRange(TRange<FFrameNumber>(PlaybackRange.GetLowerBoundValue(), Start));
+	}
+
+	if (TSharedPtr<ISequencer> SequencerPin = GetSequencer())
+	{
+		SequencerPin->NotifyMovieSceneDataChanged(EMovieSceneDataChangeType::MovieSceneStructureItemAdded);
+	}
+}
+
+FFrameNumber FKzDialogueTrackEditor::GetPlayhead(const UMovieScene& MovieScene) const
+{
+	const TSharedPtr<ISequencer> SequencerPin = GetSequencer();
+	return SequencerPin.IsValid() ? SequencerPin->GetLocalTime().Time.FrameNumber : MovieScene.GetPlaybackRange().GetLowerBoundValue();
+}
+
+FFrameNumber FKzDialogueTrackEditor::AddLineSection(UMovieSceneKzDialogueTrack* Track, const FGuid& LineId, FFrameNumber Start, float Seconds)
+{
+	const FFrameNumber End = Start + (Seconds * Track->GetTypedOuter<UMovieScene>()->GetTickResolution()).RoundToFrame();
+
+	UMovieSceneKzDialogueSection* Section = NewObject<UMovieSceneKzDialogueSection>(Track, NAME_None, RF_Transactional);
+	Section->LineId = LineId;
+	Section->SetRange(TRange<FFrameNumber>(Start, End));
+	Track->AddSection(*Section);
+	return End;
 }
 
 TSharedRef<ISequencerSection> FKzDialogueTrackEditor::MakeSectionInterface(UMovieSceneSection& SectionObject, UMovieSceneTrack& Track, FGuid /*ObjectBinding*/)
