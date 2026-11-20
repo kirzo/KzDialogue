@@ -10,8 +10,13 @@
 #include "KzDialogueSubsystem.h"
 #include "Net/KzDialogueNetTypes.h"
 #include "Settings/KzDialogueSettings.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/PlayerController.h"
+#include "LevelSequence.h"
+#include "LevelSequenceActor.h"
+#include "LevelSequencePlayer.h"
 #include "TimerManager.h"
 
 namespace
@@ -42,6 +47,28 @@ namespace
 			Ref.LineId = Line.LineId;
 		}
 		return Ref;
+	}
+
+	/** One output by weight, leaving out the one with the id Excluded. */
+	const FKzDialogueRandomOutput* PickRandomOutput(const TArray<FKzDialogueRandomOutput>& Outputs, const FGuid& Excluded)
+	{
+		auto WeightOf = [&Excluded](const FKzDialogueRandomOutput& Each) { return Each.Id == Excluded ? 0.0f : FMath::Max(Each.Weight, 0.0f); };
+		float Total = 0.0f;
+		for (const FKzDialogueRandomOutput& Each : Outputs)
+		{
+			Total += WeightOf(Each);
+		}
+		float Roll = FMath::FRand() * Total;
+		for (const FKzDialogueRandomOutput& Each : Outputs)
+		{
+			const float Weight = WeightOf(Each);
+			Roll -= Weight;
+			if (Weight > 0.0f && Roll <= 0.0f)
+			{
+				return &Each;
+			}
+		}
+		return nullptr;
 	}
 }
 
@@ -287,6 +314,32 @@ bool UKzDialogueGraphInstance::Skip()
 	{
 		return false;
 	}
+	if (bSkipFading)
+	{
+		return true;
+	}
+
+	const float FadeTime = UKzDialogueSettings::Get()->SkipFadeTime;
+	if (FadeTime > 0.0f && GetWorld() && GetCameraManager())
+	{
+		bSkipFading = true;
+		FadeScreen(1.0f, FadeTime);
+		GetWorld()->GetTimerManager().SetTimer(SkipTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::PerformSkip), FadeTime, false);
+		return true;
+	}
+	PerformSkip();
+	return true;
+}
+
+void UKzDialogueGraphInstance::PerformSkip()
+{
+	bSkipFading = false;
+	// The fade may have run into a Choice or the end.
+	if (!IsRunning() || Step == EStep::Choosing || Step == EStep::Ended)
+	{
+		RestoreScreen();
+		return;
+	}
 
 	bSkipping = true;
 	OnSkipped.Broadcast(this);
@@ -297,25 +350,45 @@ bool UKzDialogueGraphInstance::Skip()
 	// A listener may have stopped the play.
 	if (bFinished || Step == EStep::Ended)
 	{
-		return true;
+		RestoreScreen();
+		return;
 	}
 
-	if (Step == EStep::Waiting)
+	if (bFadingOutSequence)
 	{
-		HandleWaitElapsed();
+		// The sequence the walk waited to play starts now.
+		HandleSequenceFadedOut();
 	}
-	else if (Step == EStep::Ready)
+	else
 	{
-		// A line already found but not shown yet goes by too.
-		if (UKzDialogueMemorySubsystem* Memory = GetMemory()) { Memory->RecordLinePresented(PendingLine); }
-		Step = EStep::Passed;
-		Leave(DefaultOutput);
+		const bool bWasWaitingForSequence = bWaitingForSequence;
+		bWaitingForSequence = false;
+		StopSequence();
+
+		if (Step == EStep::Waiting && bWasWaitingForSequence)
+		{
+			Leave(DefaultOutput);
+			Proceed();
+		}
+		else if (Step == EStep::Waiting)
+		{
+			HandleWaitElapsed();
+		}
+		else if (Step == EStep::Ready)
+		{
+			// A line already found but not shown yet goes by too.
+			if (UKzDialogueMemorySubsystem* Memory = GetMemory()) { Memory->RecordLinePresented(PendingLine); }
+			Step = EStep::Passed;
+			Leave(DefaultOutput);
+		}
+		else if (Player && bPlaying)
+		{
+			// The walk runs now, while the picture is black; the player then lets go of the line it shows.
+			HasLine();
+			Player->SkipLine();
+		}
 	}
-	else if (Player && bPlaying)
-	{
-		Player->SkipLine();
-	}
-	return true;
+	RestoreScreen();
 }
 
 void UKzDialogueGraphInstance::Continue(FGameplayTag Tag)
@@ -533,20 +606,18 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 		}
 		else if (const FKzDialogueGraphNode_Random* Random = Data.GetNode<FKzDialogueGraphNode_Random>(Node))
 		{
-			float Total = 0.0f;
-			for (const FKzDialogueRandomOutput& Each : Random->Outputs)
+			const FGuid NodeId = Data.GetNodeGuid(Node);
+			const FGuid* Last = Random->bNoRepeat ? RandomPicks.Find(NodeId) : nullptr;
+			const FKzDialogueRandomOutput* Picked = PickRandomOutput(Random->Outputs, Last ? *Last : FGuid());
+			if (!Picked && Last)
 			{
-				Total += FMath::Max(Each.Weight, 0.0f);
+				// The last pick is the only one there is.
+				Picked = PickRandomOutput(Random->Outputs, FGuid());
 			}
-			float Roll = FMath::FRand() * Total;
-			for (const FKzDialogueRandomOutput& Each : Random->Outputs)
+			if (Picked)
 			{
-				Roll -= FMath::Max(Each.Weight, 0.0f);
-				if (Each.Weight > 0.0f && Roll <= 0.0f)
-				{
-					Target = FindTarget(Node, FKzDialogueGraphNode_Random::GetOutput(Each));
-					break;
-				}
+				RandomPicks.Add(NodeId, Picked->Id);
+				Target = FindTarget(Node, FKzDialogueGraphNode_Random::GetOutput(*Picked));
 			}
 		}
 		else if (const FKzDialogueGraphNode_Event* Event = Data.GetNode<FKzDialogueGraphNode_Event>(Node))
@@ -585,6 +656,14 @@ void UKzDialogueGraphInstance::Leave(FName Output)
 			if (!bSkipping)
 			{
 				StartWait(Wait->Seconds);
+				return;
+			}
+			Target = FindTarget(Node, DefaultOutput);
+		}
+		else if (const FKzDialogueGraphNode_Sequence* Sequence = Data.GetNode<FKzDialogueGraphNode_Sequence>(Node))
+		{
+			if (EnterSequence(*Sequence))
+			{
 				return;
 			}
 			Target = FindTarget(Node, DefaultOutput);
@@ -771,9 +850,16 @@ void UKzDialogueGraphInstance::Visit(const FGuid& Id)
 void UKzDialogueGraphInstance::EndWalk(FName Exit)
 {
 	ExitName = Exit;
-	Step = EStep::Ended;
 	bSkipping = false;
 	WithdrawOptions();
+	// The sequence playing fades out before the dialogue closes.
+	if (FadeOutSequence())
+	{
+		bEndAfterFade = true;
+		return;
+	}
+	StopSequence();
+	Step = EStep::Ended;
 }
 
 void UKzDialogueGraphInstance::Proceed()
@@ -889,6 +975,17 @@ void UKzDialogueGraphInstance::Finish(bool bInterrupted)
 	bPlaying = false;
 	WithdrawOptions();
 
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(SkipTimer);
+	}
+	bSkipFading = false;
+	bFadingOutSequence = false;
+	bEndAfterFade = false;
+	bWaitingForSequence = false;
+	StopSequence();
+	RestoreScreen();
+
 	if (Player)
 	{
 		Player->OnDialogueStarted.RemoveAll(this);
@@ -905,6 +1002,223 @@ void UKzDialogueGraphInstance::Finish(bool bInterrupted)
 	}
 
 	OnEnded.Broadcast(this, bInterrupted ? NAME_None : ExitName, bInterrupted);
+}
+
+// ---------------------------------------------------------------------------------------
+// Sequences
+// ---------------------------------------------------------------------------------------
+
+bool UKzDialogueGraphInstance::EnterSequence(const FKzDialogueGraphNode_Sequence& Sequence)
+{
+	const bool bWait = Sequence.Mode == EKzDialogueSequenceMode::Wait;
+	if (bWait)
+	{
+		// A Skip lands on a sequence the conversation waits for.
+		bSkipping = false;
+	}
+	if (FadeOutSequence())
+	{
+		return true;
+	}
+	PlaySequence(Sequence);
+	if (bWait && SequencePlayer)
+	{
+		bWaitingForSequence = true;
+		Step = EStep::Waiting;
+		return true;
+	}
+	return false;
+}
+
+void UKzDialogueGraphInstance::PlaySequence(const FKzDialogueGraphNode_Sequence& Sequence)
+{
+	StopSequence();
+	UWorld* World = GetWorld();
+	const bool bLoop = Sequence.Mode == EKzDialogueSequenceMode::Background && Sequence.bLoop;
+
+	FMovieSceneSequencePlaybackSettings Settings;
+	Settings.LoopCount.Value = bLoop ? -1 : 0;
+	// One that ends holds its last frame until the walk replaces or stops it.
+	Settings.bPauseAtEnd = true;
+
+	ALevelSequenceActor* Actor = nullptr;
+	SequencePlayer = Sequence.Sequence && World ? ULevelSequencePlayer::CreateLevelSequencePlayer(World, Sequence.Sequence, Settings, Actor) : nullptr;
+	SequenceActor = Actor;
+	if (!SequencePlayer)
+	{
+		UE_LOG(LogKzDialogue, Warning, TEXT("Dialogue graph '%s': a Sequence node has no sequence to play; going on past it."), *Graph->GetName());
+		RestoreScreen();
+		return;
+	}
+
+	if (!Sequence.EndMarker.IsEmpty())
+	{
+		const int32 StartFrame = SequencePlayer->GetStartTime().Time.FrameNumber.Value;
+		const FFrameTime End = FMovieSceneSequencePlaybackParams(Sequence.EndMarker, EUpdatePositionMethod::Jump).GetPlaybackPosition(SequencePlayer);
+		SequencePlayer->SetFrameRange(StartFrame, FMath::Max(End.FrameNumber.Value - StartFrame, 1));
+	}
+	const FFrameTime* LeftAt = SequenceTimes.Find(FObjectKey(Sequence.Sequence.Get()));
+	if (Sequence.Start == EKzDialogueSequenceStart::Marker)
+	{
+		SequencePlayer->SetPlaybackPosition(FMovieSceneSequencePlaybackParams(Sequence.StartMarker, EUpdatePositionMethod::Jump));
+	}
+	else if (Sequence.Start == EKzDialogueSequenceStart::Resume && LeftAt)
+	{
+		SequencePlayer->SetPlaybackPosition(FMovieSceneSequencePlaybackParams(*LeftAt, EUpdatePositionMethod::Jump));
+	}
+
+	SequencePlayer->OnFinished.AddDynamic(this, &UKzDialogueGraphInstance::HandleSequenceFinished);
+	SequencePlayer->Play();
+	SequenceFadeOut = Sequence.FadeOut;
+
+	if (Sequence.FadeIn > 0.0f)
+	{
+		FadeScreen(0.0f, Sequence.FadeIn, true);
+	}
+	else
+	{
+		RestoreScreen();
+	}
+
+	if (!bLoop && Sequence.FadeOut > 0.0f)
+	{
+		// Black by the time it ends.
+		const double Remaining = (SequencePlayer->GetEndTime().AsSeconds() - SequencePlayer->GetCurrentTime().AsSeconds()) / FMath::Max(SequencePlayer->GetPlayRate(), UE_KINDA_SMALL_NUMBER);
+		World->GetTimerManager().SetTimer(SequenceTimer, FTimerDelegate::CreateWeakLambda(this, [this]()
+		{
+			if (!bScreenBlack)
+			{
+				FadeScreen(1.0f, SequenceFadeOut);
+			}
+		}), FMath::Max(static_cast<float>(Remaining) - Sequence.FadeOut, 0.01f), false);
+	}
+}
+
+void UKzDialogueGraphInstance::StopSequence()
+{
+	if (GetWorld())
+	{
+		GetWorld()->GetTimerManager().ClearTimer(SequenceTimer);
+	}
+	if (SequencePlayer)
+	{
+		if (const UMovieSceneSequence* Played = SequencePlayer->GetSequence())
+		{
+			SequenceTimes.Add(FObjectKey(Played), SequencePlayer->GetCurrentTime().Time);
+		}
+		SequencePlayer->OnFinished.RemoveAll(this);
+		SequencePlayer->Stop();
+	}
+	if (SequenceActor)
+	{
+		SequenceActor->Destroy();
+	}
+	SequencePlayer = nullptr;
+	SequenceActor = nullptr;
+	SequenceFadeOut = 0.0f;
+}
+
+bool UKzDialogueGraphInstance::FadeOutSequence()
+{
+	UWorld* World = GetWorld();
+	if (!SequencePlayer || SequenceFadeOut <= 0.0f || bScreenBlack || !World || !GetCameraManager())
+	{
+		return false;
+	}
+	FadeScreen(1.0f, SequenceFadeOut);
+	bFadingOutSequence = true;
+	Step = EStep::Waiting;
+	World->GetTimerManager().SetTimer(SequenceTimer, FTimerDelegate::CreateUObject(this, &UKzDialogueGraphInstance::HandleSequenceFadedOut), SequenceFadeOut, false);
+	return true;
+}
+
+void UKzDialogueGraphInstance::HandleSequenceFadedOut()
+{
+	if (!bFadingOutSequence)
+	{
+		return;
+	}
+	bFadingOutSequence = false;
+	StopSequence();
+
+	if (bEndAfterFade)
+	{
+		bEndAfterFade = false;
+		Step = EStep::Ended;
+	}
+	else
+	{
+		const FKzDialogueGraphNode_Sequence* Sequence = Graph->GetData().GetNode<FKzDialogueGraphNode_Sequence>(Node);
+		if (!Sequence || !EnterSequence(*Sequence))
+		{
+			Leave(DefaultOutput);
+		}
+	}
+	Proceed();
+	RestoreScreen();
+}
+
+void UKzDialogueGraphInstance::HandleSequenceFinished()
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// It finishes inside its own update: the walk goes on next tick, if it still plays then.
+	World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateWeakLambda(this, [this, Finished = TWeakObjectPtr<ULevelSequencePlayer>(SequencePlayer.Get())]()
+	{
+		if (!SequencePlayer || SequencePlayer != Finished.Get())
+		{
+			return;
+		}
+		// One that faded out at its end is done; one that did not holds its last frame.
+		if (bScreenBlack && !bSkipFading)
+		{
+			StopSequence();
+		}
+		if (bWaitingForSequence)
+		{
+			bWaitingForSequence = false;
+			Leave(DefaultOutput);
+			Proceed();
+		}
+		RestoreScreen();
+	}));
+}
+
+void UKzDialogueGraphInstance::FadeScreen(float To, float Seconds, bool bFromBlack)
+{
+	APlayerCameraManager* Camera = GetCameraManager();
+	if (!Camera)
+	{
+		return;
+	}
+
+	// Held at black until a fade back; the audio fades with the picture.
+	const float From = bFromBlack ? 1.0f : (Camera->bEnableFading ? Camera->FadeAmount : 0.0f);
+	Camera->StartCameraFade(From, To, FMath::Max(Seconds, 0.01f), FLinearColor::Black, true, To > 0.0f);
+	bScreenBlack = To > 0.0f;
+	if (bScreenBlack)
+	{
+		FadeBackTime = Seconds;
+	}
+}
+
+void UKzDialogueGraphInstance::RestoreScreen()
+{
+	if (bScreenBlack && !bSkipFading && !bFadingOutSequence)
+	{
+		FadeScreen(0.0f, FadeBackTime);
+	}
+}
+
+APlayerCameraManager* UKzDialogueGraphInstance::GetCameraManager() const
+{
+	// Sequences play on the first local player's view.
+	const APlayerController* Controller = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	return Controller ? Controller->PlayerCameraManager.Get() : nullptr;
 }
 
 // ---------------------------------------------------------------------------------------

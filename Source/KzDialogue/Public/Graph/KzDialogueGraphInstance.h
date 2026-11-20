@@ -6,15 +6,21 @@
 #include "GameplayTagContainer.h"
 #include "KzDialogueProvider.h"
 #include "KzDialogueTypes.h"
+#include "Misc/FrameTime.h"
+#include "UObject/ObjectKey.h"
 #include "KzDialogueGraphInstance.generated.h"
 
 class AActor;
+class ALevelSequenceActor;
+class APlayerCameraManager;
+class ULevelSequencePlayer;
 class UKzDialogueGraph;
 class UKzDialogueGraphInstance;
 class UKzDialogueMemorySubsystem;
 class UKzDialoguePlayer;
 class UKzDialogueSubsystem;
 struct FKzDialogueGraphNode_Choice;
+struct FKzDialogueGraphNode_Sequence;
 struct FKzDialogueGraphNode_SubGraph;
 struct FKzDialogueNetGraphEntry;
 
@@ -214,9 +220,10 @@ public:
 	void Next();
 
 	/**
-	 * Skips the rest of the conversation up to the next Choice, or to the end. Lines go by unshown but count as seen, Waits do not wait,
-	 * and Events and Actions still run: an Event listener checks Is Skipping to cut short what it starts. The options come with no line held
-	 * on screen. False when there is nothing to skip (a Choice waits, the play is not running) or on a copy of a server's play.
+	 * Skips the rest of the conversation up to the next Choice, the next sequence it waits for, or the end, behind a fade to black of the
+	 * settings' Skip Fade Time. The sequence playing stops. Lines go by unshown but count as seen, Waits do not wait, sequences behind the
+	 * conversation still start, and Events and Actions still run: an Event listener checks Is Skipping to cut short what it starts. The options
+	 * come with no line held on screen. False when there is nothing to skip (a Choice waits, the play is not running) or on a copy of a server's play.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Graph")
 	bool Skip();
@@ -363,6 +370,35 @@ private:
 	/** Hands the Choice's idle line to the player as its next line, the options staying offered. */
 	void HandleIdleTimer();
 
+	/** Skips once the picture is black. */
+	void PerformSkip();
+
+	/** Plays the Sequence node at Node once the sequence playing fades out; true when the walk waits, for that fade or for the new sequence to end. */
+	bool EnterSequence(const FKzDialogueGraphNode_Sequence& Sequence);
+
+	void PlaySequence(const FKzDialogueGraphNode_Sequence& Sequence);
+
+	/** Stops the sequence playing, keeping where it was for a Resume. */
+	void StopSequence();
+
+	/** Starts the Fade Out of the sequence playing, before the walk replaces or stops it; false when it has none to wait for. */
+	bool FadeOutSequence();
+
+	/** The sequence playing is black: the walk plays the Sequence node at Node, or ends. */
+	void HandleSequenceFadedOut();
+
+	/** The sequence playing ended: the walk goes on if it waited for it. */
+	UFUNCTION()
+	void HandleSequenceFinished();
+
+	/** Fades the picture to black (To 1) or back (To 0), from where it is or from black. */
+	void FadeScreen(float To, float Seconds, bool bFromBlack = false);
+
+	/** Brings the picture back from a fade out nothing else is bringing it back from. */
+	void RestoreScreen();
+
+	APlayerCameraManager* GetCameraManager() const;
+
 	UFUNCTION()
 	void HandleDialogueStarted(UKzDialoguePlayer* InPlayer);
 
@@ -429,6 +465,40 @@ private:
 
 	/** The player is saying the Choice's idle line. */
 	bool bSayingIdleLine = false;
+
+	/** A Skip waits for the picture to go black. */
+	bool bSkipFading = false;
+
+	FTimerHandle SkipTimer;
+
+	UPROPERTY()
+	TObjectPtr<ULevelSequencePlayer> SequencePlayer;
+
+	UPROPERTY()
+	TObjectPtr<ALevelSequenceActor> SequenceActor;
+
+	/** The Fade Out of the sequence playing. */
+	float SequenceFadeOut = 0.0f;
+
+	/** Its Fade Out before its end, then the fade the walk waits for. */
+	FTimerHandle SequenceTimer;
+
+	/** The walk waits for the sequence playing to end. */
+	bool bWaitingForSequence = false;
+
+	/** The walk waits for the sequence playing to fade out, to play the Sequence node at Node, or to end when bEndAfterFade. */
+	bool bFadingOutSequence = false;
+	bool bEndAfterFade = false;
+
+	/** Where this play left each sequence, for a Resume. */
+	TMap<FObjectKey, FFrameTime> SequenceTimes;
+
+	/** The picture is black, or going black, from a fade of this play, to come back over FadeBackTime. */
+	bool bScreenBlack = false;
+	float FadeBackTime = 0.0f;
+
+	/** The output each Random node took last, by node and output id. */
+	TMap<FGuid, FGuid> RandomPicks;
 
 	bool bProxy = false;
 	int32 NetPlayId = 0;

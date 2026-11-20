@@ -36,6 +36,7 @@ public class KzDialogueEditor : ModuleRules
 				"ToolWidgets",
 				"EditorWidgets",
 				"Sequencer",
+				"LevelSequence",
 				"MovieScene",
 				"MovieSceneTools",
 				"MovieSceneTracks",

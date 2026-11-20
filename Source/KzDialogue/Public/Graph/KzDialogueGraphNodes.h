@@ -10,6 +10,7 @@
 #include "KzDialogueGraphNodes.generated.h"
 
 class UKzDialogueGraph;
+class ULevelSequence;
 
 /** Base of dialogue graph nodes. */
 USTRUCT(meta = (Hidden))
@@ -238,6 +239,10 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Random : public FKzDialogueGraphStep
 	UPROPERTY(EditAnywhere, Category = "Random")
 	TArray<FKzDialogueRandomOutput> Outputs;
 
+	/** Never takes the output this play took here last time, while there is another: variations that do not repeat back to back. */
+	UPROPERTY(EditAnywhere, Category = "Random")
+	bool bNoRepeat = false;
+
 	static FName GetOutput(const FKzDialogueRandomOutput& Output) { return FName(Output.Id.ToString(EGuidFormats::Digits)); }
 
 #if WITH_EDITOR
@@ -299,6 +304,73 @@ struct KZDIALOGUE_API FKzDialogueGraphNode_Wait : public FKzDialogueGraphStep
 	virtual FText GetSubtitle() const override;
 	virtual FLinearColor GetColor() const override;
 	virtual FSlateIcon GetIcon() const override;
+#endif
+};
+
+/** Whether the conversation waits for a Sequence node's sequence. */
+UENUM()
+enum class EKzDialogueSequenceMode : uint8
+{
+	/** The conversation goes on when the sequence ends, such as after an intro or a topic's cinematic. */
+	Wait,
+	/** The conversation goes on at once, the sequence playing behind it, such as a loop under a Choice. */
+	Background
+};
+
+/** Where a Sequence node starts its sequence. */
+UENUM()
+enum class EKzDialogueSequenceStart : uint8
+{
+	Beginning,
+	/** At the marked frame named Start Marker. */
+	Marker,
+	/** Where this play left the same sequence last time; at the beginning the first time. */
+	Resume
+};
+
+/**
+ * Plays a level sequence, such as a cinematic, with the bindings it has in its level. A play shows one sequence at a time:
+ * the next Sequence node replaces it, the end of the play stops it, and one that ends holds its last frame until then.
+ * A Skip stops it and lands on the next sequence the play waits for.
+ */
+USTRUCT(meta = (DisplayName = "Sequence", Category = "Flow", Shortcut = "S", Keywords = "cinematic cutscene sequencer camera"))
+struct KZDIALOGUE_API FKzDialogueGraphNode_Sequence : public FKzDialogueGraphStep
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Sequence")
+	TObjectPtr<ULevelSequence> Sequence;
+
+	UPROPERTY(EditAnywhere, Category = "Sequence")
+	EKzDialogueSequenceMode Mode = EKzDialogueSequenceMode::Wait;
+
+	/** Plays again from its beginning each time it ends. */
+	UPROPERTY(EditAnywhere, Category = "Sequence", meta = (EditCondition = "Mode == EKzDialogueSequenceMode::Background", EditConditionHides))
+	bool bLoop = false;
+
+	UPROPERTY(EditAnywhere, Category = "Sequence")
+	EKzDialogueSequenceStart Start = EKzDialogueSequenceStart::Beginning;
+
+	UPROPERTY(EditAnywhere, Category = "Sequence", meta = (EditCondition = "Start == EKzDialogueSequenceStart::Marker", EditConditionHides))
+	FString StartMarker;
+
+	/** A marked frame to end at instead of the end of the sequence. Empty plays it to the end. */
+	UPROPERTY(EditAnywhere, Category = "Sequence")
+	FString EndMarker;
+
+	/** Seconds the picture takes to come in from black when the sequence starts. Zero cuts in, unless the picture is black from a fade out: then it comes back over that fade's time. */
+	UPROPERTY(EditAnywhere, Category = "Sequence|Fade", meta = (ClampMin = "0", Units = "Seconds"))
+	float FadeIn = 0.0f;
+
+	/** Seconds the picture takes to go to black at the end of the sequence, or before the play replaces or stops it. Zero cuts out. */
+	UPROPERTY(EditAnywhere, Category = "Sequence|Fade", meta = (ClampMin = "0", Units = "Seconds"))
+	float FadeOut = 0.0f;
+
+#if WITH_EDITOR
+	virtual FText GetSubtitle() const override;
+	virtual FLinearColor GetColor() const override;
+	virtual FSlateIcon GetIcon() const override;
+	virtual void Validate(TArray<FKzValidationIssue>& OutIssues) const override;
 #endif
 };
 

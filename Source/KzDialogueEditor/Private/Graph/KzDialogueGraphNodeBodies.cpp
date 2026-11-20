@@ -18,6 +18,7 @@
 #include "KzEdGraphNode.h"
 #include "KzGraphEditorUtils.h"
 #include "KzSpeakerAsset.h"
+#include "LevelSequence.h"
 #include "ScopedTransaction.h"
 #include "Sound/SoundWave.h"
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -1094,6 +1095,15 @@ namespace
 			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(SubGraph->Graph);
 		}
 	}
+
+	void OpenSequence(const UKzEdGraphNode& Node)
+	{
+		const FKzDialogueGraphNode_Sequence* Sequence = Node.Node.GetPtr<FKzDialogueGraphNode_Sequence>();
+		if (Sequence && Sequence->Sequence && GEditor)
+		{
+			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(Sequence->Sequence);
+		}
+	}
 }
 
 TArray<FName> KzDialogueGraphNodeBodies::GatherEntryNames(const UEdGraph& Graph)
@@ -1135,6 +1145,7 @@ void KzDialogueGraphNodeBodies::Register()
 	KzGraphEditor::RegisterNodeBody(FKzDialogueGraphStep::StaticStruct(), FKzOnMakeGraphNodeBody::CreateStatic(&MakeOnlyIfBody));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenLine));
 	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_SubGraph::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenSubGraph));
+	KzGraphEditor::RegisterNodeDoubleClick(FKzDialogueGraphNode_Sequence::StaticStruct(), FKzOnGraphNodeDoubleClicked::CreateStatic(&OpenSequence));
 }
 
 void KzDialogueGraphNodeBodies::Unregister()
@@ -1144,6 +1155,7 @@ void KzDialogueGraphNodeBodies::Unregister()
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_Branch::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphNode_SubGraph::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_SubGraph::StaticStruct());
+	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Sequence::StaticStruct());
 	KzGraphEditor::UnregisterNodeBody(FKzDialogueGraphStep::StaticStruct());
 	KzGraphEditor::UnregisterNodeDoubleClick(FKzDialogueGraphNode_Line::StaticStruct());
 }

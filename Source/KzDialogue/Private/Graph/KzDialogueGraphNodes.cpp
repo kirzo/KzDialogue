@@ -3,6 +3,8 @@
 #include "Graph/KzDialogueGraphNodes.h"
 #include "Graph/KzDialogueGraph.h"
 #include "KzDialogueAsset.h"
+#include "LevelSequence.h"
+#include "MovieScene.h"
 
 #define LOCTEXT_NAMESPACE "KzDialogueGraphNodes"
 
@@ -21,6 +23,7 @@ namespace
 	FLinearColor RandomColor() { return FLinearColor(FColor(0x8A, 0x5A, 0x0F)); }
 	FLinearColor GameplayColor() { return FLinearColor(FColor(0x2D, 0x6A, 0x3E)); }
 	FLinearColor SubGraphColor() { return FLinearColor(FColor(0x7A, 0x2E, 0x5C)); }
+	FLinearColor SequenceColor() { return FLinearColor(FColor(0x7A, 0x3B, 0x1F)); }
 
 	/** Registered by FKzDialogueEditorStyle in the editor module. */
 	FSlateIcon NodeIcon(const TCHAR* Node) { return FSlateIcon(TEXT("KzDialogueEditorStyle"), *FString::Printf(TEXT("Kz.Dialogue.Node.%s"), Node)); }
@@ -284,6 +287,56 @@ FLinearColor FKzDialogueGraphNode_Wait::GetColor() const
 FSlateIcon FKzDialogueGraphNode_Wait::GetIcon() const
 {
 	return NodeIcon(TEXT("Wait"));
+}
+
+FText FKzDialogueGraphNode_Sequence::GetSubtitle() const
+{
+	if (!Sequence)
+	{
+		return FText::GetEmpty();
+	}
+	const FText Name = FText::FromString(Sequence->GetName());
+	if (Mode == EKzDialogueSequenceMode::Wait)
+	{
+		return Name;
+	}
+	return FText::Format(bLoop ? LOCTEXT("SequenceLoop", "{0}, looping behind") : LOCTEXT("SequenceBehind", "{0}, behind"), Name);
+}
+
+FLinearColor FKzDialogueGraphNode_Sequence::GetColor() const
+{
+	return SequenceColor();
+}
+
+FSlateIcon FKzDialogueGraphNode_Sequence::GetIcon() const
+{
+	return NodeIcon(TEXT("Sequence"));
+}
+
+void FKzDialogueGraphNode_Sequence::Validate(TArray<FKzValidationIssue>& OutIssues) const
+{
+	const UMovieScene* MovieScene = Sequence ? Sequence->GetMovieScene() : nullptr;
+	if (!MovieScene)
+	{
+		OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, LOCTEXT("NoSequence", "The sequence node has no sequence to play."), NAME_None));
+		return;
+	}
+
+	auto CheckMarker = [&](const FString& Marker)
+	{
+		if (MovieScene->FindMarkedFrameByLabel(Marker) == INDEX_NONE)
+		{
+			OutIssues.Add(FKzValidationIssue(EKzValidationSeverity::Error, FText::Format(LOCTEXT("NoMarker", "{0} has no marked frame named '{1}'."), FText::FromString(Sequence->GetName()), FText::FromString(Marker)), NAME_None));
+		}
+	};
+	if (Start == EKzDialogueSequenceStart::Marker)
+	{
+		CheckMarker(StartMarker);
+	}
+	if (!EndMarker.IsEmpty())
+	{
+		CheckMarker(EndMarker);
+	}
 }
 
 void FKzDialogueGraphNode_SubGraph::GetOutputPins(const UKzGraph& Owner, TArray<FKzGraphPinDesc>& OutPins) const

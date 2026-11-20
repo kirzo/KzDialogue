@@ -31,7 +31,8 @@ public class KzDialogue : ModuleRules
 				"Slate",
 				"SlateCore",
 				"InputCore",
-				"AssetRegistry"
+				"AssetRegistry",
+				"LevelSequence"
 			}
 			);
 	}

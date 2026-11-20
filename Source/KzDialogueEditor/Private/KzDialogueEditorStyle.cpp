@@ -55,6 +55,8 @@ FKzDialogueEditorStyle::FKzDialogueEditorStyle()
 		Set(*FString::Printf(TEXT("ClassIcon.%s"), Pair[0]), new FSlateVectorImageBrush(EngineAssetIcons / Pair[1] + TEXT(".svg"), IconSize));
 	}
 
+	Set("Kz.Dialogue.Node.Sequence", new FSlateVectorImageBrush(EngineAssetIcons / TEXT("LevelSequenceActor_16.svg"), IconSize));
+
 	// Dialogue graph nodes, next to their titles; Random takes the Chance dice and Sub Graph the graph asset's icon
 	for (const TCHAR* const Node : { TEXT("Entry"), TEXT("Line"), TEXT("Choice"), TEXT("Branch"), TEXT("Event"), TEXT("Action"), TEXT("Wait"), TEXT("Exit") })
 	{

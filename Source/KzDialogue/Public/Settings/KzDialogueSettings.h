@@ -103,6 +103,10 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Speakers")
 	bool bCapitalizeArgumentsAtSentenceStart = true;
 
+	/** Seconds a dialogue graph's Skip takes to go to black, and to come back where it lands. Zero skips with a cut. */
+	UPROPERTY(Config, EditAnywhere, Category = "Graphs", meta = (ClampMin = 0.0, Units = "Seconds"))
+	float SkipFadeTime = 0.0f;
+
 	/** Default mouth/jaw "speaking level" tuning derived from a line's audio. Speakers can override per character. */
 	UPROPERTY(Config, EditAnywhere, Category = "Speaking")
 	FKzSpeakingLevelSettings SpeakingDefaults;

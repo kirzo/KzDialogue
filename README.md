@@ -167,11 +167,14 @@ Add a **Kz Bark** component to an actor and point its **Bark** at a line or, bet
 
 ### 🔀 Dialogue graphs and choices
 
-A **Dialogue Graph** walks nodes from an entry: **Line**, **Choice**, **Branch**, **Random**, **Event**, **Action**, **Wait**, **Sub Graph** and **Exit**. Start it with **Start Dialogue Graph**; it ends through the Exit it reached, whose name gameplay receives.
+A **Dialogue Graph** walks nodes from an entry: **Line**, **Choice**, **Branch**, **Random**, **Event**, **Action**, **Wait**, **Sequence**, **Sub Graph** and **Exit**. Start it with **Start Dialogue Graph**; it ends through the Exit it reached, whose name gameplay receives.
+
+* A **Sequence** plays a Level Sequence, such as a cinematic, with the bindings it has in its level. In **Wait** mode the conversation goes on when it ends; in **Background** mode it goes on at once, with the sequence behind it, **Loop**ing if asked. It starts at its beginning, at a **Start Marker**, or where this play left it (**Resume**), and an **End Marker** ends it early. One plays at a time: the next replaces it, the end of the conversation stops it, and one that ends holds its last frame until then. **Fade In** and **Fade Out** go through black; zero cuts. Lines inside a cinematic go on its Dialogue Track, on a channel of their own so they don't clash with the conversation's.
+* A **Random** with **No Repeat** never takes the output it took last time in the play, for variations such as several cinematics of one loop.
 
 * A **Choice** offers options, each with its condition, a **Default** to mark first and **Tags** saying what kind of option it is (one that moves the story on, one that leaves), and goes on through the one chosen. An option leading back to the Choice makes a menu of topics. Its **Idle Line**, a line or an alias, is said while the options wait (after **Idle Delay**, then every **Idle Interval**); the options stay, and choosing cuts it short.
 * `KzChoiceWidget` shows the options of its channels, a row (`KzChoiceOption`) each, navigated with **Previous Option**, **Next Option** and **Accept**. Each row gets its option with its Tags and whether it was chosen before, in this play (`bVisited`) or ever (`bEverVisited`), to style it. A row's **Chosen Animation** plays when it is chosen, and the conversation goes on when it ends.
-* **Skip** jumps to the next Choice, or to the end: lines go by unshown but count as seen, Waits do not wait, and Events and Actions still run, with **Is Skipping** for listeners to cut short what they start. **On Skipped** (on the play, and **On Dialogue Graph Skipped** on the subsystem) fires as a Skip starts, to cut what is already running, such as a cinematic an Event started.
+* **Skip** jumps to the next Choice, the next Sequence in Wait mode, or the end, behind a fade to black of **Skip Fade Time** (project settings; zero cuts). The sequence playing stops. Lines go by unshown but count as seen, Waits do not wait, Sequences in Background mode still start, and Events and Actions still run, with **Is Skipping** for listeners to cut short what they start. **On Skipped** (on the play, and **On Dialogue Graph Skipped** on the subsystem) fires as a Skip starts, to cut what is already running, such as a cinematic an Event started.
 
 ### 🎞️ Sequencer
 
