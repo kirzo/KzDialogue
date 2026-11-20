@@ -11,6 +11,7 @@
 #include "Widgets/SKzDialogueTimeline.h"
 #include "Sequencer/MovieSceneKzDialogueSection.h"
 #include "Sequencer/MovieSceneKzDialogueTrack.h"
+#include "MovieScene.h"
 #include "UObject/UObjectHash.h"
 #include "UObject/UnrealType.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -878,8 +879,13 @@ void UKzDialogueValidator_DanglingLineRefs::Validate_Implementation(const UObjec
 
 		if (const UMovieSceneKzDialogueSection* Section = Cast<UMovieSceneKzDialogueSection>(Object))
 		{
+			// Sequencer keeps deleted sections and tracks in the package for undo, but they are not saved.
 			const UMovieSceneKzDialogueTrack* Track = Section->GetTypedOuter<UMovieSceneKzDialogueTrack>();
-			Check(FString::Printf(TEXT("Dialogue section %s"), *Section->GetName()), Track ? Track->DialogueAsset.Get() : nullptr, FString(), Section->LineId);
+			const UMovieScene* MovieScene = Track ? Track->GetTypedOuter<UMovieScene>() : nullptr;
+			FGuid BindingId;
+			if (!MovieScene || !Track->HasSection(*Section) || (!MovieScene->ContainsTrack(*Track) && !MovieScene->FindTrackBinding(*Track, BindingId))) { continue; }
+
+			Check(FString::Printf(TEXT("Dialogue section %s"), *Section->GetName()), Track->DialogueAsset.Get(), FString(), Section->LineId);
 			continue;
 		}
 
