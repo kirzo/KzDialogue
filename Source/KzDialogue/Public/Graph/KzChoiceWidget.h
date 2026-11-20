@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "GameplayTagContainer.h"
+#include "Types/SlateEnums.h"
 #include "Graph/KzDialogueGraphInstance.h"
 #include "KzChoiceWidget.generated.h"
 
@@ -90,9 +91,9 @@ private:
 
 /**
  * Shows the options of the conversations of its channels, through a choice listener, and navigates them
- * itself: whoever has the input (KzUI, Enhanced Input, CommonUI) calls Previous Option, Next Option and
- * Accept. With OptionsPanel and OptionClass it makes a row per option; On Show Options is there to lay
- * them out by hand instead.
+ * itself: whoever has the input (KzUI, Enhanced Input, CommonUI) calls Previous Option, Next Option or
+ * Navigate Option, and Accept. With OptionClass it makes a row per option, in OptionsPanel or in the panel
+ * Get Panel For Option gives, such as one per place of a cross.
  */
 UCLASS(Abstract)
 class KZDIALOGUE_API UKzChoiceWidget : public UUserWidget
@@ -119,6 +120,13 @@ public:
 	/** Moves the mark to the option after; with Loop Navigation it wraps around. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
 	void NextOption();
+
+	/**
+	 * Moves the mark Up, Down, Left or Right to the nearest row on screen that way, whatever the layout (a list, a cross).
+	 * With Loop Navigation, past the edge it wraps to the farthest row the other way. Next and Previous act as Next Option and Previous Option.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
+	void NavigateOption(EUINavigation Direction);
 
 	/** With options shown, chooses the marked one (nothing when it is unavailable); without, advances the line. One button for both. */
 	UFUNCTION(BlueprintCallable, Category = "Dialogue|Choices")
@@ -169,7 +177,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Choices")
 	bool bUseSubtitleChannels = true;
 
-	/** Previous Option and Next Option wrap around the ends. */
+	/** Previous Option, Next Option and Navigate Option wrap around the ends. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Choices")
 	bool bLoopNavigation = false;
 
@@ -177,9 +185,14 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "Dialogue|Choices", meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> OptionsPanel;
 
-	/** The row made for each option shown in OptionsPanel. */
+	/** The row made for each option shown. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Dialogue|Choices")
 	TSubclassOf<UKzChoiceOption> OptionClass;
+
+	/** The panel the row of the option at Position goes in: OptionsPanel, unless overridden to place each row apart. None makes no row for it. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Choices")
+	UPanelWidget* GetPanelForOption(int32 Position, const FKzDialogueGraphOption& Option) const;
+	virtual UPanelWidget* GetPanelForOption_Implementation(int32 Position, const FKzDialogueGraphOption& Option) const;
 
 	/** The Index of the option marked when they show: the one the Choice marks Default when it is available, else the first available. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintPure, Category = "Dialogue|Choices")

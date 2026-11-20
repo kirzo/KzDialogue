@@ -199,6 +199,73 @@ void UKzChoiceWidget::NextOption()
 	MoveHighlight(1);
 }
 
+void UKzChoiceWidget::NavigateOption(EUINavigation Direction)
+{
+	FVector2D Axis;
+	switch (Direction)
+	{
+		case EUINavigation::Left:		Axis = FVector2D(-1.0, 0.0); break;
+		case EUINavigation::Right:		Axis = FVector2D(1.0, 0.0); break;
+		case EUINavigation::Up:			Axis = FVector2D(0.0, -1.0); break;
+		case EUINavigation::Down:		Axis = FVector2D(0.0, 1.0); break;
+		case EUINavigation::Next:		MoveHighlight(1); return;
+		case EUINavigation::Previous:	MoveHighlight(-1); return;
+		default:						return;
+	}
+
+	auto GetCenter = [](const UKzChoiceOption* Row, FVector2D& OutCenter)
+	{
+		// A row never laid out, or hidden, has no place on screen to navigate by.
+		const FGeometry& Geometry = Row->GetCachedGeometry();
+		if (!Row->IsVisible() || FVector2D(Geometry.GetAbsoluteSize()).IsNearlyZero())
+		{
+			return false;
+		}
+		OutCenter = Geometry.GetAbsolutePositionAtCoordinates(FVector2f(0.5f, 0.5f));
+		return true;
+	};
+
+	const UKzChoiceOption* From = ShownOptions.IsValidIndex(HighlightedPosition) ? FindRow(ShownOptions[HighlightedPosition].Index) : nullptr;
+	FVector2D Origin;
+	if (!From || !GetCenter(From, Origin))
+	{
+		MoveHighlight(1);
+		return;
+	}
+
+	// The straightest row wins, so across a cross the row opposite beats a nearer one off to the side; among
+	// rows as straight, the nearest. Past the edge, the straightest the other way, the farthest.
+	struct FPick { const UKzChoiceOption* Row = nullptr; double Slope = 0.0; double Along = 0.0; };
+	auto Consider = [](FPick& Pick, const UKzChoiceOption* Row, double Slope, double Along)
+	{
+		if (!Pick.Row || Slope < Pick.Slope - 0.01 || (Slope <= Pick.Slope + 0.01 && Along < Pick.Along))
+		{
+			Pick = { Row, Slope, Along };
+		}
+	};
+
+	FPick Ahead;
+	FPick Wrapped;
+	for (const UKzChoiceOption* Row : OptionWidgets)
+	{
+		FVector2D Center;
+		if (!Row || Row == From || !GetCenter(Row, Center))
+		{
+			continue;
+		}
+		const FVector2D Offset = Center - Origin;
+		const double Along = FVector2D::DotProduct(Offset, Axis);
+		const double Slope = FMath::Abs(FVector2D::CrossProduct(Offset, Axis)) / FMath::Max(FMath::Abs(Along), 1.0);
+		if (Along > 1.0) { Consider(Ahead, Row, Slope, Along); }
+		else if (Along < -1.0) { Consider(Wrapped, Row, Slope, Along); }
+	}
+
+	if (const UKzChoiceOption* Target = Ahead.Row ? Ahead.Row : (bLoopNavigation ? Wrapped.Row : nullptr))
+	{
+		HighlightOption(Target->GetOption().Index);
+	}
+}
+
 void UKzChoiceWidget::Accept()
 {
 	if (ShownOptions.IsEmpty())
@@ -240,6 +307,11 @@ int32 UKzChoiceWidget::GetDefaultOption_Implementation(const TArray<FKzDialogueG
 	return Picked ? Picked->Index : INDEX_NONE;
 }
 
+UPanelWidget* UKzChoiceWidget::GetPanelForOption_Implementation(int32 Position, const FKzDialogueGraphOption& Option) const
+{
+	return OptionsPanel;
+}
+
 void UKzChoiceWidget::HandleShowOptions(UKzDialogueGraphInstance* Instance, const TArray<FKzDialogueGraphOption>& Options)
 {
 	ClearRows();
@@ -248,14 +320,15 @@ void UKzChoiceWidget::HandleShowOptions(UKzDialogueGraphInstance* Instance, cons
 	HighlightedPosition = INDEX_NONE;
 	PendingChoice = INDEX_NONE;
 
-	if (OptionsPanel && OptionClass)
+	if (OptionClass)
 	{
 		for (int32 Position = 0; Position < Options.Num(); ++Position)
 		{
-			UKzChoiceOption* Row = CreateWidget<UKzChoiceOption>(this, OptionClass);
+			UPanelWidget* Panel = GetPanelForOption(Position, Options[Position]);
+			UKzChoiceOption* Row = Panel ? CreateWidget<UKzChoiceOption>(this, OptionClass) : nullptr;
 			if (!Row) { continue; }
 
-			OptionsPanel->AddChild(Row);
+			Panel->AddChild(Row);
 			Row->Setup(this, Options[Position], Position + 1);
 			OptionWidgets.Add(Row);
 		}
@@ -307,9 +380,10 @@ void UKzChoiceWidget::SetHighlightedPosition(int32 Position)
 		return;
 	}
 
-	if (OptionWidgets.IsValidIndex(HighlightedPosition)) { OptionWidgets[HighlightedPosition]->SetHighlighted(false); }
+	// By Index: an option the layout gave no panel has no row, so rows and positions may not line up.
+	if (UKzChoiceOption* Row = ShownOptions.IsValidIndex(HighlightedPosition) ? FindRow(ShownOptions[HighlightedPosition].Index) : nullptr) { Row->SetHighlighted(false); }
 	HighlightedPosition = Position;
-	if (OptionWidgets.IsValidIndex(HighlightedPosition)) { OptionWidgets[HighlightedPosition]->SetHighlighted(true); }
+	if (UKzChoiceOption* Row = FindRow(ShownOptions[HighlightedPosition].Index)) { Row->SetHighlighted(true); }
 	OnOptionHighlighted.Broadcast(ShownOptions[HighlightedPosition].Index);
 }
 
