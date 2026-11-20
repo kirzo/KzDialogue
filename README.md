@@ -36,6 +36,12 @@ It comes with a dialogue asset editor with a notify timeline per line, a Sequenc
 4. Check that both plugins are enabled in **Edit > Plugins**.
 5. C++ projects only: add `"KzDialogue"` (and `"GameplayTags"` if you use channel tags in code) to your module's `PublicDependencyModuleNames`.
 
+### Optional Integrations
+
+Integrations with other plugins live in this repository next to KzDialogue, each as its own plugin and disabled by default, so KzDialogue never depends on them. Enable the ones you need in **Edit > Plugins**:
+
+* **KzDialogue - Scriptable Framework Integration** (`KzDialogueScriptable`): requires **[ScriptableFramework](https://github.com/kirzo/ScriptableFramework)**. Adds the *Play Dialogue Line*, *Play Dialogue Asset* and *Play Dialogue Graph* tasks, which finish when what they play ends and stop it when the task is stopped: what an interactable says or plays, as a bubble on a per speaker channel or a conversation.
+
 ---
 
 ## 🚀 Quick Start
