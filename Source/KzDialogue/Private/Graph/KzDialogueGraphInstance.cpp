@@ -530,13 +530,14 @@ bool UKzDialogueGraphInstance::HoldsLine()
 	HasLine();
 	if (bSayingIdleLine && Step == EStep::Choosing)
 	{
-		// The idle line ended with the options still waiting: count down to the next one.
+		// The idle line ended with the options still waiting: it leaves the screen, and the count to the next one starts.
 		bSayingIdleLine = false;
 		const FKzDialogueGraphNode_Choice* Choice = Graph->GetData().GetNode<FKzDialogueGraphNode_Choice>(Node);
 		if (Choice && Choice->IdleInterval > 0.0f)
 		{
 			StartIdleTimer(Choice->IdleInterval);
 		}
+		return false;
 	}
 	return Step == EStep::Choosing && !bSkippedToChoice;
 }
